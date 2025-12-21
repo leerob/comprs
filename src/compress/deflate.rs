@@ -167,7 +167,7 @@ fn distance_code(distance: u16) -> (u16, u8, u16) {
 pub fn deflate(data: &[u8], level: u8) -> Vec<u8> {
     if data.is_empty() {
         // Empty input: just output empty final block
-        let mut writer = BitWriter64::new();
+        let mut writer = BitWriter64::with_capacity(16);
         writer.write_bits(1, 1); // BFINAL = 1
         writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
 
@@ -183,9 +183,12 @@ pub fn deflate(data: &[u8], level: u8) -> Vec<u8> {
     let mut lz77 = Lz77Compressor::new(level);
     let tokens = lz77.compress(data);
 
+    // Rough output estimate to reduce reallocations.
+    let est_bytes = estimated_deflate_size(data.len(), level);
+
     // Choose between fixed and dynamic Huffman based on output size.
-    let fixed = encode_fixed_huffman(&tokens);
-    let dynamic = encode_dynamic_huffman(&tokens);
+    let fixed = encode_fixed_huffman_with_capacity(&tokens, est_bytes);
+    let dynamic = encode_dynamic_huffman_with_capacity(&tokens, est_bytes);
 
     if dynamic.len() < fixed.len() {
         dynamic
@@ -200,7 +203,7 @@ pub fn deflate(data: &[u8], level: u8) -> Vec<u8> {
 /// additional instrumentation by using this entrypoint.
 pub fn deflate_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats) {
     if data.is_empty() {
-        let mut writer = BitWriter64::new();
+        let mut writer = BitWriter64::with_capacity(16);
         writer.write_bits(1, 1); // BFINAL = 1
         writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
 
@@ -228,12 +231,14 @@ pub fn deflate_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats) {
 
     // Fixed Huffman encode
     let t1 = Instant::now();
-    let fixed = encode_fixed_huffman(&tokens);
+    let est_bytes = estimated_deflate_size(data.len(), level);
+
+    let fixed = encode_fixed_huffman_with_capacity(&tokens, est_bytes);
     let fixed_time = t1.elapsed();
 
     // Dynamic Huffman encode
     let t2 = Instant::now();
-    let dynamic = encode_dynamic_huffman(&tokens);
+    let dynamic = encode_dynamic_huffman_with_capacity(&tokens, est_bytes);
     let dynamic_time = t2.elapsed();
 
     // Choose smaller stream
@@ -332,12 +337,16 @@ fn should_use_stored(data_len: usize, deflated_len: usize) -> bool {
 
 /// Encode tokens using fixed Huffman codes.
 pub fn encode_fixed_huffman(tokens: &[Token]) -> Vec<u8> {
+    encode_fixed_huffman_with_capacity(tokens, 1024)
+}
+
+fn encode_fixed_huffman_with_capacity(tokens: &[Token], capacity_hint: usize) -> Vec<u8> {
     let lit_codes = huffman::fixed_literal_codes();
     let dist_codes = huffman::fixed_distance_codes();
     let lit_rev = prepare_reversed_codes(lit_codes);
     let dist_rev = prepare_reversed_codes(dist_codes);
 
-    let mut writer = BitWriter64::new();
+    let mut writer = BitWriter64::with_capacity(capacity_hint);
 
     // Block header: BFINAL=1 (last block), BTYPE=01 (fixed Huffman)
     writer.write_bits(1, 1); // BFINAL
@@ -380,6 +389,10 @@ pub fn encode_fixed_huffman(tokens: &[Token]) -> Vec<u8> {
 
 /// Encode tokens using dynamic Huffman codes (RFC 1951).
 pub fn encode_dynamic_huffman(tokens: &[Token]) -> Vec<u8> {
+    encode_dynamic_huffman_with_capacity(tokens, 1024)
+}
+
+fn encode_dynamic_huffman_with_capacity(tokens: &[Token], capacity_hint: usize) -> Vec<u8> {
     // Frequencies
     let mut lit_freqs = vec![0u32; 286]; // 0-285
     let mut dist_freqs = vec![0u32; 30]; // 0-29
@@ -440,7 +453,7 @@ pub fn encode_dynamic_huffman(tokens: &[Token]) -> Vec<u8> {
         }
     }
 
-    let mut writer = BitWriter64::new();
+    let mut writer = BitWriter64::with_capacity(capacity_hint);
     writer.write_bits(1, 1); // BFINAL (single block)
     writer.write_bits(2, 2); // BTYPE=10 (dynamic)
 
@@ -514,6 +527,17 @@ fn token_counts(tokens: &[Token]) -> (usize, usize) {
         }
     }
     (literal_count, match_count)
+}
+
+/// Heuristic estimate for compressed size in bytes to pre-allocate writers.
+fn estimated_deflate_size(data_len: usize, level: u8) -> usize {
+    let est = match level {
+        1..=3 => data_len.saturating_mul(9) / 10, // fast modes ~90%
+        4..=6 => data_len.saturating_mul(7) / 10, // default ~70%
+        7..=9 => data_len.saturating_mul(6) / 10, // max ~60%
+        _ => data_len,
+    };
+    est.max(1024)
 }
 
 /// RLE encode literal/dist code lengths and collect code length code frequencies.
