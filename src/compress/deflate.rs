@@ -3,8 +3,10 @@
 //! Combines LZ77 compression with Huffman coding.
 
 use crate::bits::BitWriter;
-use crate::compress::{adler32::adler32, huffman};
 use crate::compress::lz77::{Lz77Compressor, Token, MAX_MATCH_LENGTH, MIN_MATCH_LENGTH};
+use crate::compress::{adler32::adler32, huffman};
+use std::time::Duration;
+use std::time::Instant;
 
 /// Length code base values (codes 257-285).
 const LENGTH_BASE: [u16; 29] = [
@@ -29,6 +31,45 @@ const DISTANCE_EXTRA: [u8; 30] = [
     13,
 ];
 
+/// Timing and accounting information for a single DEFLATE encode.
+#[derive(Debug, Clone)]
+pub struct DeflateStats {
+    /// Time spent in LZ77 match finding/tokenization.
+    pub lz77_time: Duration,
+    /// Time spent encoding with fixed Huffman codes.
+    pub fixed_huffman_time: Duration,
+    /// Time spent encoding with dynamic Huffman codes.
+    pub dynamic_huffman_time: Duration,
+    /// Time spent choosing the smaller of fixed vs dynamic outputs.
+    pub choose_time: Duration,
+    /// Number of tokens produced by the LZ77 stage.
+    pub token_count: usize,
+    /// Number of literal tokens.
+    pub literal_count: usize,
+    /// Number of match tokens.
+    pub match_count: usize,
+    /// Whether the final stream used dynamic Huffman codes.
+    pub used_dynamic: bool,
+    /// Whether the zlib wrapper selected stored (uncompressed) blocks.
+    pub used_stored_block: bool,
+}
+
+impl Default for DeflateStats {
+    fn default() -> Self {
+        Self {
+            lz77_time: Duration::ZERO,
+            fixed_huffman_time: Duration::ZERO,
+            dynamic_huffman_time: Duration::ZERO,
+            choose_time: Duration::ZERO,
+            token_count: 0,
+            literal_count: 0,
+            match_count: 0,
+            used_dynamic: false,
+            used_stored_block: false,
+        }
+    }
+}
+
 /// Lookup table for length codes: maps length (3-258) to (symbol, extra_bits).
 /// Index is (length - 3), value is (symbol - 257, extra_bits).
 const LENGTH_LOOKUP: [(u8, u8); 256] = {
@@ -39,7 +80,9 @@ const LENGTH_LOOKUP: [(u8, u8); 256] = {
         // Find the appropriate code
         let mut code_idx = 0usize;
         while code_idx < 28 {
-            if length >= LENGTH_BASE[code_idx] as usize && length < LENGTH_BASE[code_idx + 1] as usize {
+            if length >= LENGTH_BASE[code_idx] as usize
+                && length < LENGTH_BASE[code_idx + 1] as usize
+            {
                 break;
             }
             code_idx += 1;
@@ -151,6 +194,69 @@ pub fn deflate(data: &[u8], level: u8) -> Vec<u8> {
     }
 }
 
+/// Compress data using DEFLATE and return encoded bytes plus timing/accounting stats.
+///
+/// This leaves the main `deflate` fast path unchanged; callers opt-in to the
+/// additional instrumentation by using this entrypoint.
+pub fn deflate_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats) {
+    if data.is_empty() {
+        let mut writer = BitWriter::new();
+        writer.write_bits(1, 1); // BFINAL = 1
+        writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
+
+        // Write end-of-block symbol (256)
+        let lit_codes = huffman::fixed_literal_codes();
+        let code = lit_codes[256];
+        writer.write_bits(reverse_bits(code.code, code.length), code.length);
+
+        return (
+            writer.finish(),
+            DeflateStats {
+                used_dynamic: false,
+                ..Default::default()
+            },
+        );
+    }
+
+    // LZ77 tokenization
+    let t0 = Instant::now();
+    let mut lz77 = Lz77Compressor::new(level);
+    let tokens = lz77.compress(data);
+    let lz77_time = t0.elapsed();
+
+    let (literal_count, match_count) = token_counts(&tokens);
+
+    // Fixed Huffman encode
+    let t1 = Instant::now();
+    let fixed = encode_fixed_huffman(&tokens);
+    let fixed_time = t1.elapsed();
+
+    // Dynamic Huffman encode
+    let t2 = Instant::now();
+    let dynamic = encode_dynamic_huffman(&tokens);
+    let dynamic_time = t2.elapsed();
+
+    // Choose smaller stream
+    let choose_start = Instant::now();
+    let use_dynamic = dynamic.len() < fixed.len();
+    let encoded = if use_dynamic { dynamic } else { fixed };
+    let choose_time = choose_start.elapsed();
+
+    let stats = DeflateStats {
+        lz77_time,
+        fixed_huffman_time: fixed_time,
+        dynamic_huffman_time: dynamic_time,
+        choose_time,
+        token_count: tokens.len(),
+        literal_count,
+        match_count,
+        used_dynamic: use_dynamic,
+        used_stored_block: false,
+    };
+
+    (encoded, stats)
+}
+
 /// Compress data and wrap it in a zlib container (RFC 1950).
 ///
 /// Produces: zlib header (CMF/FLG), deflate stream, Adler-32 checksum.
@@ -182,6 +288,39 @@ pub fn deflate_zlib(data: &[u8], level: u8) -> Vec<u8> {
     output
 }
 
+/// Compress data using DEFLATE in a zlib container, returning encoded bytes plus stats.
+pub fn deflate_zlib_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats) {
+    // Empty input mirrors `deflate_zlib`
+    if data.is_empty() {
+        let mut output = Vec::with_capacity(8);
+        output.extend_from_slice(&zlib_header(level));
+
+        let (deflated, mut stats) = deflate_with_stats(data, level);
+        output.extend_from_slice(&deflated);
+        output.extend_from_slice(&adler32(data).to_be_bytes());
+        stats.used_stored_block = false;
+        return (output, stats);
+    }
+
+    let (deflated, mut stats) = deflate_with_stats(data, level);
+
+    let use_stored = should_use_stored(data.len(), deflated.len());
+    let mut output = Vec::with_capacity(deflated.len().min(data.len()) + 32);
+    output.extend_from_slice(&zlib_header(level));
+
+    if use_stored {
+        let stored_blocks = deflate_stored(data);
+        output.extend_from_slice(&stored_blocks);
+    } else {
+        output.extend_from_slice(&deflated);
+    }
+
+    output.extend_from_slice(&adler32(data).to_be_bytes());
+
+    stats.used_stored_block = use_stored;
+    (output, stats)
+}
+
 /// Decide whether stored blocks would be smaller than the compressed stream.
 fn should_use_stored(data_len: usize, deflated_len: usize) -> bool {
     // Stored block size: data + 5 bytes per 65535 chunk
@@ -192,7 +331,7 @@ fn should_use_stored(data_len: usize, deflated_len: usize) -> bool {
 }
 
 /// Encode tokens using fixed Huffman codes.
-fn encode_fixed_huffman(tokens: &[Token]) -> Vec<u8> {
+pub fn encode_fixed_huffman(tokens: &[Token]) -> Vec<u8> {
     let lit_codes = huffman::fixed_literal_codes();
     let dist_codes = huffman::fixed_distance_codes();
 
@@ -212,7 +351,10 @@ fn encode_fixed_huffman(tokens: &[Token]) -> Vec<u8> {
                 // Encode length
                 let (len_symbol, len_extra_bits, len_extra_value) = length_code(length);
                 let len_code = lit_codes[len_symbol as usize];
-                writer.write_bits(reverse_bits(len_code.code, len_code.length), len_code.length);
+                writer.write_bits(
+                    reverse_bits(len_code.code, len_code.length),
+                    len_code.length,
+                );
 
                 if len_extra_bits > 0 {
                     writer.write_bits(len_extra_value as u32, len_extra_bits);
@@ -235,13 +377,16 @@ fn encode_fixed_huffman(tokens: &[Token]) -> Vec<u8> {
 
     // End of block symbol (256)
     let eob_code = lit_codes[256];
-    writer.write_bits(reverse_bits(eob_code.code, eob_code.length), eob_code.length);
+    writer.write_bits(
+        reverse_bits(eob_code.code, eob_code.length),
+        eob_code.length,
+    );
 
     writer.finish()
 }
 
 /// Encode tokens using dynamic Huffman codes (RFC 1951).
-fn encode_dynamic_huffman(tokens: &[Token]) -> Vec<u8> {
+pub fn encode_dynamic_huffman(tokens: &[Token]) -> Vec<u8> {
     // Frequencies
     let mut lit_freqs = vec![0u32; 286]; // 0-285
     let mut dist_freqs = vec![0u32; 30]; // 0-29
@@ -288,7 +433,9 @@ fn encode_dynamic_huffman(tokens: &[Token]) -> Vec<u8> {
     let cl_codes = huffman::build_codes(&cl_freqs, 7);
 
     // Determine HCLEN (last non-zero in order)
-    let cl_order: [usize; 19] = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+    let cl_order: [usize; 19] = [
+        16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
+    ];
     let mut hclen = 0;
     for (i, &idx) in cl_order.iter().enumerate().rev() {
         if cl_codes[idx].length > 0 {
@@ -329,14 +476,20 @@ fn encode_dynamic_huffman(tokens: &[Token]) -> Vec<u8> {
             Token::Match { length, distance } => {
                 let (len_symbol, len_extra_bits, len_extra_value) = length_code(length);
                 let len_code = lit_codes[len_symbol as usize];
-                writer.write_bits(reverse_bits(len_code.code, len_code.length), len_code.length);
+                writer.write_bits(
+                    reverse_bits(len_code.code, len_code.length),
+                    len_code.length,
+                );
                 if len_extra_bits > 0 {
                     writer.write_bits(len_extra_value as u32, len_extra_bits);
                 }
 
                 let (dist_symbol, dist_extra_bits, dist_extra_value) = distance_code(distance);
                 let dist_code = dist_codes[dist_symbol as usize];
-                writer.write_bits(reverse_bits(dist_code.code, dist_code.length), dist_code.length);
+                writer.write_bits(
+                    reverse_bits(dist_code.code, dist_code.length),
+                    dist_code.length,
+                );
                 if dist_extra_bits > 0 {
                     writer.write_bits(dist_extra_value as u32, dist_extra_bits);
                 }
@@ -346,7 +499,10 @@ fn encode_dynamic_huffman(tokens: &[Token]) -> Vec<u8> {
 
     // End of block
     let eob_code = lit_codes[256];
-    writer.write_bits(reverse_bits(eob_code.code, eob_code.length), eob_code.length);
+    writer.write_bits(
+        reverse_bits(eob_code.code, eob_code.length),
+        eob_code.length,
+    );
 
     writer.finish()
 }
@@ -357,6 +513,19 @@ fn last_nonzero(lengths: &[u8]) -> usize {
         .rposition(|&l| l != 0)
         .map(|i| i + 1)
         .unwrap_or(1) // minimum 1 code
+}
+
+/// Count literal and match tokens for stats.
+fn token_counts(tokens: &[Token]) -> (usize, usize) {
+    let mut literal_count = 0;
+    let mut match_count = 0;
+    for token in tokens {
+        match token {
+            Token::Literal(_) => literal_count += 1,
+            Token::Match { .. } => match_count += 1,
+        }
+    }
+    (literal_count, match_count)
 }
 
 /// RLE encode literal/dist code lengths and collect code length code frequencies.
@@ -458,9 +627,9 @@ fn zlib_header(level: u8) -> [u8; 2] {
 
     // Map level to FLEVEL (informative only)
     let flevel = match level {
-        0 | 1 | 2 => 1,        // fast
-        3..=6 => 2,            // default
-        _ => 3,                // maximum
+        0 | 1 | 2 => 1, // fast
+        3..=6 => 2,     // default
+        _ => 3,         // maximum
     };
 
     let mut flg: u8 = flevel << 6; // FDICT=0
