@@ -89,11 +89,20 @@ impl Lz77Compressor {
 
     /// Compress data and return LZ77 tokens.
     pub fn compress(&mut self, data: &[u8]) -> Vec<Token> {
+        let mut tokens = Vec::with_capacity(data.len());
+        self.compress_into(data, &mut tokens);
+        tokens
+    }
+
+    /// Compress data into a provided token buffer, reusing allocations.
+    pub fn compress_into(&mut self, data: &[u8], tokens: &mut Vec<Token>) {
         if data.is_empty() {
-            return Vec::new();
+            tokens.clear();
+            return;
         }
 
-        let mut tokens = Vec::with_capacity(data.len());
+        tokens.clear();
+        tokens.reserve(data.len());
         let mut pos = 0;
 
         // Reset hash tables
@@ -136,8 +145,6 @@ impl Lz77Compressor {
                 pos += 1;
             }
         }
-
-        tokens
     }
 
     /// Find the best match at the given position.

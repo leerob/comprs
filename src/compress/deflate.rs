@@ -197,6 +197,104 @@ pub fn deflate(data: &[u8], level: u8) -> Vec<u8> {
     }
 }
 
+/// Reusable DEFLATE encoder that minimizes allocations by reusing buffers.
+pub struct Deflater {
+    level: u8,
+    lz77: Lz77Compressor,
+    tokens: Vec<Token>,
+}
+
+impl Deflater {
+    /// Create a new reusable deflater for the given level.
+    pub fn new(level: u8) -> Self {
+        let level = level.clamp(1, 9);
+        Self {
+            level,
+            lz77: Lz77Compressor::new(level),
+            tokens: Vec::new(),
+        }
+    }
+
+    /// Compress raw data into a DEFLATE stream.
+    pub fn compress(&mut self, data: &[u8]) -> Vec<u8> {
+        if data.is_empty() {
+            let mut writer = BitWriter64::with_capacity(16);
+            writer.write_bits(1, 1); // BFINAL = 1
+            writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
+
+            // Write end-of-block symbol (256)
+            let lit_codes = huffman::fixed_literal_codes();
+            let code = lit_codes[256];
+            writer.write_bits(reverse_bits(code.code, code.length), code.length);
+
+            return writer.finish();
+        }
+
+        self.tokens.clear();
+        self.tokens.reserve(data.len());
+        self.lz77.compress_into(data, &mut self.tokens);
+
+        let est_bytes = estimated_deflate_size(data.len(), self.level);
+        let fixed = encode_fixed_huffman_with_capacity(&self.tokens, est_bytes);
+        let dynamic = encode_dynamic_huffman_with_capacity(&self.tokens, est_bytes);
+
+        if dynamic.len() < fixed.len() {
+            dynamic
+        } else {
+            fixed
+        }
+    }
+
+    /// Compress data and wrap in a zlib container.
+    pub fn compress_zlib(&mut self, data: &[u8]) -> Vec<u8> {
+        if data.is_empty() {
+            let mut output = Vec::with_capacity(8);
+            output.extend_from_slice(&zlib_header(self.level));
+
+            let mut writer = BitWriter64::with_capacity(16);
+            writer.write_bits(1, 1); // BFINAL = 1
+            writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
+
+            let lit_codes = huffman::fixed_literal_codes();
+            let code = lit_codes[256];
+            writer.write_bits(reverse_bits(code.code, code.length), code.length);
+            output.extend_from_slice(&writer.finish());
+            output.extend_from_slice(&adler32(data).to_be_bytes());
+            return output;
+        }
+
+        self.tokens.clear();
+        self.tokens.reserve(data.len());
+        self.lz77.compress_into(data, &mut self.tokens);
+
+        let est_bytes = estimated_deflate_size(data.len(), self.level);
+        let deflated = {
+            let fixed = encode_fixed_huffman_with_capacity(&self.tokens, est_bytes);
+            let dynamic = encode_dynamic_huffman_with_capacity(&self.tokens, est_bytes);
+            if dynamic.len() < fixed.len() {
+                dynamic
+            } else {
+                fixed
+            }
+        };
+
+        let use_stored = should_use_stored(data.len(), deflated.len());
+
+        let mut output = Vec::with_capacity(deflated.len().min(data.len()) + 32);
+        output.extend_from_slice(&zlib_header(self.level));
+
+        if use_stored {
+            let stored_blocks = deflate_stored(data);
+            output.extend_from_slice(&stored_blocks);
+        } else {
+            output.extend_from_slice(&deflated);
+        }
+
+        output.extend_from_slice(&adler32(data).to_be_bytes());
+        output
+    }
+}
+
 /// Compress data using DEFLATE and return encoded bytes plus timing/accounting stats.
 ///
 /// This leaves the main `deflate` fast path unchanged; callers opt-in to the
