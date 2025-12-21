@@ -1,25 +1,33 @@
 //! CRC32 checksum implementation (PNG uses CRC-32/ISO-HDLC).
 
-/// CRC32 lookup table using polynomial 0xEDB88320 (reversed 0x04C11DB7).
-const CRC_TABLE: [u32; 256] = {
-    let mut table = [0u32; 256];
-    let mut i = 0;
-    while i < 256 {
+/// Slicing-by-8 tables for CRC32 polynomial 0xEDB88320 (reflected 0x04C11DB7).
+/// Built once at runtime; zero-cost thereafter.
+static CRC_TABLES: std::sync::LazyLock<[[u32; 256]; 8]> = std::sync::LazyLock::new(|| {
+    let mut tables = [[0u32; 256]; 8];
+
+    // Table 0: classic byte-at-a-time.
+    for i in 0..256 {
         let mut crc = i as u32;
-        let mut j = 0;
-        while j < 8 {
-            if crc & 1 != 0 {
-                crc = (crc >> 1) ^ 0xEDB88320;
+        for _ in 0..8 {
+            crc = if (crc & 1) != 0 {
+                (crc >> 1) ^ 0xEDB88320
             } else {
-                crc >>= 1;
-            }
-            j += 1;
+                crc >> 1
+            };
         }
-        table[i] = crc;
-        i += 1;
+        tables[0][i] = crc;
     }
-    table
-};
+
+    // Tables 1..7 derived from table 0.
+    for t in 1..8 {
+        for i in 0..256 {
+            let prev = tables[t - 1][i];
+            tables[t][i] = (prev >> 8) ^ tables[0][(prev & 0xFF) as usize];
+        }
+    }
+
+    tables
+});
 
 /// Calculate CRC32 checksum of data.
 ///
@@ -27,12 +35,33 @@ const CRC_TABLE: [u32; 256] = {
 /// This is the CRC used by PNG, gzip, and many other formats.
 #[inline]
 pub fn crc32(data: &[u8]) -> u32 {
-    let mut crc = 0xFFFFFFFF_u32;
-    for &byte in data {
-        let index = ((crc ^ byte as u32) & 0xFF) as usize;
-        crc = (crc >> 8) ^ CRC_TABLE[index];
+    let mut crc = 0xFFFF_FFFFu32;
+    let tables = &*CRC_TABLES;
+
+    // Process 8 bytes at a time using slicing-by-8.
+    let mut chunks = data.chunks_exact(8);
+    for chunk in &mut chunks {
+        let low = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+        let high = u32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]);
+
+        crc ^= low;
+
+        crc = tables[7][(crc & 0xFF) as usize]
+            ^ tables[6][((crc >> 8) & 0xFF) as usize]
+            ^ tables[5][((crc >> 16) & 0xFF) as usize]
+            ^ tables[4][((crc >> 24) & 0xFF) as usize]
+            ^ tables[3][(high & 0xFF) as usize]
+            ^ tables[2][((high >> 8) & 0xFF) as usize]
+            ^ tables[1][((high >> 16) & 0xFF) as usize]
+            ^ tables[0][((high >> 24) & 0xFF) as usize];
     }
-    crc ^ 0xFFFFFFFF
+
+    for &b in chunks.remainder() {
+        let idx = ((crc ^ b as u32) & 0xFF) as usize;
+        crc = (crc >> 8) ^ tables[0][idx];
+    }
+
+    crc ^ 0xFFFF_FFFF
 }
 
 /// Calculate CRC32 incrementally.
@@ -49,9 +78,10 @@ impl Crc32 {
     /// Update the CRC with more data.
     #[inline]
     pub fn update(&mut self, data: &[u8]) {
+        let tables = &*CRC_TABLES;
         for &byte in data {
             let index = ((self.crc ^ byte as u32) & 0xFF) as usize;
-            self.crc = (self.crc >> 8) ^ CRC_TABLE[index];
+            self.crc = (self.crc >> 8) ^ tables[0][index];
         }
     }
 
