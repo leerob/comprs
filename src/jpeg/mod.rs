@@ -37,7 +37,14 @@ const SOS: u16 = 0xFFDA; // Start of Scan
 /// # Returns
 /// Complete JPEG file as bytes.
 pub fn encode(data: &[u8], width: u32, height: u32, quality: u8) -> Result<Vec<u8>> {
-    encode_with_color(data, width, height, quality, ColorType::Rgb)
+    encode_with_options(
+        data,
+        width,
+        height,
+        quality,
+        ColorType::Rgb,
+        &JpegOptions::default(),
+    )
 }
 
 /// Encode raw pixel data as JPEG with specified color type.
@@ -48,9 +55,58 @@ pub fn encode_with_color(
     quality: u8,
     color_type: ColorType,
 ) -> Result<Vec<u8>> {
+    encode_with_options(
+        data,
+        width,
+        height,
+        quality,
+        color_type,
+        &JpegOptions::default(),
+    )
+}
+
+/// Chroma subsampling options.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Subsampling {
+    /// 4:4:4, no subsampling.
+    S444,
+    /// 4:2:0, 2x2 chroma downsample.
+    S420,
+}
+
+/// JPEG encoding options.
+#[derive(Debug, Clone, Copy)]
+pub struct JpegOptions {
+    /// Quality level 1-100.
+    pub quality: u8,
+    /// Subsampling scheme.
+    pub subsampling: Subsampling,
+}
+
+impl Default for JpegOptions {
+    fn default() -> Self {
+        Self {
+            quality: 75,
+            subsampling: Subsampling::S444,
+        }
+    }
+}
+
+/// Encode raw pixel data as JPEG with options.
+pub fn encode_with_options(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    quality: u8,
+    color_type: ColorType,
+    options: &JpegOptions,
+) -> Result<Vec<u8>> {
     // Validate quality
     if quality == 0 || quality > 100 {
         return Err(Error::InvalidQuality(quality));
+    }
+    if options.quality == 0 || options.quality > 100 {
+        return Err(Error::InvalidQuality(options.quality));
     }
 
     // Validate dimensions
@@ -85,14 +141,14 @@ pub fn encode_with_color(
     let mut output = Vec::with_capacity(expected_len / 4);
 
     // Create quantization and Huffman tables
-    let quant_tables = QuantizationTables::with_quality(quality);
+    let quant_tables = QuantizationTables::with_quality(options.quality);
     let huff_tables = HuffmanTables::default();
 
     // Write JPEG headers
     write_soi(&mut output);
     write_app0(&mut output);
     write_dqt(&mut output, &quant_tables);
-    write_sof0(&mut output, width, height, color_type);
+    write_sof0(&mut output, width, height, color_type, options.subsampling);
     write_dht(&mut output, &huff_tables);
 
     // Write scan data
@@ -103,6 +159,7 @@ pub fn encode_with_color(
         width,
         height,
         color_type,
+        options.subsampling,
         &quant_tables,
         &huff_tables,
     );
@@ -167,7 +224,13 @@ fn write_dqt(output: &mut Vec<u8>, tables: &QuantizationTables) {
 }
 
 /// Write SOF0 (Start of Frame) marker.
-fn write_sof0(output: &mut Vec<u8>, width: u32, height: u32, color_type: ColorType) {
+fn write_sof0(
+    output: &mut Vec<u8>,
+    width: u32,
+    height: u32,
+    color_type: ColorType,
+    subsampling: Subsampling,
+) {
     output.extend_from_slice(&SOF0.to_be_bytes());
 
     let num_components = match color_type {
@@ -198,7 +261,11 @@ fn write_sof0(output: &mut Vec<u8>, width: u32, height: u32, color_type: ColorTy
         // YCbCr: 3 components
         // Y component
         output.push(1); // Component ID
-        output.push(0x11); // Sampling factor (1x1, no subsampling)
+        let y_sampling = match subsampling {
+            Subsampling::S444 => 0x11, // H=1, V=1
+            Subsampling::S420 => 0x22, // H=2, V=2
+        };
+        output.push(y_sampling);
         output.push(0); // Quantization table 0 (luminance)
 
         // Cb component
@@ -292,6 +359,7 @@ fn encode_scan(
     width: u32,
     height: u32,
     color_type: ColorType,
+    subsampling: Subsampling,
     quant_tables: &QuantizationTables,
     huff_tables: &HuffmanTables,
 ) {
@@ -301,9 +369,10 @@ fn encode_scan(
     let width = width as usize;
     let height = height as usize;
 
-    // Calculate padded dimensions (multiple of 8)
-    let padded_width = (width + 7) & !7;
-    let padded_height = (height + 7) & !7;
+    // Calculate padded dimensions
+    let (padded_width, padded_height) = match subsampling {
+        Subsampling::S444 | Subsampling::S420 => ((width + 7) & !7, (height + 7) & !7),
+    };
 
     // Previous DC values for differential encoding
     let mut prev_dc_y = 0i16;
@@ -311,45 +380,103 @@ fn encode_scan(
     let mut prev_dc_cr = 0i16;
 
     // Process blocks
-    for block_y in (0..padded_height).step_by(8) {
-        for block_x in (0..padded_width).step_by(8) {
-            // Extract and convert 8x8 block
-            let (y_block, cb_block, cr_block) =
-                extract_block(data, width, height, block_x, block_y, color_type);
+    match (color_type, subsampling) {
+        (ColorType::Gray, _) => {
+            for block_y in (0..padded_height).step_by(8) {
+                for block_x in (0..padded_width).step_by(8) {
+                    let (y_block, _, _) =
+                        extract_block(data, width, height, block_x, block_y, color_type);
+                    let y_dct = dct_2d(&y_block);
+                    let y_quant = quantize_block(&y_dct, &quant_tables.luminance_table);
+                    prev_dc_y = encode_block(
+                        &mut writer,
+                        &y_quant,
+                        prev_dc_y,
+                        true,
+                        huff_tables,
+                    );
+                }
+            }
+        }
+        (_, Subsampling::S444) => {
+            for block_y in (0..padded_height).step_by(8) {
+                for block_x in (0..padded_width).step_by(8) {
+                    let (y_block, cb_block, cr_block) =
+                        extract_block(data, width, height, block_x, block_y, color_type);
 
-            // Process Y channel
-            let y_dct = dct_2d(&y_block);
-            let y_quant = quantize_block(&y_dct, &quant_tables.luminance_table);
-            prev_dc_y = encode_block(
-                &mut writer,
-                &y_quant,
-                prev_dc_y,
-                true,  // is_luminance
-                huff_tables,
-            );
+                    let y_dct = dct_2d(&y_block);
+                    let y_quant = quantize_block(&y_dct, &quant_tables.luminance_table);
+                    prev_dc_y = encode_block(
+                        &mut writer,
+                        &y_quant,
+                        prev_dc_y,
+                        true,
+                        huff_tables,
+                    );
 
-            if color_type != ColorType::Gray {
-                // Process Cb channel
-                let cb_dct = dct_2d(&cb_block);
-                let cb_quant = quantize_block(&cb_dct, &quant_tables.chrominance_table);
-                prev_dc_cb = encode_block(
-                    &mut writer,
-                    &cb_quant,
-                    prev_dc_cb,
-                    false, // is_chrominance
-                    huff_tables,
-                );
+                    let cb_dct = dct_2d(&cb_block);
+                    let cb_quant = quantize_block(&cb_dct, &quant_tables.chrominance_table);
+                    prev_dc_cb = encode_block(
+                        &mut writer,
+                        &cb_quant,
+                        prev_dc_cb,
+                        false,
+                        huff_tables,
+                    );
 
-                // Process Cr channel
-                let cr_dct = dct_2d(&cr_block);
-                let cr_quant = quantize_block(&cr_dct, &quant_tables.chrominance_table);
-                prev_dc_cr = encode_block(
-                    &mut writer,
-                    &cr_quant,
-                    prev_dc_cr,
-                    false,
-                    huff_tables,
-                );
+                    let cr_dct = dct_2d(&cr_block);
+                    let cr_quant = quantize_block(&cr_dct, &quant_tables.chrominance_table);
+                    prev_dc_cr = encode_block(
+                        &mut writer,
+                        &cr_quant,
+                        prev_dc_cr,
+                        false,
+                        huff_tables,
+                    );
+                }
+            }
+        }
+        (_, Subsampling::S420) => {
+            let padded_width_420 = (width as usize + 15) & !15;
+            let padded_height_420 = (height as usize + 15) & !15;
+
+            for mcu_y in (0..padded_height_420).step_by(16) {
+                for mcu_x in (0..padded_width_420).step_by(16) {
+                    let (y_blocks, cb_block, cr_block) =
+                        extract_mcu_420(data, width as usize, height as usize, mcu_x, mcu_y);
+
+                    for y_block in &y_blocks {
+                        let y_dct = dct_2d(y_block);
+                        let y_quant = quantize_block(&y_dct, &quant_tables.luminance_table);
+                        prev_dc_y = encode_block(
+                            &mut writer,
+                            &y_quant,
+                            prev_dc_y,
+                            true,
+                            huff_tables,
+                        );
+                    }
+
+                    let cb_dct = dct_2d(&cb_block);
+                    let cb_quant = quantize_block(&cb_dct, &quant_tables.chrominance_table);
+                    prev_dc_cb = encode_block(
+                        &mut writer,
+                        &cb_quant,
+                        prev_dc_cb,
+                        false,
+                        huff_tables,
+                    );
+
+                    let cr_dct = dct_2d(&cr_block);
+                    let cr_quant = quantize_block(&cr_dct, &quant_tables.chrominance_table);
+                    prev_dc_cr = encode_block(
+                        &mut writer,
+                        &cr_quant,
+                        prev_dc_cr,
+                        false,
+                        huff_tables,
+                    );
+                }
             }
         }
     }
@@ -400,6 +527,53 @@ fn extract_block(
     }
 
     (y_block, cb_block, cr_block)
+}
+
+/// Extract a 4:2:0 MCU (16x16 luma -> 4 blocks, 8x8 chroma) starting at (mcu_x, mcu_y).
+fn extract_mcu_420(
+    data: &[u8],
+    width: usize,
+    height: usize,
+    mcu_x: usize,
+    mcu_y: usize,
+) -> ([[f32; 64]; 4], [f32; 64], [f32; 64]) {
+    let mut y_blocks = [[0.0f32; 64]; 4];
+    let mut cb_block = [0.0f32; 64];
+    let mut cr_block = [0.0f32; 64];
+
+    // Populate Y blocks and accumulate chroma
+    for by in 0..2 {
+        for bx in 0..2 {
+            let block_idx = by * 2 + bx;
+            for dy in 0..8 {
+                for dx in 0..8 {
+                    let x = (mcu_x + bx * 8 + dx).min(width - 1);
+                    let y = (mcu_y + by * 8 + dy).min(height - 1);
+                    let pixel_idx = (y * width + x) * 3;
+                    let r = data[pixel_idx];
+                    let g = data[pixel_idx + 1];
+                    let b = data[pixel_idx + 2];
+                    let (yc, cb, cr) = rgb_to_ycbcr(r, g, b);
+                    let idx = dy * 8 + dx;
+                    y_blocks[block_idx][idx] = yc as f32 - 128.0;
+
+                    let cx = dx / 2;
+                    let cy = dy / 2;
+                    let cidx = cy * 8 + cx;
+                    cb_block[cidx] += cb as f32;
+                    cr_block[cidx] += cr as f32;
+                }
+            }
+        }
+    }
+
+    // Average chroma over 2x2
+    for c in 0..64 {
+        cb_block[c] = cb_block[c] * 0.25 - 128.0;
+        cr_block[c] = cr_block[c] * 0.25 - 128.0;
+    }
+
+    (y_blocks, cb_block, cr_block)
 }
 
 #[cfg(test)]

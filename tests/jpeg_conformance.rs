@@ -221,6 +221,37 @@ fn test_jpeg_decode_random_small() {
     }
 }
 
+/// Subsampling 4:2:0 should produce valid JPEG and smaller size.
+#[test]
+fn test_jpeg_subsampling_420() {
+    let width = 32;
+    let height = 32;
+    let mut rng = StdRng::seed_from_u64(4242);
+    let mut rgb = vec![0u8; (width * height * 3) as usize];
+    rng.fill(rgb.as_mut_slice());
+
+    let opts_444 = jpeg::JpegOptions {
+        quality: 75,
+        subsampling: jpeg::Subsampling::S444,
+    };
+    let opts_420 = jpeg::JpegOptions {
+        quality: 75,
+        subsampling: jpeg::Subsampling::S420,
+    };
+
+    let jpeg_444 =
+        jpeg::encode_with_options(&rgb, width, height, 75, ColorType::Rgb, &opts_444).unwrap();
+    let jpeg_420 =
+        jpeg::encode_with_options(&rgb, width, height, 75, ColorType::Rgb, &opts_420).unwrap();
+
+    // 4:2:0 should not be larger than 4:4:4 for the same image/quality.
+    assert!(jpeg_420.len() <= jpeg_444.len());
+
+    // Decode and verify dimensions
+    let decoded = image::load_from_memory(&jpeg_420).expect("decode 420");
+    assert_eq!(decoded.dimensions(), (width, height));
+}
+
 /// Conformance: re-encode curated JPEG corpus and ensure decode succeeds.
 #[test]
 fn test_jpeg_corpus_reencode_decode() {
