@@ -48,6 +48,15 @@ use comprs::jpeg;
 // Encode RGB pixels as JPEG
 let pixels: Vec<u8> = vec![255, 128, 64]; // 1 RGB pixel
 let jpeg_data = jpeg::encode(&pixels, 1, 1, 85).unwrap(); // quality: 1-100
+
+// With subsampling options (4:4:4 default, 4:2:0 available)
+use comprs::jpeg::{JpegOptions, Subsampling};
+
+let options = JpegOptions {
+    quality: 85,
+    subsampling: Subsampling::S420, // downsample chroma for smaller files
+};
+let jpeg_data = jpeg::encode_with_options(&pixels, 1, 1, 85, ColorType::Rgb, &options).unwrap();
 ```
 
 ### Supported Color Types
@@ -58,6 +67,11 @@ let jpeg_data = jpeg::encode(&pixels, 1, 1, 85).unwrap(); // quality: 1-100
 - `ColorType::Rgba` - RGBA (4 bytes/pixel)
 
 Note: JPEG only supports `Gray` and `Rgb` color types.
+
+### Performance toggles
+
+- `parallel` feature enables rayon-powered parallel PNG adaptive filtering.
+- `simd` (planned) is reserved for future SIMD acceleration paths.
 
 ## Architecture
 
