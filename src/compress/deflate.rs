@@ -5,6 +5,7 @@
 use crate::bits::BitWriter64;
 use crate::compress::lz77::{Lz77Compressor, Token, MAX_MATCH_LENGTH, MIN_MATCH_LENGTH};
 use crate::compress::{adler32::adler32, huffman};
+use std::sync::LazyLock;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -439,10 +440,8 @@ pub fn encode_fixed_huffman(tokens: &[Token]) -> Vec<u8> {
 }
 
 fn encode_fixed_huffman_with_capacity(tokens: &[Token], capacity_hint: usize) -> Vec<u8> {
-    let lit_codes = huffman::fixed_literal_codes();
-    let dist_codes = huffman::fixed_distance_codes();
-    let lit_rev = prepare_reversed_codes(lit_codes);
-    let dist_rev = prepare_reversed_codes(dist_codes);
+    let lit_rev = fixed_literal_codes_rev();
+    let dist_rev = fixed_distance_codes_rev();
 
     let mut writer = BitWriter64::with_capacity(capacity_hint);
 
@@ -740,6 +739,36 @@ fn prepare_reversed_codes(codes: &[huffman::HuffmanCode]) -> Vec<(u32, u8)> {
         .iter()
         .map(|c| (reverse_bits(c.code, c.length), c.length))
         .collect()
+}
+
+/// Cached reversed fixed literal codes.
+static FIXED_LIT_REV: LazyLock<[(u32, u8); 288]> = LazyLock::new(|| {
+    let codes = huffman::fixed_literal_codes();
+    let mut out = [(0u32, 0u8); 288];
+    for (i, c) in codes.iter().enumerate() {
+        out[i] = (reverse_bits(c.code, c.length), c.length);
+    }
+    out
+});
+
+/// Cached reversed fixed distance codes.
+static FIXED_DIST_REV: LazyLock<[(u32, u8); 32]> = LazyLock::new(|| {
+    let codes = huffman::fixed_distance_codes();
+    let mut out = [(0u32, 0u8); 32];
+    for (i, c) in codes.iter().enumerate() {
+        out[i] = (reverse_bits(c.code, c.length), c.length);
+    }
+    out
+});
+
+#[inline]
+fn fixed_literal_codes_rev() -> &'static [(u32, u8); 288] {
+    &*FIXED_LIT_REV
+}
+
+#[inline]
+fn fixed_distance_codes_rev() -> &'static [(u32, u8); 32] {
+    &*FIXED_DIST_REV
 }
 
 /// Build the two-byte zlib header for the given compression level.
