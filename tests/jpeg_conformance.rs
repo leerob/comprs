@@ -137,6 +137,13 @@ fn test_invalid_restart_interval() {
     assert!(result.is_err());
 }
 
+#[test]
+fn test_unsupported_color_type_rejected() {
+    let pixels = vec![0u8; 4 * 4 * 4]; // RGBA data
+    let result = jpeg::encode_with_color(&pixels, 4, 4, 85, ColorType::Rgba);
+    assert!(result.is_err());
+}
+
 /// Test that encoding produces deterministic output.
 #[test]
 fn test_deterministic() {
