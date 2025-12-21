@@ -1187,4 +1187,46 @@ mod tests {
         let stored_overhead = (data.len() / 65_535 + 1) * 5 + 2 + 4;
         assert!(encoded.len() <= data.len() + stored_overhead);
     }
+
+    #[test]
+    fn test_packed_fixed_matches_standard() {
+        let data = b"aaaaabbbbccddeeffgg";
+        let mut lz = Lz77Compressor::new(6);
+        let tokens = lz.compress(data);
+
+        let mut packed = Vec::with_capacity(tokens.len());
+        for t in &tokens {
+            match t {
+                Token::Literal(b) => packed.push(PackedToken::literal(*b)),
+                Token::Match { length, distance } => {
+                    packed.push(PackedToken::match_(*length, *distance))
+                }
+            }
+        }
+
+        let std_out = encode_fixed_huffman(&tokens);
+        let packed_out = encode_fixed_huffman_packed(&packed);
+        assert_eq!(std_out, packed_out);
+    }
+
+    #[test]
+    fn test_packed_dynamic_matches_standard() {
+        let data = b"The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog.";
+        let mut lz = Lz77Compressor::new(6);
+        let tokens = lz.compress(data);
+
+        let mut packed = Vec::with_capacity(tokens.len());
+        for t in &tokens {
+            match t {
+                Token::Literal(b) => packed.push(PackedToken::literal(*b)),
+                Token::Match { length, distance } => {
+                    packed.push(PackedToken::match_(*length, *distance))
+                }
+            }
+        }
+
+        let std_out = encode_dynamic_huffman(&tokens);
+        let packed_out = encode_dynamic_huffman_packed(&packed);
+        assert_eq!(std_out, packed_out);
+    }
 }
