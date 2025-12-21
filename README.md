@@ -110,8 +110,9 @@ comprs/
 
 2. **DEFLATE Compression** (RFC 1951)
    - LZ77 with 32KB sliding window and hash chains
-   - Huffman coding (fixed codes)
-   - Configurable compression levels
+   - Huffman coding (auto-selects fixed vs dynamic)
+   - Stored-block fallback for incompressible data
+   - Wrapped as zlib (RFC 1950) for PNG IDAT
 
 3. **CRC32 Checksums** - Table-based for speed
 
@@ -131,24 +132,35 @@ comprs/
 
 ## Benchmarks
 
-Run benchmarks comparing against the `image` crate:
+- **Encoding benches**: compare PNG/JPEG against the `image` crate (`benches/encode_benchmark.rs`) for size and throughput.
+- **Deflate microbench**: compare `deflate_zlib` against `flate2` on compressible and random 1 MiB payloads (`benches/deflate_micro.rs`), reporting throughput in bytes.
+
+Run all benches:
 
 ```bash
 cargo bench
 ```
 
+Run a specific bench:
+
+```bash
+cargo bench --bench encode_benchmark
+cargo bench --bench deflate_micro
+```
+
 ## Testing
 
-Run the test suite:
+Run the full suite:
 
 ```bash
 cargo test
 ```
 
-The library includes:
-- Unit tests for all algorithms
-- PNG conformance tests
-- JPEG conformance tests
+Coverage highlights:
+- Unit tests for bits/LZ77/Huffman/CRC/Adler and codec internals.
+- Property-based tests for PNG/JPEG decode/roundtrip robustness.
+- Structural checks (CRC/length for PNG chunks; marker ordering/DRI for JPEG).
+- Conformance harnesses: PngSuite and libjpeg-turbo corpus (skip gracefully offline).
 
 ## Optional Features
 
