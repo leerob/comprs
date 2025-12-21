@@ -538,6 +538,15 @@ mod tests {
     }
 
     #[test]
+    fn test_deflate_zlib_empty_decode() {
+        let encoded = deflate_zlib(&[], 6);
+        let decoded = decompress_zlib(&encoded);
+        assert!(decoded.is_empty());
+        // Header for default compression and empty body should be minimal
+        assert!(encoded.len() <= 11); // 2 header + 5 stored + 4 adler
+    }
+
+    #[test]
     fn test_deflate_zlib_roundtrip_random_small() {
         let mut rng = rand::rngs::StdRng::seed_from_u64(999);
         for len in [0usize, 1, 2, 5, 32, 128, 1024, 4096] {
