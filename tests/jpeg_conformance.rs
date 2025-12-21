@@ -125,6 +125,18 @@ fn test_error_handling() {
     assert!(jpeg::encode(&[0, 0], 8, 8, 85).is_err());
 }
 
+#[test]
+fn test_invalid_restart_interval() {
+    let pixels = vec![128u8; 8 * 8 * 3];
+    let opts = jpeg::JpegOptions {
+        quality: 85,
+        subsampling: jpeg::Subsampling::S444,
+        restart_interval: Some(0),
+    };
+    let result = jpeg::encode_with_options(&pixels, 8, 8, 85, ColorType::Rgb, &opts);
+    assert!(result.is_err());
+}
+
 /// Test that encoding produces deterministic output.
 #[test]
 fn test_deterministic() {
