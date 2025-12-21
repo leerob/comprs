@@ -46,6 +46,10 @@ const FILTER_UP: u8 = 2;
 const FILTER_AVERAGE: u8 = 3;
 const FILTER_PAETH: u8 = 4;
 
+/// Threshold for "good enough" filter score - stop searching early.
+/// If a filter produces a score less than row_len / GOOD_SCORE_DIVISOR, use it.
+const GOOD_SCORE_DIVISOR: u64 = 8;
+
 /// Apply PNG filtering to raw image data.
 ///
 /// Returns filtered data with a filter type byte prepended to each row.
@@ -176,7 +180,7 @@ fn paeth_predictor(a: u8, b: u8, c: u8) -> u8 {
 }
 
 /// Adaptive filter selection: try all filters and pick the best.
-/// Optimized to track best score incrementally and potentially short-circuit.
+/// Optimized with early termination when a "good enough" filter is found.
 fn adaptive_filter(
     row: &[u8],
     prev_row: &[u8],
@@ -189,6 +193,9 @@ fn adaptive_filter(
     let mut best_filter = FILTER_NONE;
     let mut best_score = u64::MAX;
 
+    // Threshold for "good enough" - if we find a filter with score below this, stop
+    let good_threshold = (row.len() as u64) / GOOD_SCORE_DIVISOR;
+
     // Try None filter first
     scratch.none.extend_from_slice(row);
     let score = score_filter(&scratch.none);
@@ -197,8 +204,8 @@ fn adaptive_filter(
         best_filter = FILTER_NONE;
     }
 
-    // A score of 0 means all zeros - can't do better
-    if best_score == 0 {
+    // Early exit if score is excellent
+    if best_score <= good_threshold {
         output.push(best_filter);
         output.extend_from_slice(&scratch.none);
         return;
@@ -210,7 +217,7 @@ fn adaptive_filter(
     if score < best_score {
         best_score = score;
         best_filter = FILTER_SUB;
-        if best_score == 0 {
+        if best_score <= good_threshold {
             output.push(best_filter);
             output.extend_from_slice(&scratch.sub);
             return;
@@ -223,7 +230,7 @@ fn adaptive_filter(
     if score < best_score {
         best_score = score;
         best_filter = FILTER_UP;
-        if best_score == 0 {
+        if best_score <= good_threshold {
             output.push(best_filter);
             output.extend_from_slice(&scratch.up);
             return;
@@ -236,7 +243,7 @@ fn adaptive_filter(
     if score < best_score {
         best_score = score;
         best_filter = FILTER_AVERAGE;
-        if best_score == 0 {
+        if best_score <= good_threshold {
             output.push(best_filter);
             output.extend_from_slice(&scratch.avg);
             return;
@@ -259,6 +266,102 @@ fn adaptive_filter(
         FILTER_AVERAGE => output.extend_from_slice(&scratch.avg),
         FILTER_PAETH => output.extend_from_slice(&scratch.paeth),
         _ => unreachable!(),
+    }
+}
+
+/// Fast adaptive filter selection: uses heuristics to pick best 2-3 filters to try.
+/// Trades a small amount of compression ratio for significantly faster encoding.
+fn adaptive_filter_fast(
+    row: &[u8],
+    prev_row: &[u8],
+    bpp: usize,
+    output: &mut Vec<u8>,
+    scratch: &mut AdaptiveScratch,
+) {
+    scratch.clear();
+
+    let mut best_filter = FILTER_NONE;
+    let mut best_score = u64::MAX;
+
+    // Threshold for early termination
+    let good_threshold = (row.len() as u64) / GOOD_SCORE_DIVISOR;
+
+    // Heuristic: sample first few pixels to detect image characteristics
+    // For photographic content with gradients: Paeth/Up tend to work well
+    // For flat/synthetic images: Sub/None tend to work well
+
+    // Quick variance estimation on first few bytes
+    let sample_size = 32.min(row.len());
+    let mut variance: i32 = 0;
+    if sample_size > 1 {
+        for i in 1..sample_size {
+            let diff = (row[i] as i32) - (row[i - 1] as i32);
+            variance += diff.abs();
+        }
+        variance /= sample_size as i32;
+    }
+
+    // Choose filter order based on variance
+    let filter_order: &[u8] = if variance < 10 {
+        // Low variance (smooth): try Sub, Paeth, Up
+        &[FILTER_SUB, FILTER_PAETH, FILTER_UP]
+    } else if variance < 50 {
+        // Medium variance: try Paeth, Up, Sub
+        &[FILTER_PAETH, FILTER_UP, FILTER_SUB]
+    } else {
+        // High variance (noisy): try Up, Sub, Paeth
+        &[FILTER_UP, FILTER_SUB, FILTER_PAETH]
+    };
+
+    // Try filters in the determined order
+    for &filter_type in filter_order {
+        match filter_type {
+            FILTER_SUB => {
+                scratch.sub.clear();
+                filter_sub(row, bpp, &mut scratch.sub);
+                let score = score_filter(&scratch.sub);
+                if score < best_score {
+                    best_score = score;
+                    best_filter = FILTER_SUB;
+                }
+            }
+            FILTER_UP => {
+                scratch.up.clear();
+                filter_up(row, prev_row, &mut scratch.up);
+                let score = score_filter(&scratch.up);
+                if score < best_score {
+                    best_score = score;
+                    best_filter = FILTER_UP;
+                }
+            }
+            FILTER_PAETH => {
+                scratch.paeth.clear();
+                filter_paeth(row, prev_row, bpp, &mut scratch.paeth);
+                let score = score_filter(&scratch.paeth);
+                if score < best_score {
+                    best_score = score;
+                    best_filter = FILTER_PAETH;
+                }
+            }
+            _ => {}
+        }
+
+        // Early exit if we found a good enough filter
+        if best_score <= good_threshold {
+            break;
+        }
+    }
+
+    // Output the best filter result
+    output.push(best_filter);
+    match best_filter {
+        FILTER_SUB => output.extend_from_slice(&scratch.sub),
+        FILTER_UP => output.extend_from_slice(&scratch.up),
+        FILTER_PAETH => output.extend_from_slice(&scratch.paeth),
+        _ => {
+            // Fallback to None filter if something unexpected happened
+            output.extend_from_slice(row);
+        }
     }
 }
 
@@ -322,6 +425,16 @@ fn filter_row(
                 prev_row
             };
             adaptive_filter(row, p, bpp, output, scratch);
+        }
+        FilterStrategy::AdaptiveFast => {
+            let mut zero = Vec::new();
+            let p = if prev_row.is_empty() {
+                zero.resize(row.len(), 0);
+                &zero[..]
+            } else {
+                prev_row
+            };
+            adaptive_filter_fast(row, p, bpp, output, scratch);
         }
     }
 }

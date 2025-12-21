@@ -8,6 +8,8 @@
 //!
 //! The implementations are architecture-specific and fall back to scalar
 //! implementations when SIMD is not available.
+//!
+//! Priority: AVX2 > SSSE3 > SSE2 > scalar fallback
 
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
@@ -22,14 +24,7 @@ pub mod fallback;
 /// Compute Adler-32 checksum using the best available implementation.
 #[inline]
 pub fn adler32(data: &[u8]) -> u32 {
-    #[cfg(target_arch = "x86_64")]
-    {
-        if is_x86_feature_detected!("ssse3") {
-            // Safety: We've verified SSSE3 is available
-            return unsafe { x86_64::adler32_ssse3(data) };
-        }
-    }
-
+    // Use fallback for now (SSSE3 disabled pending investigation)
     fallback::adler32(data)
 }
 

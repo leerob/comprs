@@ -1,8 +1,13 @@
 //! CRC32 checksum implementation (PNG uses CRC-32/ISO-HDLC).
+//!
+//! Uses slice-by-8 algorithm for improved performance: processes 8 bytes
+//! per iteration with 8 parallel table lookups.
 
-/// CRC32 lookup table using polynomial 0xEDB88320 (reversed 0x04C11DB7).
-const CRC_TABLE: [u32; 256] = {
-    let mut table = [0u32; 256];
+/// CRC32 lookup tables for slice-by-8 algorithm.
+/// 8 tables of 256 entries each, using polynomial 0xEDB88320.
+const CRC_TABLES: [[u32; 256]; 8] = {
+    // First, generate the base table
+    let mut tables = [[0u32; 256]; 8];
     let mut i = 0;
     while i < 256 {
         let mut crc = i as u32;
@@ -15,24 +20,75 @@ const CRC_TABLE: [u32; 256] = {
             }
             j += 1;
         }
-        table[i] = crc;
+        tables[0][i] = crc;
         i += 1;
     }
-    table
+
+    // Generate tables 1-7 from table 0
+    i = 0;
+    while i < 256 {
+        let mut crc = tables[0][i];
+        let mut j = 1;
+        while j < 8 {
+            crc = (crc >> 8) ^ tables[0][(crc & 0xFF) as usize];
+            tables[j][i] = crc;
+            j += 1;
+        }
+        i += 1;
+    }
+
+    tables
 };
+
+/// Simple CRC32 table for scalar fallback.
+const CRC_TABLE: [u32; 256] = CRC_TABLES[0];
 
 /// Calculate CRC32 checksum of data.
 ///
-/// Uses the CRC-32/ISO-HDLC algorithm (polynomial 0x04C11DB7 reflected).
-/// This is the CRC used by PNG, gzip, and many other formats.
+/// Uses the slice-by-8 algorithm for improved performance.
+/// Processes 8 bytes per iteration instead of 1.
 #[inline]
 pub fn crc32(data: &[u8]) -> u32 {
-    let mut crc = 0xFFFFFFFF_u32;
-    for &byte in data {
+    crc32_slice8(data)
+}
+
+/// Slice-by-8 CRC32 implementation.
+/// Processes 8 bytes per iteration with 8 parallel table lookups.
+#[inline]
+fn crc32_slice8(data: &[u8]) -> u32 {
+    let mut crc = !0u32;
+    let mut remaining = data;
+
+    // Process 8 bytes at a time
+    while remaining.len() >= 8 {
+        // Load 8 bytes as two u32s
+        let lo = u32::from_le_bytes([remaining[0], remaining[1], remaining[2], remaining[3]]);
+        let hi = u32::from_le_bytes([remaining[4], remaining[5], remaining[6], remaining[7]]);
+
+        // XOR with current CRC
+        let val_lo = crc ^ lo;
+        let val_hi = hi;
+
+        // Perform 8 parallel table lookups and XOR together
+        crc = CRC_TABLES[7][(val_lo & 0xFF) as usize]
+            ^ CRC_TABLES[6][((val_lo >> 8) & 0xFF) as usize]
+            ^ CRC_TABLES[5][((val_lo >> 16) & 0xFF) as usize]
+            ^ CRC_TABLES[4][((val_lo >> 24) & 0xFF) as usize]
+            ^ CRC_TABLES[3][(val_hi & 0xFF) as usize]
+            ^ CRC_TABLES[2][((val_hi >> 8) & 0xFF) as usize]
+            ^ CRC_TABLES[1][((val_hi >> 16) & 0xFF) as usize]
+            ^ CRC_TABLES[0][((val_hi >> 24) & 0xFF) as usize];
+
+        remaining = &remaining[8..];
+    }
+
+    // Handle remaining bytes (0-7) with simple table lookup
+    for &byte in remaining {
         let index = ((crc ^ byte as u32) & 0xFF) as usize;
         crc = (crc >> 8) ^ CRC_TABLE[index];
     }
-    crc ^ 0xFFFFFFFF
+
+    !crc
 }
 
 /// Calculate CRC32 incrementally.
@@ -47,9 +103,33 @@ impl Crc32 {
     }
 
     /// Update the CRC with more data.
+    /// Uses slice-by-8 for improved performance on larger chunks.
     #[inline]
     pub fn update(&mut self, data: &[u8]) {
-        for &byte in data {
+        let mut remaining = data;
+
+        // Process 8 bytes at a time
+        while remaining.len() >= 8 {
+            let lo = u32::from_le_bytes([remaining[0], remaining[1], remaining[2], remaining[3]]);
+            let hi = u32::from_le_bytes([remaining[4], remaining[5], remaining[6], remaining[7]]);
+
+            let val_lo = self.crc ^ lo;
+            let val_hi = hi;
+
+            self.crc = CRC_TABLES[7][(val_lo & 0xFF) as usize]
+                ^ CRC_TABLES[6][((val_lo >> 8) & 0xFF) as usize]
+                ^ CRC_TABLES[5][((val_lo >> 16) & 0xFF) as usize]
+                ^ CRC_TABLES[4][((val_lo >> 24) & 0xFF) as usize]
+                ^ CRC_TABLES[3][(val_hi & 0xFF) as usize]
+                ^ CRC_TABLES[2][((val_hi >> 8) & 0xFF) as usize]
+                ^ CRC_TABLES[1][((val_hi >> 16) & 0xFF) as usize]
+                ^ CRC_TABLES[0][((val_hi >> 24) & 0xFF) as usize];
+
+            remaining = &remaining[8..];
+        }
+
+        // Handle remaining bytes
+        for &byte in remaining {
             let index = ((self.crc ^ byte as u32) & 0xFF) as usize;
             self.crc = (self.crc >> 8) ^ CRC_TABLE[index];
         }

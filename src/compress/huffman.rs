@@ -18,6 +18,65 @@ pub struct HuffmanCode {
     pub length: u8,
 }
 
+/// Pre-reversed Huffman code ready for direct writing to DEFLATE stream.
+/// Avoids per-symbol bit reversal during encoding.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ReversedHuffmanCode {
+    /// The code bits, already reversed for DEFLATE (ready to write).
+    pub reversed_code: u32,
+    /// Number of bits in the code.
+    pub length: u8,
+}
+
+/// Lookup table for reversing the bits in a byte.
+const REVERSE_BYTE: [u8; 256] = {
+    let mut table = [0u8; 256];
+    let mut i = 0usize;
+    while i < 256 {
+        let mut b = i as u8;
+        let mut r = 0u8;
+        let mut j = 0;
+        while j < 8 {
+            r = (r << 1) | (b & 1);
+            b >>= 1;
+            j += 1;
+        }
+        table[i] = r;
+        i += 1;
+    }
+    table
+};
+
+/// Reverse bits in a code (DEFLATE uses reversed bit order for Huffman codes).
+/// Uses a lookup table for O(1) byte reversal.
+#[inline]
+pub fn reverse_bits(code: u16, length: u8) -> u32 {
+    if length == 0 {
+        return 0;
+    }
+    // Reverse all 16 bits using byte lookup table, then shift to correct position
+    let low = REVERSE_BYTE[code as u8 as usize] as u16;
+    let high = REVERSE_BYTE[(code >> 8) as u8 as usize] as u16;
+    let reversed = (low << 8) | high;
+    (reversed >> (16 - length)) as u32
+}
+
+impl HuffmanCode {
+    /// Convert to a pre-reversed code for efficient encoding.
+    #[inline]
+    pub fn to_reversed(&self) -> ReversedHuffmanCode {
+        ReversedHuffmanCode {
+            reversed_code: reverse_bits(self.code, self.length),
+            length: self.length,
+        }
+    }
+}
+
+/// Convert a slice of HuffmanCodes to pre-reversed codes.
+pub fn prepare_reversed_codes(codes: &[HuffmanCode]) -> Vec<ReversedHuffmanCode> {
+    codes.iter().map(|c| c.to_reversed()).collect()
+}
+
 /// Huffman tree node for construction.
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct Node {
@@ -239,6 +298,16 @@ static FIXED_DISTANCE_CODES: LazyLock<Vec<HuffmanCode>> = LazyLock::new(|| {
     generate_canonical_codes(&lengths)
 });
 
+/// Cached pre-reversed fixed Huffman codes for literal/length symbols.
+static FIXED_LITERAL_CODES_REVERSED: LazyLock<Vec<ReversedHuffmanCode>> = LazyLock::new(|| {
+    prepare_reversed_codes(&FIXED_LITERAL_CODES)
+});
+
+/// Cached pre-reversed fixed Huffman codes for distance symbols.
+static FIXED_DISTANCE_CODES_REVERSED: LazyLock<Vec<ReversedHuffmanCode>> = LazyLock::new(|| {
+    prepare_reversed_codes(&FIXED_DISTANCE_CODES)
+});
+
 /// DEFLATE fixed Huffman codes for literal/length symbols (0-287).
 /// Returns a cached reference for O(1) access after first call.
 #[inline]
@@ -251,6 +320,20 @@ pub fn fixed_literal_codes() -> &'static [HuffmanCode] {
 #[inline]
 pub fn fixed_distance_codes() -> &'static [HuffmanCode] {
     &FIXED_DISTANCE_CODES
+}
+
+/// Pre-reversed fixed Huffman codes for literal/length symbols.
+/// Ready for direct writing to DEFLATE stream without per-symbol bit reversal.
+#[inline]
+pub fn fixed_literal_codes_reversed() -> &'static [ReversedHuffmanCode] {
+    &FIXED_LITERAL_CODES_REVERSED
+}
+
+/// Pre-reversed fixed Huffman codes for distance symbols.
+/// Ready for direct writing to DEFLATE stream without per-symbol bit reversal.
+#[inline]
+pub fn fixed_distance_codes_reversed() -> &'static [ReversedHuffmanCode] {
+    &FIXED_DISTANCE_CODES_REVERSED
 }
 
 #[cfg(test)]

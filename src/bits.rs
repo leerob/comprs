@@ -1,11 +1,14 @@
 //! Bit-level I/O utilities for binary encoding.
 
 /// A bit writer that packs bits into bytes, LSB first (for DEFLATE).
+/// Uses a 64-bit accumulator for efficient batch flushing.
 #[derive(Debug)]
 pub struct BitWriter {
     buffer: Vec<u8>,
-    current_byte: u8,
-    bit_position: u8,
+    /// 64-bit accumulator for pending bits
+    accumulator: u64,
+    /// Number of bits currently in the accumulator (0-63)
+    bits_in_acc: u8,
 }
 
 impl BitWriter {
@@ -18,12 +21,13 @@ impl BitWriter {
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             buffer: Vec::with_capacity(capacity),
-            current_byte: 0,
-            bit_position: 0,
+            accumulator: 0,
+            bits_in_acc: 0,
         }
     }
 
     /// Write bits to the stream, LSB first.
+    /// Optimized with 64-bit accumulator for reduced flush overhead.
     ///
     /// # Arguments
     /// * `value` - The value to write (only lower `num_bits` are used)
@@ -32,30 +36,56 @@ impl BitWriter {
     pub fn write_bits(&mut self, value: u32, num_bits: u8) {
         debug_assert!(num_bits <= 32);
 
-        let mut value = value;
-        let mut remaining = num_bits;
+        if num_bits == 0 {
+            return;
+        }
 
-        while remaining > 0 {
-            let available = 8 - self.bit_position;
-            let to_write = remaining.min(available);
+        // Mask the value to only include the bits we want
+        let mask = if num_bits == 32 {
+            u32::MAX
+        } else {
+            (1u32 << num_bits) - 1
+        };
+        let masked_value = value & mask;
 
-            // Extract the bits we want to write
-            let mask = (1u32 << to_write) - 1;
-            let bits = (value & mask) as u8;
+        // Add bits to accumulator
+        self.accumulator |= (masked_value as u64) << self.bits_in_acc;
+        self.bits_in_acc += num_bits;
 
-            // Add to current byte at the correct position
-            self.current_byte |= bits << self.bit_position;
+        // Flush complete bytes when we have 8 or more bits
+        while self.bits_in_acc >= 8 {
+            self.buffer.push(self.accumulator as u8);
+            self.accumulator >>= 8;
+            self.bits_in_acc -= 8;
+        }
+    }
 
-            self.bit_position += to_write;
-            value >>= to_write;
-            remaining -= to_write;
+    /// Write bits without overflow checking - for hot paths.
+    /// Caller must ensure bits_in_acc + num_bits <= 56 to avoid overflow.
+    #[inline]
+    pub fn write_bits_fast(&mut self, value: u32, num_bits: u8) {
+        debug_assert!(num_bits <= 32);
+        debug_assert!(self.bits_in_acc + num_bits <= 64);
 
-            // If byte is full, flush it
-            if self.bit_position == 8 {
-                self.buffer.push(self.current_byte);
-                self.current_byte = 0;
-                self.bit_position = 0;
-            }
+        // Mask the value to only include the bits we want
+        let mask = if num_bits == 32 {
+            u32::MAX
+        } else {
+            (1u32 << num_bits) - 1
+        };
+        let masked_value = value & mask;
+
+        self.accumulator |= (masked_value as u64) << self.bits_in_acc;
+        self.bits_in_acc += num_bits;
+    }
+
+    /// Flush complete bytes from the accumulator.
+    #[inline]
+    pub fn flush_bytes(&mut self) {
+        while self.bits_in_acc >= 8 {
+            self.buffer.push(self.accumulator as u8);
+            self.accumulator >>= 8;
+            self.bits_in_acc -= 8;
         }
     }
 
@@ -67,7 +97,7 @@ impl BitWriter {
 
     /// Write a byte-aligned value (flushes partial byte first with zeros).
     pub fn write_byte(&mut self, byte: u8) {
-        if self.bit_position == 0 {
+        if self.bits_in_acc == 0 {
             self.buffer.push(byte);
         } else {
             self.write_bits(byte as u32, 8);
@@ -83,10 +113,10 @@ impl BitWriter {
 
     /// Flush any remaining bits, padding with zeros.
     pub fn flush(&mut self) {
-        if self.bit_position > 0 {
-            self.buffer.push(self.current_byte);
-            self.current_byte = 0;
-            self.bit_position = 0;
+        if self.bits_in_acc > 0 {
+            self.buffer.push(self.accumulator as u8);
+            self.accumulator = 0;
+            self.bits_in_acc = 0;
         }
     }
 
@@ -103,12 +133,12 @@ impl BitWriter {
 
     /// Check if the writer is empty.
     pub fn is_empty(&self) -> bool {
-        self.buffer.is_empty() && self.bit_position == 0
+        self.buffer.is_empty() && self.bits_in_acc == 0
     }
 
     /// Get current bit position within the current byte.
     pub fn bit_position(&self) -> u8 {
-        self.bit_position
+        self.bits_in_acc % 8
     }
 }
 

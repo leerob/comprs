@@ -30,8 +30,8 @@ png = { version = "0.17", optional = true }
 jpeg-decoder = { version = "0.3", optional = true }
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
-image = "0.25"
+criterion = { version = "0.5.1", features = ["html_reports"] }
+image = "0.24"
 rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 sha2 = "0.10"

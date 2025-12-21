@@ -129,9 +129,9 @@ pub fn deflate(data: &[u8], level: u8) -> Vec<u8> {
         writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
 
         // Write end-of-block symbol (256)
-        let lit_codes = huffman::fixed_literal_codes();
-        let code = lit_codes[256];
-        writer.write_bits(reverse_bits(code.code, code.length), code.length);
+        let lit_codes = huffman::fixed_literal_codes_reversed();
+        let code = &lit_codes[256];
+        writer.write_bits(code.reversed_code, code.length);
 
         return writer.finish();
     }
@@ -192,11 +192,13 @@ fn should_use_stored(data_len: usize, deflated_len: usize) -> bool {
 }
 
 /// Encode tokens using fixed Huffman codes.
+/// Uses pre-reversed codes for improved performance.
 fn encode_fixed_huffman(tokens: &[Token]) -> Vec<u8> {
-    let lit_codes = huffman::fixed_literal_codes();
-    let dist_codes = huffman::fixed_distance_codes();
+    let lit_codes = huffman::fixed_literal_codes_reversed();
+    let dist_codes = huffman::fixed_distance_codes_reversed();
 
-    let mut writer = BitWriter::new();
+    // Estimate output size: ~70% of token count for typical data
+    let mut writer = BitWriter::with_capacity(tokens.len() * 2);
 
     // Block header: BFINAL=1 (last block), BTYPE=01 (fixed Huffman)
     writer.write_bits(1, 1); // BFINAL
@@ -205,14 +207,14 @@ fn encode_fixed_huffman(tokens: &[Token]) -> Vec<u8> {
     for token in tokens {
         match *token {
             Token::Literal(byte) => {
-                let code = lit_codes[byte as usize];
-                writer.write_bits(reverse_bits(code.code, code.length), code.length);
+                let code = &lit_codes[byte as usize];
+                writer.write_bits(code.reversed_code, code.length);
             }
             Token::Match { length, distance } => {
                 // Encode length
                 let (len_symbol, len_extra_bits, len_extra_value) = length_code(length);
-                let len_code = lit_codes[len_symbol as usize];
-                writer.write_bits(reverse_bits(len_code.code, len_code.length), len_code.length);
+                let len_code = &lit_codes[len_symbol as usize];
+                writer.write_bits(len_code.reversed_code, len_code.length);
 
                 if len_extra_bits > 0 {
                     writer.write_bits(len_extra_value as u32, len_extra_bits);
@@ -220,11 +222,8 @@ fn encode_fixed_huffman(tokens: &[Token]) -> Vec<u8> {
 
                 // Encode distance
                 let (dist_symbol, dist_extra_bits, dist_extra_value) = distance_code(distance);
-                let dist_code = dist_codes[dist_symbol as usize];
-                writer.write_bits(
-                    reverse_bits(dist_code.code, dist_code.length),
-                    dist_code.length,
-                );
+                let dist_code = &dist_codes[dist_symbol as usize];
+                writer.write_bits(dist_code.reversed_code, dist_code.length);
 
                 if dist_extra_bits > 0 {
                     writer.write_bits(dist_extra_value as u32, dist_extra_bits);
@@ -234,13 +233,14 @@ fn encode_fixed_huffman(tokens: &[Token]) -> Vec<u8> {
     }
 
     // End of block symbol (256)
-    let eob_code = lit_codes[256];
-    writer.write_bits(reverse_bits(eob_code.code, eob_code.length), eob_code.length);
+    let eob_code = &lit_codes[256];
+    writer.write_bits(eob_code.reversed_code, eob_code.length);
 
     writer.finish()
 }
 
 /// Encode tokens using dynamic Huffman codes (RFC 1951).
+/// Uses pre-reversed codes for improved performance.
 fn encode_dynamic_huffman(tokens: &[Token]) -> Vec<u8> {
     // Frequencies
     let mut lit_freqs = vec![0u32; 286]; // 0-285
@@ -269,6 +269,10 @@ fn encode_dynamic_huffman(tokens: &[Token]) -> Vec<u8> {
     let lit_codes = huffman::build_codes(&lit_freqs, huffman::MAX_CODE_LENGTH);
     let dist_codes = huffman::build_codes(&dist_freqs, huffman::MAX_CODE_LENGTH);
 
+    // Pre-reverse codes for faster encoding
+    let lit_codes_rev = huffman::prepare_reversed_codes(&lit_codes);
+    let dist_codes_rev = huffman::prepare_reversed_codes(&dist_codes);
+
     // Code lengths
     let mut lit_lengths: Vec<u8> = lit_codes.iter().map(|c| c.length).collect();
     let mut dist_lengths: Vec<u8> = dist_codes.iter().map(|c| c.length).collect();
@@ -286,6 +290,7 @@ fn encode_dynamic_huffman(tokens: &[Token]) -> Vec<u8> {
 
     // Build code length codes (max len 7)
     let cl_codes = huffman::build_codes(&cl_freqs, 7);
+    let cl_codes_rev = huffman::prepare_reversed_codes(&cl_codes);
 
     // Determine HCLEN (last non-zero in order)
     let cl_order: [usize; 19] = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
@@ -297,7 +302,8 @@ fn encode_dynamic_huffman(tokens: &[Token]) -> Vec<u8> {
         }
     }
 
-    let mut writer = BitWriter::new();
+    // Estimate output size
+    let mut writer = BitWriter::with_capacity(tokens.len() * 2);
     writer.write_bits(1, 1); // BFINAL (single block)
     writer.write_bits(2, 2); // BTYPE=10 (dynamic)
 
@@ -312,8 +318,8 @@ fn encode_dynamic_huffman(tokens: &[Token]) -> Vec<u8> {
 
     // Write the RLE-encoded code lengths
     for (sym, extra_bits, extra_len) in rle {
-        let code = cl_codes[sym as usize];
-        writer.write_bits(reverse_bits(code.code, code.length), code.length);
+        let code = &cl_codes_rev[sym as usize];
+        writer.write_bits(code.reversed_code, code.length);
         if extra_len > 0 {
             writer.write_bits(extra_bits as u32, extra_len);
         }
@@ -323,20 +329,20 @@ fn encode_dynamic_huffman(tokens: &[Token]) -> Vec<u8> {
     for token in tokens {
         match *token {
             Token::Literal(byte) => {
-                let code = lit_codes[byte as usize];
-                writer.write_bits(reverse_bits(code.code, code.length), code.length);
+                let code = &lit_codes_rev[byte as usize];
+                writer.write_bits(code.reversed_code, code.length);
             }
             Token::Match { length, distance } => {
                 let (len_symbol, len_extra_bits, len_extra_value) = length_code(length);
-                let len_code = lit_codes[len_symbol as usize];
-                writer.write_bits(reverse_bits(len_code.code, len_code.length), len_code.length);
+                let len_code = &lit_codes_rev[len_symbol as usize];
+                writer.write_bits(len_code.reversed_code, len_code.length);
                 if len_extra_bits > 0 {
                     writer.write_bits(len_extra_value as u32, len_extra_bits);
                 }
 
                 let (dist_symbol, dist_extra_bits, dist_extra_value) = distance_code(distance);
-                let dist_code = dist_codes[dist_symbol as usize];
-                writer.write_bits(reverse_bits(dist_code.code, dist_code.length), dist_code.length);
+                let dist_code = &dist_codes_rev[dist_symbol as usize];
+                writer.write_bits(dist_code.reversed_code, dist_code.length);
                 if dist_extra_bits > 0 {
                     writer.write_bits(dist_extra_value as u32, dist_extra_bits);
                 }
@@ -345,8 +351,8 @@ fn encode_dynamic_huffman(tokens: &[Token]) -> Vec<u8> {
     }
 
     // End of block
-    let eob_code = lit_codes[256];
-    writer.write_bits(reverse_bits(eob_code.code, eob_code.length), eob_code.length);
+    let eob_code = &lit_codes_rev[256];
+    writer.write_bits(eob_code.reversed_code, eob_code.length);
 
     writer.finish()
 }
@@ -419,36 +425,6 @@ fn rle_code_lengths(
     }
 
     encoded
-}
-
-/// Lookup table for reversing the bits in a byte.
-const REVERSE_BYTE: [u8; 256] = {
-    let mut table = [0u8; 256];
-    let mut i = 0usize;
-    while i < 256 {
-        let mut b = i as u8;
-        let mut r = 0u8;
-        let mut j = 0;
-        while j < 8 {
-            r = (r << 1) | (b & 1);
-            b >>= 1;
-            j += 1;
-        }
-        table[i] = r;
-        i += 1;
-    }
-    table
-};
-
-/// Reverse bits in a code (DEFLATE uses reversed bit order for Huffman codes).
-/// Uses a lookup table for O(1) byte reversal.
-#[inline]
-fn reverse_bits(code: u16, length: u8) -> u32 {
-    // Reverse all 16 bits using byte lookup table, then shift to correct position
-    let low = REVERSE_BYTE[code as u8 as usize] as u16;
-    let high = REVERSE_BYTE[(code >> 8) as u8 as usize] as u16;
-    let reversed = (low << 8) | high;
-    (reversed >> (16 - length)) as u32
 }
 
 /// Build the two-byte zlib header for the given compression level.
@@ -572,6 +548,7 @@ mod tests {
 
     #[test]
     fn test_reverse_bits() {
+        use crate::compress::huffman::reverse_bits;
         assert_eq!(reverse_bits(0b101, 3), 0b101);
         assert_eq!(reverse_bits(0b100, 3), 0b001);
         assert_eq!(reverse_bits(0b11110000, 8), 0b00001111);
