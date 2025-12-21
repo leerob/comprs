@@ -190,6 +190,9 @@ fn decode_jpeg(path: &PathBuf) -> Result<DecodedImage, Box<dyn std::error::Error
 
     let color_type = match info.pixel_format {
         jpeg_decoder::PixelFormat::L8 => ColorType::Gray,
+        jpeg_decoder::PixelFormat::L16 => {
+            return Err("16-bit grayscale JPEG not supported.".into())
+        }
         jpeg_decoder::PixelFormat::RGB24 => ColorType::Rgb,
         jpeg_decoder::PixelFormat::CMYK32 => {
             return Err("CMYK JPEG not supported. Convert to RGB first.".into())

@@ -66,7 +66,9 @@ let jpeg_data = jpeg::encode_with_options(&pixels, 1, 1, 85, ColorType::Rgb, &op
 
 ### Command-Line Interface
 
-The library includes a CLI tool for quick image compression from the terminal.
+The library includes a CLI tool for quick image compression from the terminal. It only supports PNG and JPEG images in and out.
+
+The CLI uses lightweight decoder crates (`png`, `jpeg-decoder`) instead of the full `image` crate.
 
 #### Installation
 
@@ -105,16 +107,16 @@ comprs input.png -o output.jpg -v
 
 #### CLI Options
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `-o, --output` | Output file path | `<input>.compressed.<ext>` |
-| `-f, --format` | Output format (`png`, `jpeg`, `jpg`) | Detected from extension |
-| `-q, --quality` | JPEG quality (1-100) | 85 |
-| `-c, --compression` | PNG compression level (1-9) | 6 |
-| `--subsampling` | JPEG chroma subsampling (`s444`, `s420`) | s444 |
-| `--filter` | PNG filter (`none`, `sub`, `up`, `average`, `paeth`, `adaptive`) | adaptive |
-| `--grayscale` | Convert to grayscale | false |
-| `-v, --verbose` | Show detailed output | false |
+| Option              | Description                                                      | Default                    |
+| ------------------- | ---------------------------------------------------------------- | -------------------------- |
+| `-o, --output`      | Output file path                                                 | `<input>.compressed.<ext>` |
+| `-f, --format`      | Output format (`png`, `jpeg`, `jpg`)                             | Detected from extension    |
+| `-q, --quality`     | JPEG quality (1-100)                                             | 85                         |
+| `-c, --compression` | PNG compression level (1-9)                                      | 6                          |
+| `--subsampling`     | JPEG chroma subsampling (`s444`, `s420`)                         | s444                       |
+| `--filter`          | PNG filter (`none`, `sub`, `up`, `average`, `paeth`, `adaptive`) | adaptive                   |
+| `--grayscale`       | Convert to grayscale                                             | false                      |
+| `-v, --verbose`     | Show detailed output                                             | false                      |
 
 ### Supported Color Types
 
@@ -162,10 +164,12 @@ comprs/
 ### PNG (Lossless)
 
 1. **PNG Filtering** - All 5 filter types for optimal compression
+
    - None, Sub, Up, Average, Paeth predictor
    - Adaptive selection per scanline
 
 2. **DEFLATE Compression** (RFC 1951)
+
    - LZ77 with 32KB sliding window and hash chains
    - Huffman coding (auto-selects fixed vs dynamic)
    - Stored-block fallback for incompressible data
@@ -214,6 +218,7 @@ cargo test
 ```
 
 Coverage highlights:
+
 - Unit tests for bits/LZ77/Huffman/CRC/Adler and codec internals.
 - Property-based tests for PNG/JPEG decode/roundtrip robustness.
 - Structural checks (CRC/length for PNG chunks; marker ordering/DRI for JPEG).
@@ -223,7 +228,7 @@ Note: tests and benches are validated on nightly toolchain; ensure `rustup overr
 
 ## Optional Features
 
-- `cli` - Build the command-line interface (`comprs` binary)
+- `cli` - Build the command-line interface (adds `clap`, `png`, `jpeg-decoder`)
 - `simd` - Enable SIMD optimizations (requires nightly for some platforms)
 - `parallel` - Enable parallel processing with rayon
 
@@ -233,7 +238,7 @@ Note: tests and benches are validated on nightly toolchain; ensure `rustup overr
 - JPEG encoder processes images in 8×8 blocks for cache efficiency
 - All algorithms minimize allocations during encoding
 
-## 📚 Documentation
+## Documentation
 
 We provide comprehensive documentation explaining the algorithms and compression strategies used in this library. These guides are designed to be accessible to developers who may not be familiar with low-level compression details.
 

@@ -42,3 +42,7 @@ flate2 = "1.0"
 [[bench]]
 name = "encode_benchmark"
 harness = false
+
+[[bench]]
+name = "deflate_micro"
+harness = false
