@@ -288,6 +288,82 @@ fn test_jpeg_restart_interval_marker_and_decode() {
     assert_eq!(decoded.dimensions(), (width, height));
 }
 
+/// Structural marker walk to ensure required segments and restart interval are present.
+#[test]
+fn test_jpeg_marker_structure_with_restart() {
+    let width = 16;
+    let height = 12;
+    let mut rng = StdRng::seed_from_u64(6262);
+    let mut rgb = vec![0u8; (width * height * 3) as usize];
+    rng.fill(rgb.as_mut_slice());
+
+    let opts = jpeg::JpegOptions {
+        quality: 85,
+        subsampling: jpeg::Subsampling::S420,
+        restart_interval: Some(4),
+    };
+
+    let jpeg_bytes =
+        jpeg::encode_with_options(&rgb, width, height, 85, ColorType::Rgb, &opts).unwrap();
+
+    assert!(jpeg_bytes.starts_with(&[0xFF, 0xD8]), "missing SOI");
+    assert!(jpeg_bytes.ends_with(&[0xFF, 0xD9]), "missing EOI");
+
+    let mut offset = 2; // after SOI
+    let mut saw_app0 = false;
+    let mut saw_dqt = false;
+    let mut saw_sof0 = false;
+    let mut saw_dht = false;
+    let mut saw_dri = false;
+    let mut saw_sos = false;
+
+    while offset + 4 <= jpeg_bytes.len() {
+        assert_eq!(jpeg_bytes[offset], 0xFF, "marker sync lost at {offset}");
+        let marker = jpeg_bytes[offset + 1];
+        offset += 2;
+
+        if marker == 0xD9 {
+            break; // EOI (no length)
+        }
+
+        assert!(
+            offset + 2 <= jpeg_bytes.len(),
+            "truncated marker length for 0x{:02X}",
+            marker
+        );
+        let len = u16::from_be_bytes([jpeg_bytes[offset], jpeg_bytes[offset + 1]]) as usize;
+        assert!(len >= 2, "invalid length for marker 0x{:02X}", marker);
+        offset += 2;
+        assert!(
+            offset + len - 2 <= jpeg_bytes.len(),
+            "segment overruns buffer for marker 0x{:02X}",
+            marker
+        );
+
+        match marker {
+            0xE0 => saw_app0 = true,      // APP0
+            0xDB => saw_dqt = true,       // DQT
+            0xC0 => saw_sof0 = true,      // SOF0
+            0xC4 => saw_dht = true,       // DHT
+            0xDD => saw_dri = true,       // DRI
+            0xDA => {
+                saw_sos = true; // SOS
+                break; // after SOS, entropy-coded data continues until EOI
+            }
+            _ => {}
+        }
+
+        offset += len - 2;
+    }
+
+    assert!(saw_app0, "APP0 not found");
+    assert!(saw_dqt, "DQT not found");
+    assert!(saw_sof0, "SOF0 not found");
+    assert!(saw_dht, "DHT not found");
+    assert!(saw_sos, "SOS not found");
+    assert!(saw_dri, "DRI not found despite restart_interval");
+}
+
 fn jpeg_case_strategy(
 ) -> impl Strategy<Value = (u32, u32, u8, ColorType, jpeg::Subsampling, Option<u16>, Vec<u8>)> {
     (1u32..24, 1u32..24, 30u8..96)
