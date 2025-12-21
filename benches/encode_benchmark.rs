@@ -91,12 +91,36 @@ fn jpeg_encoding_benchmark(c: &mut Criterion) {
 
         group.throughput(Throughput::Bytes(pixel_bytes));
 
+        let opts_420 = jpeg::JpegOptions {
+            quality: 85,
+            subsampling: jpeg::Subsampling::S420,
+            restart_interval: None,
+        };
+
         group.bench_with_input(
-            BenchmarkId::new("comprs_q85", format!("{}x{}", size, size)),
+            BenchmarkId::new("comprs_q85_444", format!("{}x{}", size, size)),
             &pixels,
             |b, pixels| {
                 b.iter(|| {
                     jpeg::encode(black_box(pixels), *size, *size, 85).unwrap()
+                });
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("comprs_q85_420", format!("{}x{}", size, size)),
+            &pixels,
+            |b, pixels| {
+                b.iter(|| {
+                    jpeg::encode_with_options(
+                        black_box(pixels),
+                        *size,
+                        *size,
+                        85,
+                        ColorType::Rgb,
+                        &opts_420,
+                    )
+                    .unwrap()
                 });
             },
         );
