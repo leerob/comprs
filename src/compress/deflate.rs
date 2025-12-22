@@ -7,7 +7,9 @@ use crate::compress::lz77::{
     Lz77Compressor, PackedToken, Token, MAX_MATCH_LENGTH, MIN_MATCH_LENGTH,
 };
 use crate::compress::{adler32::adler32, huffman};
+use std::cell::RefCell;
 use std::sync::LazyLock;
+use std::thread_local;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -97,6 +99,69 @@ const LENGTH_LOOKUP: [(u8, u8); 256] = {
     table
 };
 
+/// Threshold (in tokens) above which we skip fixed-Huffman encoding and go
+/// straight to dynamic codes to avoid double-encoding overhead on large
+/// payloads (common for PNG scanlines).
+const DYNAMIC_ONLY_TOKEN_THRESHOLD: usize = 1024;
+
+thread_local! {
+    /// Thread-local pool of reusable deflaters keyed by compression level.
+    static DEFLATE_REUSE: RefCell<Vec<Option<Deflater>>> = RefCell::new(Vec::new());
+}
+
+#[inline]
+fn with_reusable_deflater<T>(level: u8, f: impl FnOnce(&mut Deflater) -> T) -> T {
+    let level = level.clamp(1, 9);
+    DEFLATE_REUSE.with(|pool| {
+        let mut pool = pool.borrow_mut();
+        let idx = level as usize;
+        if pool.len() <= idx {
+            pool.resize_with(idx + 1, || None);
+        }
+        if pool[idx].as_ref().map(|d| d.level()) != Some(level) {
+            pool[idx] = Some(Deflater::new(level));
+        }
+        let deflater = pool[idx].as_mut().expect("deflater slot initialized");
+        f(deflater)
+    })
+}
+
+#[inline]
+fn encode_best_huffman(tokens: &[Token], est_bytes: usize) -> (Vec<u8>, bool) {
+    if tokens.len() >= DYNAMIC_ONLY_TOKEN_THRESHOLD {
+        return (
+            encode_dynamic_huffman_with_capacity(tokens, est_bytes),
+            true,
+        );
+    }
+
+    let fixed = encode_fixed_huffman_with_capacity(tokens, est_bytes);
+    let dynamic = encode_dynamic_huffman_with_capacity(tokens, est_bytes);
+    if dynamic.len() < fixed.len() {
+        (dynamic, true)
+    } else {
+        (fixed, false)
+    }
+}
+
+#[inline]
+fn encode_best_huffman_packed(tokens: &[PackedToken], est_bytes: usize) -> (Vec<u8>, bool) {
+    if tokens.len() >= DYNAMIC_ONLY_TOKEN_THRESHOLD {
+        return (
+            encode_dynamic_huffman_packed_with_capacity(tokens, est_bytes),
+            true,
+        );
+    }
+
+    let fixed = encode_fixed_huffman_packed_with_capacity(tokens, est_bytes);
+    let dynamic = encode_dynamic_huffman_packed_with_capacity(tokens, est_bytes);
+    if dynamic.len() < fixed.len() {
+        (dynamic, true)
+    } else {
+        (fixed, false)
+    }
+}
+
 /// Lookup table for distance codes: maps distance (1-32768) to code index.
 /// Uses a two-level approach for efficiency.
 const DISTANCE_LOOKUP_SMALL: [u8; 512] = {
@@ -182,21 +247,7 @@ pub fn deflate(data: &[u8], level: u8) -> Vec<u8> {
         return writer.finish();
     }
 
-    // Use LZ77 to find matches
-    let mut lz77 = Lz77Compressor::new(level);
-    let tokens = lz77.compress(data);
-
-    // Rough output estimate to reduce reallocations.
-    let est_bytes = estimated_deflate_size(data.len(), level);
-
-    // Choose between fixed and dynamic Huffman based on output size.
-    let fixed = encode_fixed_huffman_with_capacity(&tokens, est_bytes);
-    let dynamic = encode_dynamic_huffman_with_capacity(&tokens, est_bytes);
-    if dynamic.len() < fixed.len() {
-        dynamic
-    } else {
-        fixed
-    }
+    with_reusable_deflater(level, |deflater| deflater.compress(data))
 }
 
 /// Compress data using DEFLATE algorithm with packed tokens (non-reusable).
@@ -217,21 +268,7 @@ pub fn deflate_packed(data: &[u8], level: u8) -> Vec<u8> {
         return writer.finish();
     }
 
-    // Use LZ77 to find matches
-    let mut lz77 = Lz77Compressor::new(level);
-    let tokens = lz77.compress_packed(data);
-
-    // Rough output estimate to reduce reallocations.
-    let est_bytes = estimated_deflate_size(data.len(), level);
-
-    // Choose between fixed and dynamic Huffman based on output size.
-    let fixed = encode_fixed_huffman_packed_with_capacity(&tokens, est_bytes);
-    let dynamic = encode_dynamic_huffman_packed_with_capacity(&tokens, est_bytes);
-    if dynamic.len() < fixed.len() {
-        dynamic
-    } else {
-        fixed
-    }
+    with_reusable_deflater(level, |deflater| deflater.compress_packed(data))
 }
 
 /// Reusable DEFLATE encoder that minimizes allocations by reusing buffers.
@@ -254,6 +291,12 @@ impl Deflater {
         }
     }
 
+    /// Return the compression level configured for this deflater.
+    #[inline]
+    pub fn level(&self) -> u8 {
+        self.level
+    }
+
     /// Compress raw data into a DEFLATE stream.
     pub fn compress(&mut self, data: &[u8]) -> Vec<u8> {
         if data.is_empty() {
@@ -274,13 +317,8 @@ impl Deflater {
         self.lz77.compress_into(data, &mut self.tokens);
 
         let est_bytes = estimated_deflate_size(data.len(), self.level);
-        let fixed = encode_fixed_huffman_with_capacity(&self.tokens, est_bytes);
-        let dynamic = encode_dynamic_huffman_with_capacity(&self.tokens, est_bytes);
-        if dynamic.len() < fixed.len() {
-            dynamic
-        } else {
-            fixed
-        }
+        let (encoded, _) = encode_best_huffman(&self.tokens, est_bytes);
+        encoded
     }
 
     /// Compress data and wrap in a zlib container.
@@ -306,15 +344,7 @@ impl Deflater {
         self.lz77.compress_into(data, &mut self.tokens);
 
         let est_bytes = estimated_deflate_size(data.len(), self.level);
-        let deflated = {
-            let fixed = encode_fixed_huffman_with_capacity(&self.tokens, est_bytes);
-            let dynamic = encode_dynamic_huffman_with_capacity(&self.tokens, est_bytes);
-            if dynamic.len() < fixed.len() {
-                dynamic
-            } else {
-                fixed
-            }
-        };
+        let (deflated, _) = encode_best_huffman(&self.tokens, est_bytes);
 
         let use_stored = should_use_stored(data.len(), deflated.len());
 
@@ -351,13 +381,8 @@ impl Deflater {
             .compress_packed_into(data, &mut self.packed_tokens);
 
         let est_bytes = estimated_deflate_size(data.len(), self.level);
-        let fixed = encode_fixed_huffman_packed_with_capacity(&self.packed_tokens, est_bytes);
-        let dynamic = encode_dynamic_huffman_packed_with_capacity(&self.packed_tokens, est_bytes);
-        if dynamic.len() < fixed.len() {
-            dynamic
-        } else {
-            fixed
-        }
+        let (encoded, _) = encode_best_huffman_packed(&self.packed_tokens, est_bytes);
+        encoded
     }
 
     /// Compress data using packed tokens and wrap in a zlib container.
@@ -384,15 +409,7 @@ impl Deflater {
             .compress_packed_into(data, &mut self.packed_tokens);
 
         let est_bytes = estimated_deflate_size(data.len(), self.level);
-        let deflated = {
-            let fixed = encode_fixed_huffman_packed_with_capacity(&self.packed_tokens, est_bytes);
-            let dynamic = encode_dynamic_huffman_packed_with_capacity(&self.packed_tokens, est_bytes);
-            if dynamic.len() < fixed.len() {
-                dynamic
-            } else {
-                fixed
-            }
-        };
+        let (deflated, _) = encode_best_huffman_packed(&self.packed_tokens, est_bytes);
 
         let use_stored = should_use_stored(data.len(), deflated.len());
 
@@ -447,19 +464,30 @@ pub fn deflate_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats) {
     let t1 = Instant::now();
     let est_bytes = estimated_deflate_size(data.len(), level);
 
-    let fixed = encode_fixed_huffman_with_capacity(&tokens, est_bytes);
-    let fixed_time = t1.elapsed();
+    let (encoded, fixed_time, dynamic_time, choose_time, use_dynamic) =
+        if tokens.len() >= DYNAMIC_ONLY_TOKEN_THRESHOLD {
+            // Skip fixed encode for large inputs to avoid double work.
+            let t_dyn_start = Instant::now();
+            let dynamic = encode_dynamic_huffman_with_capacity(&tokens, est_bytes);
+            let dynamic_time = t_dyn_start.elapsed();
+            (dynamic, Duration::ZERO, dynamic_time, Duration::ZERO, true)
+        } else {
+            let fixed = encode_fixed_huffman_with_capacity(&tokens, est_bytes);
+            let fixed_time = t1.elapsed();
 
-    // Dynamic Huffman encode
-    let t2 = Instant::now();
-    let dynamic = encode_dynamic_huffman_with_capacity(&tokens, est_bytes);
-    let dynamic_time = t2.elapsed();
+            // Dynamic Huffman encode
+            let t2 = Instant::now();
+            let dynamic = encode_dynamic_huffman_with_capacity(&tokens, est_bytes);
+            let dynamic_time = t2.elapsed();
 
-    // Choose smaller stream
-    let choose_start = Instant::now();
-    let use_dynamic = dynamic.len() < fixed.len();
-    let encoded = if use_dynamic { dynamic } else { fixed };
-    let choose_time = choose_start.elapsed();
+            // Choose smaller stream
+            let choose_start = Instant::now();
+            let use_dynamic = dynamic.len() < fixed.len();
+            let encoded = if use_dynamic { dynamic } else { fixed };
+            let choose_time = choose_start.elapsed();
+
+            (encoded, fixed_time, dynamic_time, choose_time, use_dynamic)
+        };
 
     let stats = DeflateStats {
         lz77_time,

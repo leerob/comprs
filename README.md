@@ -267,7 +267,7 @@ Note: tests and benches are validated on nightly toolchain; ensure `rustup overr
 ## Optional Features
 
 - `cli` - Build the command-line interface (adds `clap`, `png`, `jpeg-decoder`)
-- `simd` - Enable SIMD optimizations (requires nightly for some platforms)
+- `simd` *(default)* - Enable SIMD optimizations with runtime feature detection (falls back to scalar paths when unavailable)
 - `parallel` - Enable parallel processing with rayon
 
 ## Performance Notes

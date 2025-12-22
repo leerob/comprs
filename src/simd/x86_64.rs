@@ -302,7 +302,6 @@ pub unsafe fn adler32_avx2(data: &[u8]) -> u32 {
 /// Caller must ensure SSE2 is available on the current CPU.
 #[target_feature(enable = "sse2")]
 pub unsafe fn score_filter_sse2(filtered: &[u8]) -> u64 {
-    let zeros = _mm_setzero_si128();
     let mut sum = _mm_setzero_si128();
     let mut remaining = filtered;
 
@@ -321,7 +320,7 @@ pub unsafe fn score_filter_sse2(filtered: &[u8]) -> u64 {
         // For values 0-127: keep as is
         // For values 128-255: negate (256 - x)
         let high_bit = _mm_set1_epi8(-128i8); // 0x80
-        let is_negative = _mm_cmpgt_epi8(high_bit, v); // true for 0-127, false for 128-255
+        let _is_negative = _mm_cmpgt_epi8(high_bit, v); // true for 0-127, false for 128-255
 
         // Compute absolute value using: abs(x) = (x XOR mask) - mask where mask = x >> 7
         // But for bytes this is: for negative bytes, flip and add 1

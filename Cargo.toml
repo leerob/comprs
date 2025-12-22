@@ -18,7 +18,9 @@ path = "src/bin/comprs.rs"
 required-features = ["cli"]
 
 [features]
-default = []
+# Enable SIMD fast paths by default. These are guarded by runtime feature detection
+# and fall back to scalar implementations when unavailable.
+default = ["simd"]
 simd = []
 parallel = ["rayon"]
 cli = ["clap", "png", "jpeg-decoder"]
