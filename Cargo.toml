@@ -16,10 +16,12 @@ crate-type = ["cdylib", "rlib"]
 [[bin]]
 name = "comprs"
 path = "src/bin/comprs.rs"
-required-features = ["cli"]
+required-features = ["cli", "png", "jpeg"]
 
 [features]
-default = []
+default = ["png", "jpeg"]
+png = ["dep:png"]
+jpeg = []
 simd = []
 parallel = ["rayon"]
 cli = ["clap", "png", "jpeg-decoder"]

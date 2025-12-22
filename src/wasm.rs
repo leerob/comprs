@@ -25,7 +25,9 @@
 use wasm_bindgen::prelude::*;
 
 use crate::color::ColorType;
+#[cfg(feature = "jpeg")]
 use crate::jpeg::{self, JpegOptions, Subsampling};
+#[cfg(feature = "png")]
 use crate::png::{self, FilterStrategy, PngOptions};
 
 /// Convert a u8 color type code to ColorType enum.
@@ -68,13 +70,24 @@ pub fn encode_png(
     color_type: u8,
     compression_level: u8,
 ) -> Result<Vec<u8>, JsError> {
+    #[cfg(not(feature = "png"))]
+    {
+        let _ = (data, width, height, color_type, compression_level);
+        return Err(JsError::new(
+            "PNG support not enabled; build with feature \"png\"",
+        ));
+    }
+
+    #[cfg(feature = "png")]
     let color = color_type_from_u8(color_type)?;
 
+    #[cfg(feature = "png")]
     let options = PngOptions {
         compression_level,
         filter_strategy: FilterStrategy::Adaptive,
     };
 
+    #[cfg(feature = "png")]
     png::encode_with_options(data, width, height, color, &options)
         .map_err(|e| JsError::new(&e.to_string()))
 }
@@ -102,8 +115,18 @@ pub fn encode_png_with_filter(
     compression_level: u8,
     filter: u8,
 ) -> Result<Vec<u8>, JsError> {
+    #[cfg(not(feature = "png"))]
+    {
+        let _ = (data, width, height, color_type, compression_level, filter);
+        return Err(JsError::new(
+            "PNG support not enabled; build with feature \"png\"",
+        ));
+    }
+
+    #[cfg(feature = "png")]
     let color = color_type_from_u8(color_type)?;
 
+    #[cfg(feature = "png")]
     let filter_strategy = match filter {
         0 => FilterStrategy::None,
         1 => FilterStrategy::Sub,
@@ -125,6 +148,7 @@ pub fn encode_png_with_filter(
         filter_strategy,
     };
 
+    #[cfg(feature = "png")]
     png::encode_with_options(data, width, height, color, &options)
         .map_err(|e| JsError::new(&e.to_string()))
 }
@@ -132,8 +156,21 @@ pub fn encode_png_with_filter(
 /// Encode raw pixel data as PNG using the fast preset.
 #[wasm_bindgen(js_name = "encodePngFast")]
 pub fn encode_png_fast(data: &[u8], width: u32, height: u32, color_type: u8) -> Result<Vec<u8>, JsError> {
+    #[cfg(not(feature = "png"))]
+    {
+        let _ = (data, width, height, color_type);
+        return Err(JsError::new(
+            "PNG support not enabled; build with feature \"png\"",
+        ));
+    }
+
+    #[cfg(feature = "png")]
     let color = color_type_from_u8(color_type)?;
+
+    #[cfg(feature = "png")]
     let options = PngOptions::fast();
+
+    #[cfg(feature = "png")]
     png::encode_with_options(data, width, height, color, &options)
         .map_err(|e| JsError::new(&e.to_string()))
 }
@@ -141,8 +178,21 @@ pub fn encode_png_fast(data: &[u8], width: u32, height: u32, color_type: u8) -> 
 /// Encode raw pixel data as PNG using the max compression preset.
 #[wasm_bindgen(js_name = "encodePngMax")]
 pub fn encode_png_max(data: &[u8], width: u32, height: u32, color_type: u8) -> Result<Vec<u8>, JsError> {
+    #[cfg(not(feature = "png"))]
+    {
+        let _ = (data, width, height, color_type);
+        return Err(JsError::new(
+            "PNG support not enabled; build with feature \"png\"",
+        ));
+    }
+
+    #[cfg(feature = "png")]
     let color = color_type_from_u8(color_type)?;
+
+    #[cfg(feature = "png")]
     let options = PngOptions::max_compression();
+
+    #[cfg(feature = "png")]
     png::encode_with_options(data, width, height, color, &options)
         .map_err(|e| JsError::new(&e.to_string()))
 }
@@ -170,6 +220,15 @@ pub fn encode_jpeg(
     color_type: u8,
     subsampling_420: bool,
 ) -> Result<Vec<u8>, JsError> {
+    #[cfg(not(feature = "jpeg"))]
+    {
+        let _ = (data, width, height, quality, color_type, subsampling_420);
+        return Err(JsError::new(
+            "JPEG support not enabled; build with feature \"jpeg\"",
+        ));
+    }
+
+    #[cfg(feature = "jpeg")]
     let color = match color_type {
         0 => ColorType::Gray,
         2 => ColorType::Rgb,
@@ -181,6 +240,7 @@ pub fn encode_jpeg(
         }
     };
 
+    #[cfg(feature = "jpeg")]
     let options = JpegOptions {
         quality,
         subsampling: if subsampling_420 {
@@ -191,6 +251,7 @@ pub fn encode_jpeg(
         restart_interval: None,
     };
 
+    #[cfg(feature = "jpeg")]
     jpeg::encode_with_options(data, width, height, quality, color, &options)
         .map_err(|e| JsError::new(&e.to_string()))
 }
@@ -198,6 +259,15 @@ pub fn encode_jpeg(
 /// Encode raw pixel data as JPEG using the fast preset (Q=75, 4:2:0).
 #[wasm_bindgen(js_name = "encodeJpegFast")]
 pub fn encode_jpeg_fast(data: &[u8], width: u32, height: u32, color_type: u8) -> Result<Vec<u8>, JsError> {
+    #[cfg(not(feature = "jpeg"))]
+    {
+        let _ = (data, width, height, color_type);
+        return Err(JsError::new(
+            "JPEG support not enabled; build with feature \"jpeg\"",
+        ));
+    }
+
+    #[cfg(feature = "jpeg")]
     let color = match color_type {
         0 => ColorType::Gray,
         2 => ColorType::Rgb,
@@ -209,7 +279,10 @@ pub fn encode_jpeg_fast(data: &[u8], width: u32, height: u32, color_type: u8) ->
         }
     };
 
+    #[cfg(feature = "jpeg")]
     let options = JpegOptions::fast();
+
+    #[cfg(feature = "jpeg")]
     jpeg::encode_with_options(data, width, height, options.quality, color, &options)
         .map_err(|e| JsError::new(&e.to_string()))
 }
@@ -217,6 +290,15 @@ pub fn encode_jpeg_fast(data: &[u8], width: u32, height: u32, color_type: u8) ->
 /// Encode raw pixel data as JPEG using the max quality preset (Q=90, 4:4:4).
 #[wasm_bindgen(js_name = "encodeJpegMaxQuality")]
 pub fn encode_jpeg_max_quality(data: &[u8], width: u32, height: u32, color_type: u8) -> Result<Vec<u8>, JsError> {
+    #[cfg(not(feature = "jpeg"))]
+    {
+        let _ = (data, width, height, color_type);
+        return Err(JsError::new(
+            "JPEG support not enabled; build with feature \"jpeg\"",
+        ));
+    }
+
+    #[cfg(feature = "jpeg")]
     let color = match color_type {
         0 => ColorType::Gray,
         2 => ColorType::Rgb,
@@ -228,7 +310,10 @@ pub fn encode_jpeg_max_quality(data: &[u8], width: u32, height: u32, color_type:
         }
     };
 
+    #[cfg(feature = "jpeg")]
     let options = JpegOptions::max_quality();
+
+    #[cfg(feature = "jpeg")]
     jpeg::encode_with_options(data, width, height, options.quality, color, &options)
         .map_err(|e| JsError::new(&e.to_string()))
 }

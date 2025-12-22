@@ -40,7 +40,9 @@ pub mod bits;
 pub mod color;
 pub mod compress;
 pub mod error;
+#[cfg(feature = "jpeg")]
 pub mod jpeg;
+#[cfg(feature = "png")]
 pub mod png;
 
 #[cfg(feature = "simd")]
@@ -51,3 +53,6 @@ pub mod wasm;
 
 pub use color::ColorType;
 pub use error::{Error, Result};
+
+#[cfg(not(any(feature = "png", feature = "jpeg")))]
+compile_error!("At least one of the features `png` or `jpeg` must be enabled.");
