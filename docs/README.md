@@ -29,6 +29,12 @@ This documentation is designed to be accessible to developers who may not be fam
 | [Discrete Cosine Transform (DCT)](./dct.md) | The mathematical heart of JPEG compression |
 | [JPEG Quantization](./quantization.md) | How JPEG achieves its dramatic compression ratios |
 
+### Performance & Implementation
+
+| Document | Description |
+|----------|-------------|
+| [Performance Optimization](./performance-optimization.md) | Techniques for high-performance compression code |
+
 ## 🎯 Learning Path
 
 If you're new to image compression, we recommend reading the documents in this order:
@@ -41,6 +47,7 @@ If you're new to image compression, we recommend reading the documents in this o
 6. **[Discrete Cosine Transform](./dct.md)** - Mathematical foundations for JPEG
 7. **[JPEG Quantization](./quantization.md)** - Controlled information loss
 8. **[JPEG Encoding](./jpeg-encoding.md)** - Complete lossy pipeline
+9. **[Performance Optimization](./performance-optimization.md)** - Making it all fast
 
 ## 🔧 Implementation Details
 
@@ -75,3 +82,5 @@ Every algorithm in this library exploits some form of redundancy:
 | Quantization | Perceptual redundancy (humans can't see small changes) |
 
 Understanding these principles will help you reason about when and why each algorithm is effective.
+
+Beyond correctness, performance matters. See [Performance Optimization](./performance-optimization.md) for how we make these algorithms fast through techniques like SIMD, lookup tables, and algorithm selection.
