@@ -131,6 +131,10 @@ comprs photo.png -o photo.jpg --subsampling s420
 # PNG with specific filter strategy
 comprs input.jpg -o output.png --filter paeth
 
+# Adaptive fast (reduced trials) or sampled (every Nth row) strategies
+comprs input.jpg -o output.png --filter adaptive-fast
+comprs input.jpg -o output.png --filter adaptive-sampled --adaptive-sample-interval 8
+
 # Convert to grayscale
 comprs color.png -o gray.jpg --grayscale
 
@@ -147,7 +151,8 @@ comprs input.png -o output.jpg -v
 | `-q, --quality`     | JPEG quality (1-100)                                             | 85                         |
 | `-c, --compression` | PNG compression level (1-9)                                      | 6                          |
 | `--subsampling`     | JPEG chroma subsampling (`s444`, `s420`)                         | s444                       |
-| `--filter`          | PNG filter (`none`, `sub`, `up`, `average`, `paeth`, `adaptive`) | adaptive                   |
+| `--filter`          | PNG filter (`none`, `sub`, `up`, `average`, `paeth`, `adaptive`, `adaptive-fast`, `adaptive-sampled`) | adaptive                   |
+| `--adaptive-sample-interval` | Rows between full adaptive evaluations when using `adaptive-sampled` | 4 |
 | `--grayscale`       | Convert to grayscale                                             | false                      |
 | `-v, --verbose`     | Show detailed output                                             | false                      |
 
