@@ -74,6 +74,22 @@ let jpeg_data = jpeg::encode_with_options(&pixels, 1, 1, 85, ColorType::Rgb, &op
 - **Fast**: `JpegOptions::fast()` — Q=75 with 4:2:0 subsampling.
 - **Max quality**: `JpegOptions::max_quality()` — Q=90 with 4:4:4 subsampling.
 
+#### Huffman optimization
+
+For smaller JPEGs, enable per-image optimized Huffman tables (adds a prepass):
+
+```rust
+use comprs::jpeg::{self, JpegOptions, Subsampling};
+
+let opts = JpegOptions {
+    quality: 85,
+    subsampling: Subsampling::S444,
+    restart_interval: None,
+    optimize_huffman: true,
+};
+let jpeg = jpeg::encode_with_options(&pixels, width, height, 85, ColorType::Rgb, &opts)?;
+```
+
 ### WASM bindings (presets)
 
 When using the `wasm` feature and the provided JS bindings:

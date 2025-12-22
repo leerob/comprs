@@ -287,6 +287,25 @@ impl HuffmanTables {
 }
 ```
 
+### Optional: Optimized Huffman tables
+
+You can trade a small amount of extra work for smaller files by enabling a two-pass optimization that collects per-image symbol frequencies and builds custom Huffman tables:
+
+```rust
+use comprs::jpeg::{self, JpegOptions, Subsampling};
+
+let opts = JpegOptions {
+    quality: 85,
+    subsampling: Subsampling::S444,
+    restart_interval: None,
+    optimize_huffman: true, // enable optimization
+};
+
+let jpeg = jpeg::encode_with_options(&pixels, width, height, 85, ColorType::Rgb, &opts)?;
+```
+
+When enabled, the encoder first scans the image to gather DC/AC frequencies, builds canonical JPEG Huffman tables from those frequencies (respecting the 16-bit length limit), then encodes the image with the tailored tables. This typically reduces JPEG size without affecting quality, at the cost of a second pass over the image data.
+
 ## JPEG File Structure
 
 A JPEG file consists of **markers** and **segments**:
