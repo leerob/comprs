@@ -28,6 +28,11 @@ Then open the printed local URL (default `http://localhost:5173` or the next fre
 - `npm run build` — production build.
 - `npm run e2e` — headless Playwright smoke test (requires a dev server running on `http://localhost:4173` or set `BASE_URL`). Uploads `tests/fixtures/playground.png`, compresses, and asserts a download is available.
 
+## Shortcuts & accessibility
+- Drop zone is keyboard-activatable (Enter/Space) and also responds to Ctrl/Cmd+O to open the file picker (when not typing in an input).
+- Inline notices surface unsupported files instead of alerts.
+- “Clear completed” removes finished jobs and revokes object URLs to free memory.
+
 ## Notes
 - Only PNG and JPEG inputs are supported.
 - JPEG encodes drop alpha (RGBA → RGB) with optional 4:2:0 subsampling.
