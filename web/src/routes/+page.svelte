@@ -123,10 +123,14 @@
 				triggerFilePicker();
 			}
 
-			// ESC to go back
-			if (e.key === 'Escape' && viewMode === 'single' && hasMultipleJobs) {
-				viewMode = 'list';
-				selectedJobId = null;
+			// ESC to close modal (go back to list) or remove if single image
+			if (e.key === 'Escape' && viewMode === 'single' && selectedJobId) {
+				if (hasMultipleJobs) {
+					viewMode = 'list';
+					selectedJobId = null;
+				} else {
+					removeJob(selectedJobId);
+				}
 			}
 		};
 
@@ -170,16 +174,18 @@
 		const ctx = canvas.getContext('2d', { willReadFrequently: true });
 		if (!ctx) throw new Error('Canvas context not available.');
 		const bitmap = await createImageBitmap(file);
-		canvas.width = bitmap.width;
-		canvas.height = bitmap.height;
-		ctx.clearRect(0, 0, bitmap.width, bitmap.height);
+		const width = bitmap.width;
+		const height = bitmap.height;
+		canvas.width = width;
+		canvas.height = height;
+		ctx.clearRect(0, 0, width, height);
 		ctx.drawImage(bitmap, 0, 0);
-		const imageData = ctx.getImageData(0, 0, bitmap.width, bitmap.height);
+		const imageData = ctx.getImageData(0, 0, width, height);
 		bitmap.close();
 		return {
 			imageData,
-			width: bitmap.width,
-			height: bitmap.height,
+			width,
+			height,
 			hasAlpha: detectAlpha(imageData.data)
 		};
 	}
@@ -514,8 +520,15 @@
 
 				<button
 					class="absolute right-4 top-4 z-10 btn-ghost text-neutral-500 hover:text-red-400"
-					onclick={() => removeJob(selectedJob.id)}
-					title="Remove"
+					onclick={() => {
+						if (hasMultipleJobs) {
+							viewMode = 'list';
+							selectedJobId = null;
+						} else {
+							removeJob(selectedJob.id);
+						}
+					}}
+					title={hasMultipleJobs ? "Close" : "Remove"}
 				>
 					<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -583,7 +596,7 @@
 				{/if}
 
 				<!-- File info overlay -->
-				<div class="absolute left-4 bottom-20 text-xs text-neutral-500">
+				<div class="absolute left-4 bottom-4 text-xs text-neutral-500">
 					<p>{selectedJob.name}</p>
 					<p>{selectedJob.width} × {selectedJob.height}</p>
 				</div>
@@ -638,7 +651,7 @@
 							<!-- Savings -->
 							<div class="w-16 text-right">
 								{#if job.result}
-									<span class="text-sm font-medium text-terminal-green">
+									<span class="text-sm font-medium" class:text-terminal-green={job.result.savings >= 0} class:text-terminal-red={job.result.savings < 0}>
 										{formatSavings(job.result.savings)}
 									</span>
 								{:else if job.status === 'error'}
@@ -763,7 +776,7 @@
 					<span class="text-neutral-500">Compressed</span>
 					<span class="text-neutral-300">{formatBytes(totalCompressed)}</span>
 				</div>
-				<span class="font-medium text-terminal-green">{formatSavings(totalSavingsPct)}</span>
+				<span class="font-medium" class:text-terminal-green={totalSavingsPct >= 0} class:text-terminal-red={totalSavingsPct < 0}>{formatSavings(totalSavingsPct)}</span>
 			{:else if jobs.length > 0}
 				<span class="text-neutral-500">Compressing...</span>
 			{/if}
