@@ -279,7 +279,8 @@ fn adaptive_filter(
     let mut best_filter = FILTER_NONE;
     let mut best_score = u64::MAX;
     // Early-stop threshold: if a candidate beats this, skip remaining filters.
-    let early_stop = (row.len() as u64 / 8).saturating_add(1);
+    // Bias toward speed: allow earlier exit.
+    let early_stop = (row.len() as u64 / 4).saturating_add(1);
 
     // Try None filter first
     scratch.none.extend_from_slice(row);
@@ -374,8 +375,8 @@ fn adaptive_filter_fast(
     let mut best_filter = FILTER_SUB;
     let mut best_score = score_filter(&scratch.sub);
 
-    // Early stop threshold: very low score, stop immediately.
-    let early_stop = (row.len() as u64 / 10).saturating_add(1);
+    // Early stop threshold: very low score, stop immediately. Bias toward speed.
+    let early_stop = (row.len() as u64 / 8).saturating_add(1);
     if best_score <= early_stop {
         output.push(best_filter);
         output.extend_from_slice(&scratch.sub);
