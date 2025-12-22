@@ -124,3 +124,36 @@ pub fn filter_average(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<
         output.push(byte.wrapping_sub(avg));
     }
 }
+
+/// Apply Paeth filter (scalar fallback).
+#[inline]
+pub fn filter_paeth(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<u8>) {
+    for (i, &byte) in row.iter().enumerate() {
+        let left = if i >= bpp { row[i - bpp] } else { 0 };
+        let above = prev_row[i];
+        let upper_left = if i >= bpp { prev_row[i - bpp] } else { 0 };
+        let predicted = fallback_paeth_predictor(left, above, upper_left);
+        output.push(byte.wrapping_sub(predicted));
+    }
+}
+
+/// Scalar Paeth predictor used by both fallback and tests.
+#[inline]
+pub fn fallback_paeth_predictor(a: u8, b: u8, c: u8) -> u8 {
+    let a = a as i16;
+    let b = b as i16;
+    let c = c as i16;
+
+    let p = a + b - c;
+    let pa = (p - a).abs();
+    let pb = (p - b).abs();
+    let pc = (p - c).abs();
+
+    if pa <= pb && pa <= pc {
+        a as u8
+    } else if pb <= pc {
+        b as u8
+    } else {
+        c as u8
+    }
+}

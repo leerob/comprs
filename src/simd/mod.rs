@@ -140,3 +140,11 @@ pub fn filter_average(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<
 
     fallback::filter_average(row, prev_row, bpp, output)
 }
+
+/// Apply Paeth filter using the best available implementation.
+#[inline]
+pub fn filter_paeth(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<u8>) {
+    // Paeth predictor is branchy; keep scalar for correctness and portability.
+    // SIMD version exists but remains experimental until fully validated.
+    fallback::filter_paeth(row, prev_row, bpp, output)
+}

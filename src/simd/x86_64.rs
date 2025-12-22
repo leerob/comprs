@@ -1,6 +1,7 @@
 //! x86_64 SIMD implementations using SSE2, SSSE3, and SSE4.2.
 
 use std::arch::x86_64::*;
+use crate::simd::fallback::fallback_paeth_predictor;
 
 /// Compute Adler-32 checksum using SSSE3 instructions.
 ///
@@ -491,6 +492,182 @@ pub unsafe fn filter_sub_avx2(row: &[u8], bpp: usize, output: &mut Vec<u8>) {
 
     while i < rem_len {
         output.push(remaining[i].wrapping_sub(left[i]));
+        i += 1;
+    }
+}
+
+#[inline]
+unsafe fn abs_epi16_sse2(v: __m128i) -> __m128i {
+    let sign = _mm_srai_epi16(v, 15);
+    let xor = _mm_xor_si128(v, sign);
+    _mm_sub_epi16(xor, sign)
+}
+
+#[inline]
+unsafe fn paeth_predict_128(left: __m128i, above: __m128i, upper_left: __m128i) -> __m128i {
+    let zero = _mm_setzero_si128();
+
+    let a_lo = _mm_unpacklo_epi8(left, zero);
+    let b_lo = _mm_unpacklo_epi8(above, zero);
+    let c_lo = _mm_unpacklo_epi8(upper_left, zero);
+
+    let a_hi = _mm_unpackhi_epi8(left, zero);
+    let b_hi = _mm_unpackhi_epi8(above, zero);
+    let c_hi = _mm_unpackhi_epi8(upper_left, zero);
+
+    let p_lo = _mm_sub_epi16(_mm_add_epi16(a_lo, b_lo), c_lo);
+    let p_hi = _mm_sub_epi16(_mm_add_epi16(a_hi, b_hi), c_hi);
+
+    let pa_lo = abs_epi16_sse2(_mm_sub_epi16(p_lo, a_lo));
+    let pb_lo = abs_epi16_sse2(_mm_sub_epi16(p_lo, b_lo));
+    let pc_lo = abs_epi16_sse2(_mm_sub_epi16(p_lo, c_lo));
+
+    let pa_hi = abs_epi16_sse2(_mm_sub_epi16(p_hi, a_hi));
+    let pb_hi = abs_epi16_sse2(_mm_sub_epi16(p_hi, b_hi));
+    let pc_hi = abs_epi16_sse2(_mm_sub_epi16(p_hi, c_hi));
+
+    let mask_a_lo = _mm_and_si128(_mm_cmpgt_epi16(pb_lo, pa_lo), _mm_cmpgt_epi16(pc_lo, pa_lo));
+    let mask_b_lo = _mm_and_si128(_mm_cmpgt_epi16(pa_lo, pb_lo), _mm_cmpgt_epi16(pc_lo, pb_lo));
+    let mask_c_lo = _mm_andnot_si128(_mm_or_si128(mask_a_lo, mask_b_lo), _mm_set1_epi16(-1));
+
+    let mask_a_hi = _mm_and_si128(_mm_cmpgt_epi16(pb_hi, pa_hi), _mm_cmpgt_epi16(pc_hi, pa_hi));
+    let mask_b_hi = _mm_and_si128(_mm_cmpgt_epi16(pa_hi, pb_hi), _mm_cmpgt_epi16(pc_hi, pb_hi));
+    let mask_c_hi = _mm_andnot_si128(_mm_or_si128(mask_a_hi, mask_b_hi), _mm_set1_epi16(-1));
+
+    let pred_lo = _mm_or_si128(
+        _mm_or_si128(_mm_and_si128(mask_a_lo, a_lo), _mm_and_si128(mask_b_lo, b_lo)),
+        _mm_and_si128(mask_c_lo, c_lo),
+    );
+    let pred_hi = _mm_or_si128(
+        _mm_or_si128(_mm_and_si128(mask_a_hi, a_hi), _mm_and_si128(mask_b_hi, b_hi)),
+        _mm_and_si128(mask_c_hi, c_hi),
+    );
+
+    _mm_packus_epi16(pred_lo, pred_hi)
+}
+
+/// Apply Paeth filter using SSE2 (experimental; currently gated off in dispatch).
+#[target_feature(enable = "sse2")]
+pub unsafe fn filter_paeth_sse2(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<u8>) {
+    let len = row.len();
+    output.reserve(len);
+
+    // First bpp bytes scalar
+    for i in 0..bpp.min(len) {
+        let left = 0;
+        let above = prev_row[i];
+        let upper_left = 0;
+        let predicted = fallback_paeth_predictor(left, above, upper_left);
+        output.push(row[i].wrapping_sub(predicted));
+    }
+
+    if len <= bpp {
+        return;
+    }
+
+    let mut i = bpp;
+    while i + 16 <= len {
+        let curr = _mm_loadu_si128(row[i..].as_ptr() as *const __m128i);
+        let left = _mm_loadu_si128(row[i - bpp..].as_ptr() as *const __m128i);
+        let above = _mm_loadu_si128(prev_row[i..].as_ptr() as *const __m128i);
+        let upper_left = _mm_loadu_si128(prev_row[i - bpp..].as_ptr() as *const __m128i);
+
+        let predicted = paeth_predict_128(left, above, upper_left);
+        let diff = _mm_sub_epi8(curr, predicted);
+
+        let mut buf = [0u8; 16];
+        _mm_storeu_si128(buf.as_mut_ptr() as *mut __m128i, diff);
+        output.extend_from_slice(&buf);
+        i += 16;
+    }
+
+    while i < len {
+        let left = row[i - bpp];
+        let above = prev_row[i];
+        let upper_left = prev_row[i - bpp];
+        let predicted = fallback_paeth_predictor(left, above, upper_left);
+        output.push(row[i].wrapping_sub(predicted));
+        i += 1;
+    }
+}
+
+/// Apply Paeth filter using AVX2 (experimental; currently gated off in dispatch).
+#[target_feature(enable = "avx2")]
+pub unsafe fn filter_paeth_avx2(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<u8>) {
+    let len = row.len();
+    output.reserve(len);
+
+    for i in 0..bpp.min(len) {
+        let left = 0;
+        let above = prev_row[i];
+        let upper_left = 0;
+        let predicted = fallback_paeth_predictor(left, above, upper_left);
+        output.push(row[i].wrapping_sub(predicted));
+    }
+
+    if len <= bpp {
+        return;
+    }
+
+    let mut i = bpp;
+    while i + 32 <= len {
+        let curr = _mm256_loadu_si256(row[i..].as_ptr() as *const __m256i);
+        let left = _mm256_loadu_si256(row[i - bpp..].as_ptr() as *const __m256i);
+        let above = _mm256_loadu_si256(prev_row[i..].as_ptr() as *const __m256i);
+        let upper_left = _mm256_loadu_si256(prev_row[i - bpp..].as_ptr() as *const __m256i);
+
+        let zero = _mm256_setzero_si256();
+        let a_lo = _mm256_unpacklo_epi8(left, zero);
+        let b_lo = _mm256_unpacklo_epi8(above, zero);
+        let c_lo = _mm256_unpacklo_epi8(upper_left, zero);
+
+        let a_hi = _mm256_unpackhi_epi8(left, zero);
+        let b_hi = _mm256_unpackhi_epi8(above, zero);
+        let c_hi = _mm256_unpackhi_epi8(upper_left, zero);
+
+        let p_lo = _mm256_sub_epi16(_mm256_add_epi16(a_lo, b_lo), c_lo);
+        let p_hi = _mm256_sub_epi16(_mm256_add_epi16(a_hi, b_hi), c_hi);
+
+        let pa_lo = _mm256_abs_epi16(_mm256_sub_epi16(p_lo, a_lo));
+        let pb_lo = _mm256_abs_epi16(_mm256_sub_epi16(p_lo, b_lo));
+        let pc_lo = _mm256_abs_epi16(_mm256_sub_epi16(p_lo, c_lo));
+
+        let pa_hi = _mm256_abs_epi16(_mm256_sub_epi16(p_hi, a_hi));
+        let pb_hi = _mm256_abs_epi16(_mm256_sub_epi16(p_hi, b_hi));
+        let pc_hi = _mm256_abs_epi16(_mm256_sub_epi16(p_hi, c_hi));
+
+        let mask_a_lo = _mm256_and_si256(_mm256_cmpgt_epi16(pb_lo, pa_lo), _mm256_cmpgt_epi16(pc_lo, pa_lo));
+        let mask_b_lo = _mm256_and_si256(_mm256_cmpgt_epi16(pa_lo, pb_lo), _mm256_cmpgt_epi16(pc_lo, pb_lo));
+        let mask_c_lo = _mm256_andnot_si256(_mm256_or_si256(mask_a_lo, mask_b_lo), _mm256_set1_epi16(-1));
+
+        let mask_a_hi = _mm256_and_si256(_mm256_cmpgt_epi16(pb_hi, pa_hi), _mm256_cmpgt_epi16(pc_hi, pa_hi));
+        let mask_b_hi = _mm256_and_si256(_mm256_cmpgt_epi16(pa_hi, pb_hi), _mm256_cmpgt_epi16(pc_hi, pb_hi));
+        let mask_c_hi = _mm256_andnot_si256(_mm256_or_si256(mask_a_hi, mask_b_hi), _mm256_set1_epi16(-1));
+
+        let pred_lo = _mm256_or_si256(
+            _mm256_or_si256(_mm256_and_si256(mask_a_lo, a_lo), _mm256_and_si256(mask_b_lo, b_lo)),
+            _mm256_and_si256(mask_c_lo, c_lo),
+        );
+        let pred_hi = _mm256_or_si256(
+            _mm256_or_si256(_mm256_and_si256(mask_a_hi, a_hi), _mm256_and_si256(mask_b_hi, b_hi)),
+            _mm256_and_si256(mask_c_hi, c_hi),
+        );
+
+        let predicted = _mm256_packus_epi16(pred_lo, pred_hi);
+        let diff = _mm256_sub_epi8(curr, predicted);
+
+        let mut buf = [0u8; 32];
+        _mm256_storeu_si256(buf.as_mut_ptr() as *mut __m256i, diff);
+        output.extend_from_slice(&buf);
+        i += 32;
+    }
+
+    while i < len {
+        let left = row[i - bpp];
+        let above = prev_row[i];
+        let upper_left = prev_row[i - bpp];
+        let predicted = fallback_paeth_predictor(left, above, upper_left);
+        output.push(row[i].wrapping_sub(predicted));
         i += 1;
     }
 }

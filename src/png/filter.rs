@@ -191,36 +191,31 @@ fn filter_average(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<u8>)
 
 /// Paeth filter: difference from Paeth predictor.
 fn filter_paeth(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<u8>) {
-    for (i, &byte) in row.iter().enumerate() {
-        let left = if i >= bpp { row[i - bpp] } else { 0 };
-        let above = prev_row[i];
-        let upper_left = if i >= bpp { prev_row[i - bpp] } else { 0 };
-        let predicted = paeth_predictor(left, above, upper_left);
-        output.push(byte.wrapping_sub(predicted));
+    #[cfg(feature = "simd")]
+    {
+        simd::filter_paeth(row, prev_row, bpp, output);
+        return;
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        for (i, &byte) in row.iter().enumerate() {
+            let left = if i >= bpp { row[i - bpp] } else { 0 };
+            let above = prev_row[i];
+            let upper_left = if i >= bpp { prev_row[i - bpp] } else { 0 };
+            let predicted = paeth_predictor(left, above, upper_left);
+            output.push(byte.wrapping_sub(predicted));
+        }
     }
 }
 
 /// Paeth predictor function.
 ///
 /// Selects the value (a, b, or c) closest to p = a + b - c.
+#[allow(dead_code)]
 #[inline]
 fn paeth_predictor(a: u8, b: u8, c: u8) -> u8 {
-    let a = a as i16;
-    let b = b as i16;
-    let c = c as i16;
-
-    let p = a + b - c;
-    let pa = (p - a).abs();
-    let pb = (p - b).abs();
-    let pc = (p - c).abs();
-
-    if pa <= pb && pa <= pc {
-        a as u8
-    } else if pb <= pc {
-        b as u8
-    } else {
-        c as u8
-    }
+    crate::simd::fallback::fallback_paeth_predictor(a, b, c)
 }
 
 /// Adaptive filter selection: try all filters and pick the best.
