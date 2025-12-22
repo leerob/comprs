@@ -200,6 +200,42 @@ pub fn deflate(data: &[u8], level: u8) -> Vec<u8> {
     }
 }
 
+/// Compress data using DEFLATE algorithm with packed tokens (non-reusable).
+///
+/// This is an experimental fast path that avoids `Token` allocations by
+/// emitting packed tokens directly into the Huffman encoder.
+pub fn deflate_packed(data: &[u8], level: u8) -> Vec<u8> {
+    if data.is_empty() {
+        // Empty input: just output empty final block
+        let mut writer = BitWriter64::with_capacity(16);
+        writer.write_bits(1, 1); // BFINAL = 1
+        writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
+
+        // Write end-of-block symbol (256)
+        let (code, len) = fixed_literal_codes_rev()[256];
+        writer.write_bits(code, len);
+
+        return writer.finish();
+    }
+
+    // Use LZ77 to find matches
+    let mut lz77 = Lz77Compressor::new(level);
+    let tokens = lz77.compress_packed(data);
+
+    // Rough output estimate to reduce reallocations.
+    let est_bytes = estimated_deflate_size(data.len(), level);
+
+    // Choose between fixed and dynamic Huffman based on output size.
+    let fixed = encode_fixed_huffman_packed_with_capacity(&tokens, est_bytes);
+    let dynamic = encode_dynamic_huffman_packed_with_capacity(&tokens, est_bytes);
+
+    if dynamic.len() < fixed.len() {
+        dynamic
+    } else {
+        fixed
+    }
+}
+
 /// Reusable DEFLATE encoder that minimizes allocations by reusing buffers.
 pub struct Deflater {
     level: u8,
@@ -459,6 +495,35 @@ pub fn deflate_zlib(data: &[u8], level: u8) -> Vec<u8> {
     }
 
     let deflated = deflate(data, level);
+
+    let use_stored = should_use_stored(data.len(), deflated.len());
+
+    let mut output = Vec::with_capacity(deflated.len().min(data.len()) + 32);
+    output.extend_from_slice(&zlib_header(level));
+
+    if use_stored {
+        let stored_blocks = deflate_stored(data);
+        output.extend_from_slice(&stored_blocks);
+    } else {
+        output.extend_from_slice(&deflated);
+    }
+
+    output.extend_from_slice(&adler32(data).to_be_bytes());
+    output
+}
+
+/// Compress data with packed tokens and wrap it in a zlib container.
+pub fn deflate_zlib_packed(data: &[u8], level: u8) -> Vec<u8> {
+    // For empty input, keep the fixed-Huffman minimal block.
+    if data.is_empty() {
+        let mut output = Vec::with_capacity(8);
+        output.extend_from_slice(&zlib_header(level));
+        output.extend_from_slice(&deflate_packed(data, level));
+        output.extend_from_slice(&adler32(data).to_be_bytes());
+        return output;
+    }
+
+    let deflated = deflate_packed(data, level);
 
     let use_stored = should_use_stored(data.len(), deflated.len());
 
@@ -1171,6 +1236,26 @@ mod tests {
             let decoded = decompress_zlib(&encoded);
             assert_eq!(decoded, data, "mismatch at len={}", len);
         }
+    }
+
+    #[test]
+    fn test_deflate_zlib_packed_roundtrip_random_small() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1001);
+        for len in [0usize, 1, 2, 5, 32, 128, 1024, 4096] {
+            let mut data = vec![0u8; len];
+            rng.fill(data.as_mut_slice());
+            let encoded = deflate_zlib_packed(&data, 6);
+            let decoded = decompress_zlib(&encoded);
+            assert_eq!(decoded, data, "mismatch at len={}", len);
+        }
+    }
+
+    #[test]
+    fn test_deflate_zlib_packed_matches_standard_output() {
+        let data = b"The quick brown fox jumps over the lazy dog. Pack me tightly!";
+        let std_encoded = deflate_zlib(data, 6);
+        let packed_encoded = deflate_zlib_packed(data, 6);
+        assert_eq!(std_encoded, packed_encoded);
     }
 
     #[test]
