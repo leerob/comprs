@@ -9,6 +9,7 @@ use rayon::prelude::*;
 
 #[cfg(feature = "simd")]
 use crate::simd;
+use crate::paeth;
 
 /// Scratch buffers reused for adaptive filtering to reduce per-row allocations.
 struct AdaptiveScratch {
@@ -277,7 +278,7 @@ fn filter_paeth(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<u8>) {
 #[allow(dead_code)]
 #[inline]
 fn paeth_predictor(a: u8, b: u8, c: u8) -> u8 {
-    crate::simd::fallback::fallback_paeth_predictor(a, b, c)
+    paeth::paeth_predictor(a, b, c)
 }
 
 /// Adaptive filter selection: try all filters and pick the best.

@@ -40,6 +40,7 @@ pub mod bits;
 pub mod color;
 pub mod compress;
 pub mod error;
+pub mod paeth;
 pub mod jpeg;
 pub mod png;
 

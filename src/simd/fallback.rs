@@ -140,20 +140,5 @@ pub fn filter_paeth(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<u8
 /// Scalar Paeth predictor used by both fallback and tests.
 #[inline]
 pub fn fallback_paeth_predictor(a: u8, b: u8, c: u8) -> u8 {
-    let a = a as i16;
-    let b = b as i16;
-    let c = c as i16;
-
-    let p = a + b - c;
-    let pa = (p - a).abs();
-    let pb = (p - b).abs();
-    let pc = (p - c).abs();
-
-    if pa <= pb && pa <= pc {
-        a as u8
-    } else if pb <= pc {
-        b as u8
-    } else {
-        c as u8
-    }
+    crate::paeth::paeth_predictor(a, b, c)
 }
