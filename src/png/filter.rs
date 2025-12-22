@@ -83,7 +83,9 @@ pub fn apply_filters(
     if area >= 16_384
         && matches!(
             strategy,
-            FilterStrategy::Adaptive | FilterStrategy::AdaptiveFast | FilterStrategy::AdaptiveSampled { .. }
+            FilterStrategy::Adaptive
+                | FilterStrategy::AdaptiveFast
+                | FilterStrategy::AdaptiveSampled { .. }
         )
     {
         let first_row = &data[..row_bytes];
@@ -97,7 +99,12 @@ pub fn apply_filters(
     {
         // Parallel gains when rows are numerous; avoid overhead on tiny images.
         if height > 32
-            && matches!(strategy, FilterStrategy::Adaptive | FilterStrategy::AdaptiveFast | FilterStrategy::AdaptiveSampled { .. })
+            && matches!(
+                strategy,
+                FilterStrategy::Adaptive
+                    | FilterStrategy::AdaptiveFast
+                    | FilterStrategy::AdaptiveSampled { .. }
+            )
         {
             return apply_filters_parallel(
                 data,
@@ -115,7 +122,7 @@ pub fn apply_filters(
     let mut prev_row: &[u8] = &zero_row;
     let mut adaptive_scratch = AdaptiveScratch::new(row_bytes);
     let mut last_filter: u8 = FILTER_PAETH; // default guess for sampled reuse
-    // Track last used filter to bias adaptive_fast toward recent winner.
+                                            // Track last used filter to bias adaptive_fast toward recent winner.
     let mut last_adaptive_filter: Option<u8> = None;
 
     for y in 0..height as usize {
@@ -204,7 +211,6 @@ fn filter_sub(row: &[u8], bpp: usize, output: &mut Vec<u8>) {
     #[cfg(feature = "simd")]
     {
         simd::filter_sub(row, bpp, output);
-        return;
     }
 
     #[cfg(not(feature = "simd"))]
@@ -221,7 +227,6 @@ fn filter_up(row: &[u8], prev_row: &[u8], output: &mut Vec<u8>) {
     #[cfg(feature = "simd")]
     {
         simd::filter_up(row, prev_row, output);
-        return;
     }
 
     #[cfg(not(feature = "simd"))]
@@ -237,7 +242,6 @@ fn filter_average(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<u8>)
     #[cfg(feature = "simd")]
     {
         simd::filter_average(row, prev_row, bpp, output);
-        return;
     }
 
     #[cfg(not(feature = "simd"))]
@@ -256,7 +260,6 @@ fn filter_paeth(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<u8>) {
     #[cfg(feature = "simd")]
     {
         simd::filter_paeth(row, prev_row, bpp, output);
-        return;
     }
 
     #[cfg(not(feature = "simd"))]
@@ -277,7 +280,22 @@ fn filter_paeth(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<u8>) {
 #[allow(dead_code)]
 #[inline]
 fn paeth_predictor(a: u8, b: u8, c: u8) -> u8 {
-    crate::simd::fallback::fallback_paeth_predictor(a, b, c)
+    let a_i = a as i16;
+    let b_i = b as i16;
+    let c_i = c as i16;
+
+    let p = a_i + b_i - c_i;
+    let pa = (p - a_i).abs();
+    let pb = (p - b_i).abs();
+    let pc = (p - c_i).abs();
+
+    if pa <= pb && pa <= pc {
+        a
+    } else if pb <= pc {
+        b
+    } else {
+        c
+    }
 }
 
 /// Adaptive filter selection: try all filters and pick the best.
@@ -553,6 +571,7 @@ fn score_filter(filtered: &[u8]) -> u64 {
 /// Simple high-entropy detector:
 /// - Fewer than 1% of neighboring bytes are equal (no runs)
 /// - The most common delta between neighbors accounts for <10% of positions
+///
 /// This avoids misclassifying smooth gradients (constant delta).
 /// Guarded to rows >= 1024 bytes to avoid noise.
 fn is_high_entropy_row(row: &[u8]) -> bool {

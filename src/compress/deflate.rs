@@ -114,7 +114,7 @@ const STORED_LITERAL_ONLY_BYTES: usize = 8 * 1024;
 
 thread_local! {
     /// Thread-local pool of reusable deflaters keyed by compression level.
-    static DEFLATE_REUSE: RefCell<Vec<Option<Deflater>>> = RefCell::new(Vec::new());
+    static DEFLATE_REUSE: RefCell<Vec<Option<Deflater>>> = const { RefCell::new(Vec::new()) };
 }
 
 #[inline]
@@ -206,8 +206,7 @@ const DISTANCE_LOOKUP_SMALL: [u8; 512] = {
 fn length_code(length: u16) -> (u16, u8, u16) {
     debug_assert!(
         (MIN_MATCH_LENGTH as u16..=MAX_MATCH_LENGTH as u16).contains(&length),
-        "Invalid length: {}",
-        length
+        "Invalid length: {length}",
     );
 
     let idx = (length - 3) as usize;
@@ -221,7 +220,7 @@ fn length_code(length: u16) -> (u16, u8, u16) {
 /// Uses lookup table for small distances, bit manipulation for large.
 #[inline]
 fn distance_code(distance: u16) -> (u16, u8, u16) {
-    debug_assert!(distance >= 1 && distance <= 32768, "Invalid distance");
+    debug_assert!((1..=32768).contains(&distance), "Invalid distance");
 
     let code_idx = if distance < 512 {
         // Use direct lookup for small distances (covers codes 0-17)
@@ -811,7 +810,7 @@ fn should_use_stored(data_len: usize, deflated_len: usize) -> bool {
 }
 
 /// Detect high-entropy (likely incompressible) data by sampling for repeated n-grams.
-/// 
+///
 /// The previous heuristic (equal neighbors + delta histogram) failed on repetitive text
 /// because text has few adjacent equal bytes and many different character transitions,
 /// even when highly compressible by LZ77.
@@ -838,7 +837,7 @@ fn is_high_entropy_data(data: &[u8]) -> bool {
     for window in sample.windows(4) {
         let val = u32::from_le_bytes([window[0], window[1], window[2], window[3]]);
         let hash = ((val.wrapping_mul(0x1E35_A7BD)) >> 20) as usize & (HASH_SIZE - 1);
-        
+
         if seen[hash] {
             collisions += 1;
         } else {
@@ -849,12 +848,12 @@ fn is_high_entropy_data(data: &[u8]) -> bool {
     // For truly random data, we expect very few hash collisions in a 4K table
     // when sampling 8K 4-grams (birthday paradox gives ~50% fill).
     // Compressible data will have many repeated patterns causing high collision rate.
-    // 
+    //
     // If collision rate is < 5%, data is likely random/incompressible.
     // This threshold is conservative to avoid false positives on compressible data.
     let total_4grams = sample_len.saturating_sub(3);
     let collision_rate = collisions as f32 / total_4grams as f32;
-    
+
     collision_rate < 0.05
 }
 
@@ -1343,12 +1342,12 @@ static FIXED_DIST_REV: LazyLock<[(u32, u8); 32]> = LazyLock::new(|| {
 
 #[inline]
 fn fixed_literal_codes_rev() -> &'static [(u32, u8); 288] {
-    &*FIXED_LIT_REV
+    &FIXED_LIT_REV
 }
 
 #[inline]
 fn fixed_distance_codes_rev() -> &'static [(u32, u8); 32] {
-    &*FIXED_DIST_REV
+    &FIXED_DIST_REV
 }
 
 /// Build the two-byte zlib header for the given compression level.
@@ -1358,9 +1357,9 @@ fn zlib_header(level: u8) -> [u8; 2] {
 
     // Map level to FLEVEL (informative only)
     let flevel = match level {
-        0 | 1 | 2 => 1, // fast
-        3..=6 => 2,     // default
-        _ => 3,         // maximum
+        0..=2 => 1, // fast
+        3..=6 => 2, // default
+        _ => 3,     // maximum
     };
 
     let mut flg: u8 = flevel << 6; // FDICT=0
@@ -1511,7 +1510,7 @@ mod tests {
             rng.fill(data.as_mut_slice());
             let encoded = deflate_zlib(&data, 6);
             let decoded = decompress_zlib(&encoded);
-            assert_eq!(decoded, data, "mismatch at len={}", len);
+            assert_eq!(decoded, data, "mismatch at len={len}");
         }
     }
 
@@ -1523,7 +1522,7 @@ mod tests {
             rng.fill(data.as_mut_slice());
             let encoded = deflate_zlib_packed(&data, 6);
             let decoded = decompress_zlib(&encoded);
-            assert_eq!(decoded, data, "mismatch at len={}", len);
+            assert_eq!(decoded, data, "mismatch at len={len}");
         }
     }
 
@@ -1596,19 +1595,21 @@ mod tests {
     fn test_dynamic_huffman_decode() {
         use flate2::read::DeflateDecoder;
         use std::io::Read;
-        
+
         // Data that produces dynamic Huffman output
         let data = b"The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog.";
         let mut lz = Lz77Compressor::new(6);
         let tokens = lz.compress(data);
-        
+
         let dynamic_out = encode_dynamic_huffman(&tokens);
-        
+
         // Verify it decodes correctly
         let mut decoder = DeflateDecoder::new(&dynamic_out[..]);
         let mut decoded = Vec::new();
-        decoder.read_to_end(&mut decoded).expect("dynamic Huffman should decode");
-        
+        decoder
+            .read_to_end(&mut decoded)
+            .expect("dynamic Huffman should decode");
+
         assert_eq!(decoded, data.to_vec(), "dynamic Huffman roundtrip failed");
     }
 }

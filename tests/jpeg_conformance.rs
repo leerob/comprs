@@ -3,6 +3,12 @@
 //! Tests JPEG encoding for correctness and validates
 //! that encoded images contain proper markers.
 
+#![allow(
+    clippy::uninlined_format_args,
+    clippy::needless_range_loop,
+    clippy::unnecessary_cast
+)]
+
 use comprs::{jpeg, ColorType};
 use image::GenericImageView;
 use proptest::prelude::*;

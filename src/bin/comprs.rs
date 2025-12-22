@@ -249,11 +249,9 @@ fn decode_pnm(path: &PathBuf) -> Result<DecodedImage, Box<dyn std::error::Error>
         "P5" => (ColorType::Gray, "PGM"),
         "P6" => (ColorType::Rgb, "PPM"),
         _ => {
-            return Err(format!(
-                "Unsupported format '{}'. Expected P5 (PGM) or P6 (PPM)",
-                magic
+            return Err(
+                format!("Unsupported format '{magic}'. Expected P5 (PGM) or P6 (PPM)",).into(),
             )
-            .into())
         }
     };
 
@@ -272,11 +270,7 @@ fn decode_pnm(path: &PathBuf) -> Result<DecodedImage, Box<dyn std::error::Error>
     let max_val: u32 = token.parse()?;
 
     if max_val != 255 {
-        return Err(format!(
-            "Unsupported max value {}. Only 8-bit (255) supported",
-            max_val
-        )
-        .into());
+        return Err(format!("Unsupported max value {max_val}. Only 8-bit (255) supported",).into());
     }
 
     // Read pixel data
@@ -341,7 +335,7 @@ fn load_image(path: &PathBuf) -> Result<DecodedImage, Box<dyn std::error::Error>
         "png" => decode_png(path),
         "jpeg" => decode_jpeg(path),
         "ppm" | "pgm" => decode_pnm(path),
-        _ => Err(format!("Unsupported format: {}", format).into()),
+        _ => Err(format!("Unsupported format: {format}").into()),
     }
 }
 
@@ -405,11 +399,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let input_format = img.input_format;
 
     if args.verbose {
-        eprintln!("Loaded: {:?}", args.input);
-        eprintln!("  Input format: {}", input_format);
-        eprintln!("  Dimensions: {}x{}", width, height);
-        eprintln!("  Color type: {:?}", img.color_type);
-        eprintln!("  Load time: {:.2?}", load_time);
+        let input = &args.input;
+        let ct = img.color_type;
+        eprintln!("Loaded: {input:?}");
+        eprintln!("  Input format: {input_format}");
+        eprintln!("  Dimensions: {width}x{height}");
+        eprintln!("  Color type: {ct:?}");
+        eprintln!("  Load time: {load_time:.2?}");
     }
 
     // Determine output format
@@ -419,7 +415,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             OutputFormat::Png => "png",
             OutputFormat::Jpeg | OutputFormat::Jpg => "jpg",
         };
-        path.set_extension(format!("compressed.{}", ext));
+        path.set_extension(format!("compressed.{ext}"));
         path
     });
 
@@ -515,20 +511,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     if args.verbose {
-        eprintln!("Output: {:?}", output_path);
-        eprintln!("  Format: {:?}", format);
-        eprintln!("  Color type: {:?}", color_type);
+        eprintln!("Output: {output_path:?}");
+        eprintln!("  Format: {format:?}");
+        eprintln!("  Color type: {color_type:?}");
         match format {
             OutputFormat::Png => {
-                eprintln!("  Compression level: {}", args.compression);
-                eprintln!("  Filter: {:?}", args.filter);
+                let compression = args.compression;
+                let filter = &args.filter;
+                eprintln!("  Compression level: {compression}");
+                eprintln!("  Filter: {filter:?}");
             }
             OutputFormat::Jpeg | OutputFormat::Jpg => {
-                eprintln!("  Quality: {}", args.quality);
-                eprintln!("  Subsampling: {:?}", args.subsampling);
+                let quality = args.quality;
+                let subsampling = &args.subsampling;
+                eprintln!("  Quality: {quality}");
+                eprintln!("  Subsampling: {subsampling:?}");
             }
         }
-        eprintln!("  Encode time: {:.2?}", encode_time);
+        eprintln!("  Encode time: {encode_time:.2?}");
         eprintln!(
             "  Size: {} -> {} ({:.1}%)",
             format_size(input_size),
@@ -567,10 +567,12 @@ fn format_size(bytes: u64) -> String {
     const MB: u64 = KB * 1024;
 
     if bytes >= MB {
-        format!("{:.2} MB", bytes as f64 / MB as f64)
+        let mb = bytes as f64 / MB as f64;
+        format!("{mb:.2} MB")
     } else if bytes >= KB {
-        format!("{:.2} KB", bytes as f64 / KB as f64)
+        let kb = bytes as f64 / KB as f64;
+        format!("{kb:.2} KB")
     } else {
-        format!("{} B", bytes)
+        format!("{bytes} B")
     }
 }

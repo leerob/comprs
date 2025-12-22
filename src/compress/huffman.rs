@@ -336,9 +336,7 @@ mod tests {
                     assert_ne!(
                         prefix_i & mask,
                         prefix_j & mask,
-                        "Codes {} and {} share prefix",
-                        i,
-                        j
+                        "Codes {i} and {j} share prefix",
                     );
                 }
             }

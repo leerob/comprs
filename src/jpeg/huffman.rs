@@ -241,9 +241,7 @@ pub fn encode_block(
     // Encode AC coefficients
     let mut zero_run = 0;
 
-    for i in 1..64 {
-        let ac = zigzag[i];
-
+    for &ac in zigzag.iter().skip(1) {
         if ac == 0 {
             zero_run += 1;
         } else {

@@ -4,27 +4,27 @@
 //! The AAN algorithm uses only 5 multiplications and 29 additions per 8-point DCT,
 //! compared to 64 multiplications in the naive approach.
 
-use std::f32::consts::PI;
+use std::f32::consts::{FRAC_1_SQRT_2, PI};
 
 // AAN DCT constants - precomputed trigonometric values
 // These are the scale factors for the AAN algorithm
-const A1: f32 = 0.7071067811865476; // cos(4*pi/16) = 1/sqrt(2)
-const A2: f32 = 0.5411961001461969; // cos(6*pi/16) - cos(2*pi/16)
-const A3: f32 = 0.7071067811865476; // cos(4*pi/16) = 1/sqrt(2)
-const A4: f32 = 1.3065629648763766; // cos(2*pi/16) + cos(6*pi/16)
-const A5: f32 = 0.3826834323650898; // cos(6*pi/16)
+const A1: f32 = FRAC_1_SQRT_2; // cos(4*pi/16) = 1/sqrt(2)
+const A2: f32 = 0.541_196_1; // cos(6*pi/16) - cos(2*pi/16)
+const A3: f32 = FRAC_1_SQRT_2; // cos(4*pi/16) = 1/sqrt(2)
+const A4: f32 = 1.306_562_9; // cos(2*pi/16) + cos(6*pi/16)
+const A5: f32 = 0.382_683_43; // cos(6*pi/16)
 
 // Post-scaling factors for the AAN algorithm to produce correctly normalized DCT output
 // These are: s[k] = 1/(4 * c[k]) where c[k] = cos(k*pi/16) for k > 0, c[0] = 1/sqrt(2)
 const S: [f32; 8] = [
-    0.35355339059327373, // 1/(2*sqrt(2))
-    0.25489778955207960, // 1/(4*cos(pi/16))
-    0.27059805007309850, // 1/(4*cos(2*pi/16))
-    0.30067244346752264, // 1/(4*cos(3*pi/16))
-    0.35355339059327373, // 1/(4*cos(4*pi/16)) = 1/(2*sqrt(2))
-    0.44998811156820780, // 1/(4*cos(5*pi/16))
-    0.65328148243818820, // 1/(4*cos(6*pi/16))
-    1.28145772387075310, // 1/(4*cos(7*pi/16))
+    0.353_553_4, // 1/(2*sqrt(2))
+    0.254_897_8, // 1/(4*cos(pi/16))
+    0.270_598_1, // 1/(4*cos(2*pi/16))
+    0.300_672_4, // 1/(4*cos(3*pi/16))
+    0.353_553_4, // 1/(4*cos(4*pi/16)) = 1/(2*sqrt(2))
+    0.449_988_1, // 1/(4*cos(5*pi/16))
+    0.653_281_5, // 1/(4*cos(6*pi/16))
+    1.281_457_8, // 1/(4*cos(7*pi/16))
 ];
 
 /// Perform 2D DCT on an 8x8 block using AAN fast DCT algorithm.
@@ -161,7 +161,7 @@ const fn cos_approx(x: f32) -> f32 {
 /// Normalization factors for IDCT.
 /// alpha(0) = 1/sqrt(2), alpha(k) = 1 for k > 0
 const ALPHA: [f32; 8] = [
-    0.7071067811865476, // 1/sqrt(2)
+    FRAC_1_SQRT_2, // 1/sqrt(2)
     1.0,
     1.0,
     1.0,
@@ -245,15 +245,15 @@ mod tests {
         // AC components should be relatively small compared to DC
         // (some numerical error is expected with the const fn cos approximation)
         for &val in result.iter().skip(1) {
-            assert!(val.abs() < 5.0, "AC component too large: {}", val);
+            assert!(val.abs() < 5.0, "AC component too large: {val}");
         }
     }
 
     #[test]
     fn test_dct_idct_roundtrip() {
         let mut block = [0.0f32; 64];
-        for i in 0..64 {
-            block[i] = (i as f32 * 4.0) - 128.0;
+        for (i, item) in block.iter_mut().enumerate() {
+            *item = (i as f32 * 4.0) - 128.0;
         }
 
         let dct = dct_2d(&block);

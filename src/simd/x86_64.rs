@@ -1,7 +1,7 @@
 //! x86_64 SIMD implementations using SSE2, SSSE3, and SSE4.2.
 
-use std::arch::x86_64::*;
 use crate::simd::fallback::fallback_paeth_predictor;
+use std::arch::x86_64::*;
 
 /// Compute Adler-32 checksum using SSSE3 instructions.
 ///
@@ -535,11 +535,17 @@ unsafe fn paeth_predict_128(left: __m128i, above: __m128i, upper_left: __m128i) 
     let mask_c_hi = _mm_andnot_si128(_mm_or_si128(mask_a_hi, mask_b_hi), _mm_set1_epi16(-1));
 
     let pred_lo = _mm_or_si128(
-        _mm_or_si128(_mm_and_si128(mask_a_lo, a_lo), _mm_and_si128(mask_b_lo, b_lo)),
+        _mm_or_si128(
+            _mm_and_si128(mask_a_lo, a_lo),
+            _mm_and_si128(mask_b_lo, b_lo),
+        ),
         _mm_and_si128(mask_c_lo, c_lo),
     );
     let pred_hi = _mm_or_si128(
-        _mm_or_si128(_mm_and_si128(mask_a_hi, a_hi), _mm_and_si128(mask_b_hi, b_hi)),
+        _mm_or_si128(
+            _mm_and_si128(mask_a_hi, a_hi),
+            _mm_and_si128(mask_b_hi, b_hi),
+        ),
         _mm_and_si128(mask_c_hi, c_hi),
     );
 
@@ -636,20 +642,40 @@ pub unsafe fn filter_paeth_avx2(row: &[u8], prev_row: &[u8], bpp: usize, output:
         let pb_hi = _mm256_abs_epi16(_mm256_sub_epi16(p_hi, b_hi));
         let pc_hi = _mm256_abs_epi16(_mm256_sub_epi16(p_hi, c_hi));
 
-        let mask_a_lo = _mm256_and_si256(_mm256_cmpgt_epi16(pb_lo, pa_lo), _mm256_cmpgt_epi16(pc_lo, pa_lo));
-        let mask_b_lo = _mm256_and_si256(_mm256_cmpgt_epi16(pa_lo, pb_lo), _mm256_cmpgt_epi16(pc_lo, pb_lo));
-        let mask_c_lo = _mm256_andnot_si256(_mm256_or_si256(mask_a_lo, mask_b_lo), _mm256_set1_epi16(-1));
+        let mask_a_lo = _mm256_and_si256(
+            _mm256_cmpgt_epi16(pb_lo, pa_lo),
+            _mm256_cmpgt_epi16(pc_lo, pa_lo),
+        );
+        let mask_b_lo = _mm256_and_si256(
+            _mm256_cmpgt_epi16(pa_lo, pb_lo),
+            _mm256_cmpgt_epi16(pc_lo, pb_lo),
+        );
+        let mask_c_lo =
+            _mm256_andnot_si256(_mm256_or_si256(mask_a_lo, mask_b_lo), _mm256_set1_epi16(-1));
 
-        let mask_a_hi = _mm256_and_si256(_mm256_cmpgt_epi16(pb_hi, pa_hi), _mm256_cmpgt_epi16(pc_hi, pa_hi));
-        let mask_b_hi = _mm256_and_si256(_mm256_cmpgt_epi16(pa_hi, pb_hi), _mm256_cmpgt_epi16(pc_hi, pb_hi));
-        let mask_c_hi = _mm256_andnot_si256(_mm256_or_si256(mask_a_hi, mask_b_hi), _mm256_set1_epi16(-1));
+        let mask_a_hi = _mm256_and_si256(
+            _mm256_cmpgt_epi16(pb_hi, pa_hi),
+            _mm256_cmpgt_epi16(pc_hi, pa_hi),
+        );
+        let mask_b_hi = _mm256_and_si256(
+            _mm256_cmpgt_epi16(pa_hi, pb_hi),
+            _mm256_cmpgt_epi16(pc_hi, pb_hi),
+        );
+        let mask_c_hi =
+            _mm256_andnot_si256(_mm256_or_si256(mask_a_hi, mask_b_hi), _mm256_set1_epi16(-1));
 
         let pred_lo = _mm256_or_si256(
-            _mm256_or_si256(_mm256_and_si256(mask_a_lo, a_lo), _mm256_and_si256(mask_b_lo, b_lo)),
+            _mm256_or_si256(
+                _mm256_and_si256(mask_a_lo, a_lo),
+                _mm256_and_si256(mask_b_lo, b_lo),
+            ),
             _mm256_and_si256(mask_c_lo, c_lo),
         );
         let pred_hi = _mm256_or_si256(
-            _mm256_or_si256(_mm256_and_si256(mask_a_hi, a_hi), _mm256_and_si256(mask_b_hi, b_hi)),
+            _mm256_or_si256(
+                _mm256_and_si256(mask_a_hi, a_hi),
+                _mm256_and_si256(mask_b_hi, b_hi),
+            ),
             _mm256_and_si256(mask_c_hi, c_hi),
         );
 

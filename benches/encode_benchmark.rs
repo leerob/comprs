@@ -49,7 +49,7 @@ fn png_encoding_benchmark(c: &mut Criterion) {
 
         let mut png_buf = Vec::new();
         group.bench_with_input(
-            BenchmarkId::new("comprs", format!("{}x{}", size, size)),
+            BenchmarkId::new("comprs", format!("{size}x{size}")),
             &pixels,
             |b, pixels| {
                 b.iter(|| {
@@ -68,19 +68,14 @@ fn png_encoding_benchmark(c: &mut Criterion) {
 
         // Compare with image crate
         group.bench_with_input(
-            BenchmarkId::new("image_crate", format!("{}x{}", size, size)),
+            BenchmarkId::new("image_crate", format!("{size}x{size}")),
             &pixels,
             |b, pixels| {
                 b.iter(|| {
                     let mut output = Vec::new();
                     let encoder = image::codecs::png::PngEncoder::new(&mut output);
                     encoder
-                        .write_image(
-                            black_box(pixels),
-                            *size,
-                            *size,
-                            image::ColorType::Rgb8,
-                        )
+                        .write_image(black_box(pixels), *size, *size, image::ColorType::Rgb8)
                         .unwrap();
                     output
                 });
@@ -108,7 +103,7 @@ fn jpeg_encoding_benchmark(c: &mut Criterion) {
         };
 
         group.bench_with_input(
-            BenchmarkId::new("comprs_q85_444", format!("{}x{}", size, size)),
+            BenchmarkId::new("comprs_q85_444", format!("{size}x{size}")),
             &pixels,
             |b, pixels| {
                 b.iter(|| {
@@ -132,7 +127,7 @@ fn jpeg_encoding_benchmark(c: &mut Criterion) {
 
         let mut jpeg_buf_420 = Vec::new();
         group.bench_with_input(
-            BenchmarkId::new("comprs_q85_420", format!("{}x{}", size, size)),
+            BenchmarkId::new("comprs_q85_420", format!("{size}x{size}")),
             &pixels,
             |b, pixels| {
                 b.iter(|| {
@@ -152,7 +147,7 @@ fn jpeg_encoding_benchmark(c: &mut Criterion) {
 
         // Compare with image crate
         group.bench_with_input(
-            BenchmarkId::new("image_crate_q85", format!("{}x{}", size, size)),
+            BenchmarkId::new("image_crate_q85", format!("{size}x{size}")),
             &pixels,
             |b, pixels| {
                 b.iter(|| {
@@ -160,12 +155,7 @@ fn jpeg_encoding_benchmark(c: &mut Criterion) {
                     let encoder =
                         image::codecs::jpeg::JpegEncoder::new_with_quality(&mut output, 85);
                     encoder
-                        .write_image(
-                            black_box(pixels),
-                            *size,
-                            *size,
-                            image::ColorType::Rgb8,
-                        )
+                        .write_image(black_box(pixels), *size, *size, image::ColorType::Rgb8)
                         .unwrap();
                     output
                 });
@@ -242,12 +232,7 @@ fn compression_ratio_benchmark(c: &mut Criterion) {
                 let mut output = Vec::new();
                 let encoder = image::codecs::png::PngEncoder::new(&mut output);
                 encoder
-                    .write_image(
-                        black_box(&noisy),
-                        *width,
-                        *height,
-                        image::ColorType::Rgb8,
-                    )
+                    .write_image(black_box(&noisy), *width, *height, image::ColorType::Rgb8)
                     .unwrap();
                 output.len()
             });
@@ -256,7 +241,7 @@ fn compression_ratio_benchmark(c: &mut Criterion) {
         // JPEG quality comparison
         for quality in [50, 75, 90].iter() {
             let mut jpeg_buf = Vec::new();
-            group.bench_function(format!("JPEG q{} (comprs)", quality), |b| {
+            group.bench_function(format!("JPEG q{quality} (comprs)"), |b| {
                 b.iter(|| {
                     jpeg::encode_with_options_into(
                         &mut jpeg_buf,
@@ -276,7 +261,7 @@ fn compression_ratio_benchmark(c: &mut Criterion) {
                 });
             });
 
-            group.bench_function(format!("JPEG q{} (image crate)", quality), |b| {
+            group.bench_function(format!("JPEG q{quality} (image crate)"), |b| {
                 b.iter(|| {
                     let mut output = Vec::new();
                     let encoder =

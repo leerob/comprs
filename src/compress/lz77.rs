@@ -233,8 +233,7 @@ impl Lz77Compressor {
                     // Update hash for current position
                     self.update_hash(data, pos);
 
-                    if let Some((next_length, _)) =
-                        self.find_best_match(data, pos + 1, chain_limit)
+                    if let Some((next_length, _)) = self.find_best_match(data, pos + 1, chain_limit)
                     {
                         if next_length > length + 1 {
                             // Better match at next position, emit literal
@@ -346,8 +345,7 @@ impl Lz77Compressor {
                 if self.lazy_matching && length < GOOD_MATCH_LENGTH && pos + 1 < data.len() {
                     self.update_hash(data, pos);
 
-                    if let Some((next_length, _)) =
-                        self.find_best_match(data, pos + 1, chain_limit)
+                    if let Some((next_length, _)) = self.find_best_match(data, pos + 1, chain_limit)
                     {
                         if next_length > length + 1 {
                             tokens.push(PackedToken::literal(data[pos]));
@@ -586,7 +584,10 @@ mod tests {
     fn test_packed_token_literal() {
         for byte in 0u8..=255 {
             let token = PackedToken::literal(byte);
-            assert!(token.is_literal(), "Literal should be identified as literal");
+            assert!(
+                token.is_literal(),
+                "Literal should be identified as literal"
+            );
             assert_eq!(token.as_literal(), Some(byte), "Literal value mismatch");
             assert_eq!(token.as_match(), None, "Literal should not be a match");
         }
@@ -596,32 +597,29 @@ mod tests {
     fn test_packed_token_match() {
         // Test various lengths and distances including edge cases
         let test_cases = [
-            (3, 1),      // min length, min distance
-            (258, 1),    // max length, min distance
-            (3, 32768),  // min length, max distance (the bug case!)
+            (3, 1),       // min length, min distance
+            (258, 1),     // max length, min distance
+            (3, 32768),   // min length, max distance (the bug case!)
             (258, 32768), // max length, max distance
-            (100, 100),  // typical values
-            (3, 32767),  // just below max distance
+            (100, 100),   // typical values
+            (3, 32767),   // just below max distance
         ];
 
         for (length, distance) in test_cases {
             let token = PackedToken::match_(length, distance);
             assert!(
                 !token.is_literal(),
-                "Match with length={}, distance={} should NOT be identified as literal",
-                length, distance
+                "Match with length={length}, distance={distance} should NOT be identified as literal",
             );
             assert_eq!(
                 token.as_match(),
                 Some((length, distance)),
-                "Match values mismatch for length={}, distance={}",
-                length, distance
+                "Match values mismatch for length={length}, distance={distance}",
             );
             assert_eq!(
                 token.as_literal(),
                 None,
-                "Match should not return a literal value for length={}, distance={}",
-                length, distance
+                "Match should not return a literal value for length={length}, distance={distance}",
             );
         }
     }

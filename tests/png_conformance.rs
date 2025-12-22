@@ -3,6 +3,8 @@
 //! Tests PNG encoding against expected output and validates
 //! that encoded images can be decoded correctly.
 
+#![allow(clippy::uninlined_format_args)]
+
 use comprs::compress::crc32::crc32;
 use comprs::{png, ColorType, Error};
 use image::GenericImageView;

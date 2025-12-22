@@ -45,33 +45,28 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::InvalidDimensions { width, height } => {
-                write!(f, "Invalid image dimensions: {}x{}", width, height)
+                write!(f, "Invalid image dimensions: {width}x{height}")
             }
             Error::InvalidDataLength { expected, actual } => {
                 write!(
                     f,
-                    "Invalid pixel data length: expected {} bytes, got {}",
-                    expected, actual
+                    "Invalid pixel data length: expected {expected} bytes, got {actual}",
                 )
             }
             Error::InvalidQuality(q) => {
-                write!(f, "Invalid quality {}: must be 1-100", q)
+                write!(f, "Invalid quality {q}: must be 1-100")
             }
             Error::InvalidCompressionLevel(level) => {
-                write!(f, "Invalid compression level {}: must be 1-9", level)
+                write!(f, "Invalid compression level {level}: must be 1-9")
             }
             Error::ImageTooLarge { width, height, max } => {
-                write!(
-                    f,
-                    "Image {}x{} exceeds maximum dimension {}",
-                    width, height, max
-                )
+                write!(f, "Image {width}x{height} exceeds maximum dimension {max}",)
             }
             Error::UnsupportedColorType => {
                 write!(f, "Unsupported color type for this format")
             }
             Error::CompressionError(msg) => {
-                write!(f, "Compression error: {}", msg)
+                write!(f, "Compression error: {msg}")
             }
         }
     }

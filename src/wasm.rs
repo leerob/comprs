@@ -41,8 +41,7 @@ fn color_type_from_u8(value: u8) -> Result<ColorType, JsError> {
         2 => Ok(ColorType::Rgb),
         3 => Ok(ColorType::Rgba),
         _ => Err(JsError::new(&format!(
-            "Invalid color type: {}. Expected 0 (Gray), 1 (GrayAlpha), 2 (Rgb), or 3 (Rgba)",
-            value
+            "Invalid color type: {value}. Expected 0 (Gray), 1 (GrayAlpha), 2 (Rgb), or 3 (Rgba)",
         ))),
     }
 }
@@ -114,8 +113,7 @@ pub fn encode_png_with_filter(
         6 => FilterStrategy::AdaptiveFast,
         _ => {
             return Err(JsError::new(&format!(
-                "Invalid filter: {}. Expected 0-6",
-                filter
+                "Invalid filter: {filter}. Expected 0-6",
             )))
         }
     };
@@ -157,8 +155,7 @@ pub fn encode_jpeg(
         2 => ColorType::Rgb,
         _ => {
             return Err(JsError::new(&format!(
-                "Invalid color type for JPEG: {}. Expected 0 (Gray) or 2 (Rgb)",
-                color_type
+                "Invalid color type for JPEG: {color_type}. Expected 0 (Gray) or 2 (Rgb)",
             )))
         }
     };
@@ -206,7 +203,10 @@ mod tests {
         assert!(result.is_ok());
         let png = result.unwrap();
         // Check PNG signature
-        assert_eq!(&png[0..8], &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+        assert_eq!(
+            &png[0..8],
+            &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+        );
     }
 
     #[test]

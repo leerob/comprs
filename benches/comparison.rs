@@ -87,7 +87,7 @@ fn bench_png_comparison(c: &mut Criterion) {
         // --- Gradient Image ---
         let mut png_buf = Vec::new();
         group.bench_with_input(
-            BenchmarkId::new("comprs_gradient", format!("{}x{}", size, size)),
+            BenchmarkId::new("comprs_gradient", format!("{size}x{size}")),
             &gradient,
             |b, pixels| {
                 b.iter(|| {
@@ -105,7 +105,7 @@ fn bench_png_comparison(c: &mut Criterion) {
         );
 
         group.bench_with_input(
-            BenchmarkId::new("image_crate_gradient", format!("{}x{}", size, size)),
+            BenchmarkId::new("image_crate_gradient", format!("{size}x{size}")),
             &gradient,
             |b, pixels| {
                 b.iter(|| {
@@ -121,7 +121,7 @@ fn bench_png_comparison(c: &mut Criterion) {
 
         // --- Noisy Image ---
         group.bench_with_input(
-            BenchmarkId::new("comprs_noisy", format!("{}x{}", size, size)),
+            BenchmarkId::new("comprs_noisy", format!("{size}x{size}")),
             &noisy,
             |b, pixels| {
                 b.iter(|| {
@@ -139,7 +139,7 @@ fn bench_png_comparison(c: &mut Criterion) {
         );
 
         group.bench_with_input(
-            BenchmarkId::new("image_crate_noisy", format!("{}x{}", size, size)),
+            BenchmarkId::new("image_crate_noisy", format!("{size}x{size}")),
             &noisy,
             |b, pixels| {
                 b.iter(|| {
@@ -174,7 +174,7 @@ fn bench_jpeg_comparison(c: &mut Criterion) {
 
         // comprs with 4:4:4 subsampling
         group.bench_with_input(
-            BenchmarkId::new("comprs_q85_444", format!("{}x{}", size, size)),
+            BenchmarkId::new("comprs_q85_444", format!("{size}x{size}")),
             &gradient,
             |b, pixels| {
                 b.iter(|| {
@@ -198,7 +198,7 @@ fn bench_jpeg_comparison(c: &mut Criterion) {
 
         // comprs with 4:2:0 subsampling
         group.bench_with_input(
-            BenchmarkId::new("comprs_q85_420", format!("{}x{}", size, size)),
+            BenchmarkId::new("comprs_q85_420", format!("{size}x{size}")),
             &gradient,
             |b, pixels| {
                 b.iter(|| {
@@ -222,7 +222,7 @@ fn bench_jpeg_comparison(c: &mut Criterion) {
 
         // image crate
         group.bench_with_input(
-            BenchmarkId::new("image_crate_q85", format!("{}x{}", size, size)),
+            BenchmarkId::new("image_crate_q85", format!("{size}x{size}")),
             &gradient,
             |b, pixels| {
                 b.iter(|| {
@@ -251,10 +251,7 @@ fn bench_deflate_comparison(c: &mut Criterion) {
     let compressible = make_compressible(1 << 20);
     let random = make_random(1 << 20, 0xDEAD_BEEF);
 
-    let cases = [
-        ("compressible_1mb", &compressible),
-        ("random_1mb", &random),
-    ];
+    let cases = [("compressible_1mb", &compressible), ("random_1mb", &random)];
 
     for (name, data) in cases {
         let bytes = data.len() as u64;
@@ -564,20 +561,23 @@ fn get_wasm_size() -> Option<usize> {
 
 fn format_size(bytes: usize) -> String {
     if bytes >= 1024 * 1024 {
-        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+        let mb = bytes as f64 / (1024.0 * 1024.0);
+        format!("{mb:.1} MB")
     } else if bytes >= 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
+        let kb = bytes as f64 / 1024.0;
+        format!("{kb:.1} KB")
     } else {
-        format!("{} B", bytes)
+        format!("{bytes} B")
     }
 }
 
 fn format_duration(duration: Duration) -> String {
     let micros = duration.as_micros();
     if micros >= 1000 {
-        format!("{:.2} ms", duration.as_secs_f64() * 1000.0)
+        let ms = duration.as_secs_f64() * 1000.0;
+        format!("{ms:.2} ms")
     } else {
-        format!("{} µs", micros)
+        format!("{micros} µs")
     }
 }
 
@@ -585,10 +585,11 @@ fn format_relative_speed(comprs_time: Duration, other_time: Duration) -> String 
     let ratio = comprs_time.as_secs_f64() / other_time.as_secs_f64();
     if ratio < 1.0 {
         // comprs is faster
-        format!("comprs {:.1}x faster", 1.0 / ratio)
+        let faster = 1.0 / ratio;
+        format!("comprs {faster:.1}x faster")
     } else if ratio > 1.0 {
         // other is faster
-        format!("image {:.1}x faster", ratio)
+        format!("image {ratio:.1}x faster")
     } else {
         "equal".to_string()
     }

@@ -126,6 +126,12 @@ pub struct BitWriter64 {
     bits_in_acc: u8,
 }
 
+impl Default for BitWriter64 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BitWriter64 {
     /// Create a new bit writer with default capacity.
     pub fn new() -> Self {
