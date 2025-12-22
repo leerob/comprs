@@ -27,11 +27,15 @@ export type CompressResult = {
 
 let initialized: Promise<InitOutput> | null = null;
 
-async function ensureWasmLoaded() {
+export function initWasm() {
 	if (!initialized) {
 		initialized = init();
 	}
 	return initialized;
+}
+
+async function ensureWasmLoaded() {
+	return initWasm();
 }
 
 const filterMap: Record<PngFilter, number> = {

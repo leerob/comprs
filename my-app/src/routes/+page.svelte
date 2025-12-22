@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { compressImage, type PngFilter } from '$lib/wasm';
+	import { compressImage, initWasm, type PngFilter } from '$lib/wasm';
 	import { onDestroy, onMount } from 'svelte';
 
 	type JobStatus = 'idle' | 'compressing' | 'done' | 'error';
@@ -39,6 +39,7 @@
 	let busy = false;
 	let notices: { id: string; message: string; tone: 'info' | 'warning' | 'error' }[] = [];
 	const fileInputId = 'file-input';
+	let wasmReady = false;
 
 	const filterOptions: { label: string; value: PngFilter; hint?: string }[] = [
 		{ label: 'Adaptive', value: 'adaptive', hint: 'Best compression' },
@@ -132,6 +133,14 @@ function detectAlpha(data: Uint8ClampedArray) {
 	}
 
 	onMount(() => {
+		initWasm()
+			.then(() => {
+				wasmReady = true;
+			})
+			.catch((err) => {
+				addNotice(err instanceof Error ? err.message : 'Failed to load WASM module', 'error');
+			});
+
 		const handler = (e: KeyboardEvent) => {
 			const target = e.target as HTMLElement | null;
 			const isTypingContext =
@@ -247,6 +256,15 @@ function detectAlpha(data: Uint8ClampedArray) {
 	async function compressJob(id: string) {
 		const job = jobs.find((j) => j.id === id);
 		if (!job) return;
+		if (!wasmReady) {
+			try {
+				await initWasm();
+				wasmReady = true;
+			} catch (err) {
+				addNotice(err instanceof Error ? err.message : 'Failed to load WASM module', 'error');
+				return;
+			}
+		}
 		busy = true;
 		updateJob(id, (j) => ({ ...j, status: 'compressing', error: undefined }));
 		try {
@@ -346,6 +364,20 @@ function detectAlpha(data: Uint8ClampedArray) {
 				<p class="text-sm text-slate-400">PNG and JPEG only. Files never leave your device.</p>
 			</div>
 			<div class="flex gap-2">
+				<div
+					class={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs ${
+						wasmReady
+							? 'border-emerald-700/50 bg-emerald-900/40 text-emerald-100'
+							: 'border-amber-700/50 bg-amber-900/40 text-amber-100'
+					}`}
+				>
+					<span
+						class="h-2 w-2 rounded-full"
+						class:animate-pulse={!wasmReady}
+						style={`background:${wasmReady ? '#34d399' : '#fbbf24'}`}
+					></span>
+					<span>{wasmReady ? 'WASM ready' : 'Loading WASM'}</span>
+				</div>
 				<button class="btn-ghost" type="button" on:click={revokeAll} disabled={!jobs.length}>
 					Clear all
 				</button>
@@ -587,9 +619,13 @@ function detectAlpha(data: Uint8ClampedArray) {
 					<button
 						class="btn-primary"
 						on:click={() => compressJob(job.id)}
-						disabled={job.status === 'compressing' || busy}
+						disabled={job.status === 'compressing' || busy || !wasmReady}
 					>
-						{job.status === 'compressing' ? 'Compressing…' : 'Compress now'}
+						{!wasmReady
+							? 'Loading WASM…'
+							: job.status === 'compressing'
+								? 'Compressing…'
+								: 'Compress now'}
 					</button>
 					{#if job.status === 'error'}
 						<span class="text-sm font-medium text-red-300">{job.error}</span>
