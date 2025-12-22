@@ -6,7 +6,7 @@ static CRC_TABLES: std::sync::LazyLock<[[u32; 256]; 8]> = std::sync::LazyLock::n
     let mut tables = [[0u32; 256]; 8];
 
     // Table 0: classic byte-at-a-time.
-    for i in 0..256 {
+    for (i, entry) in tables[0].iter_mut().enumerate() {
         let mut crc = i as u32;
         for _ in 0..8 {
             crc = if (crc & 1) != 0 {
@@ -15,7 +15,7 @@ static CRC_TABLES: std::sync::LazyLock<[[u32; 256]; 8]> = std::sync::LazyLock::n
                 crc >> 1
             };
         }
-        tables[0][i] = crc;
+        *entry = crc;
     }
 
     // Tables 1..7 derived from table 0.

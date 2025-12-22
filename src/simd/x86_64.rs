@@ -205,7 +205,7 @@ pub unsafe fn match_length_avx2(data: &[u8], pos1: usize, pos2: usize, max_len: 
 
         if mask != 0xFFFF_FFFF {
             // Find first differing byte
-            let diff = (!mask) & 0xFFFF_FFFF;
+            let diff = !mask;
             return length + diff.trailing_zeros() as usize;
         }
         length += 32;
@@ -553,6 +553,10 @@ unsafe fn paeth_predict_128(left: __m128i, above: __m128i, upper_left: __m128i) 
 }
 
 /// Apply Paeth filter using SSE2 (experimental; currently gated off in dispatch).
+///
+/// # Safety
+///
+/// The caller must ensure that the CPU supports SSE2 instructions.
 #[target_feature(enable = "sse2")]
 pub unsafe fn filter_paeth_sse2(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<u8>) {
     let len = row.len();
@@ -598,6 +602,10 @@ pub unsafe fn filter_paeth_sse2(row: &[u8], prev_row: &[u8], bpp: usize, output:
 }
 
 /// Apply Paeth filter using AVX2 (experimental; currently gated off in dispatch).
+///
+/// # Safety
+///
+/// The caller must ensure that the CPU supports AVX2 instructions.
 #[target_feature(enable = "avx2")]
 pub unsafe fn filter_paeth_avx2(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<u8>) {
     let len = row.len();
