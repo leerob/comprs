@@ -275,6 +275,11 @@ Note: tests and benches are validated on nightly toolchain; ensure `rustup overr
 - Default filter strategy: **AdaptiveFast**, with height-aware sampling on tall images
 - SIMD + parallel enabled by default
 - Small inputs: prefer fixed Huffman (token thresholds tuned to avoid double encoding)
+
+Presets:
+- `PngOptions::fast()` — level 2, AdaptiveFast (default)
+- `PngOptions::balanced()` — level 6, Adaptive
+- `PngOptions::max_compression()` — level 9, AdaptiveSampled(interval=2)
 ## Performance Notes
 
 - PNG compression uses adaptive filter selection for best compression
