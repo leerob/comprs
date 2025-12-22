@@ -111,6 +111,26 @@ impl Default for JpegOptions {
     }
 }
 
+impl JpegOptions {
+    /// Preset optimized for speed/smaller size using 4:2:0 subsampling.
+    pub fn fast() -> Self {
+        Self {
+            quality: 75,
+            subsampling: Subsampling::S420,
+            restart_interval: None,
+        }
+    }
+
+    /// Preset optimized for visual quality (keeps 4:4:4 chroma).
+    pub fn max_quality() -> Self {
+        Self {
+            quality: 90,
+            subsampling: Subsampling::S444,
+            restart_interval: None,
+        }
+    }
+}
+
 /// Encode raw pixel data as JPEG with options.
 pub fn encode_with_options(
     data: &[u8],
