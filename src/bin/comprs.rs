@@ -49,6 +49,14 @@ struct Args {
     #[arg(long, value_enum, default_value = "adaptive")]
     filter: FilterArg,
 
+    /// Interval for adaptive-sampled filter (rows between full evaluations)
+    #[arg(
+        long,
+        default_value = "4",
+        value_parser = clap::value_parser!(u32).range(1..=1_000_000)
+    )]
+    adaptive_sample_interval: u32,
+
     /// Convert to grayscale
     #[arg(long)]
     grayscale: bool,
@@ -99,17 +107,25 @@ enum FilterArg {
     Paeth,
     /// Adaptive filter selection (best compression)
     Adaptive,
+    /// Adaptive with reduced trials and early cutoffs (faster)
+    AdaptiveFast,
+    /// Adaptive on sampled rows, reuse chosen filter between samples
+    AdaptiveSampled,
 }
 
-impl From<FilterArg> for FilterStrategy {
-    fn from(arg: FilterArg) -> Self {
-        match arg {
+impl FilterArg {
+    fn to_strategy(self, sampled_interval: u32) -> FilterStrategy {
+        match self {
             FilterArg::None => FilterStrategy::None,
             FilterArg::Sub => FilterStrategy::Sub,
             FilterArg::Up => FilterStrategy::Up,
             FilterArg::Average => FilterStrategy::Average,
             FilterArg::Paeth => FilterStrategy::Paeth,
             FilterArg::Adaptive => FilterStrategy::Adaptive,
+            FilterArg::AdaptiveFast => FilterStrategy::AdaptiveFast,
+            FilterArg::AdaptiveSampled => FilterStrategy::AdaptiveSampled {
+                interval: sampled_interval.max(1),
+            },
         }
     }
 }
@@ -433,7 +449,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         OutputFormat::Png => {
             let options = PngOptions {
                 compression_level: args.compression,
-                filter_strategy: args.filter.into(),
+                filter_strategy: args.filter.to_strategy(args.adaptive_sample_interval),
             };
             comprs::png::encode_into(
                 &mut output_data,
