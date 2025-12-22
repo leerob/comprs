@@ -232,22 +232,25 @@ fn build_codes_256(bits: &[u8; 16], vals: &[u8]) -> [HuffCode; 256] {
 }
 
 fn build_jpeg_table(freqs: &[u32], is_dc: bool) -> ([u8; 16], Vec<u8>, Vec<HuffCode>) {
-    // Build canonical codes from frequencies with max length 16 (JPEG limit).
-    let raw_codes = compress::huffman::build_codes(freqs, 16);
+    // Build canonical codes from frequencies with max length 15 (DEFLATE helper limit).
+    // JPEG allows 16, but we clamp to 15 to stay within the shared canonical generator.
+    let max_len = 15;
+    let raw_codes = compress::huffman::build_codes(freqs, max_len);
 
     // bits[len-1] = count of symbols with that length
     let mut bits = [0u8; 16];
     for c in &raw_codes {
-        if c.length > 0 {
-            bits[(c.length - 1) as usize] += 1;
+        let len = c.length.min(max_len as u8);
+        if len > 0 {
+            bits[(len - 1) as usize] += 1;
         }
     }
 
     // vals: symbols ordered by increasing length then symbol value
     let mut vals = Vec::new();
-    for len in 1..=16 {
+    for len in 1..=max_len {
         for (sym, c) in raw_codes.iter().enumerate() {
-            if c.length == len as u8 {
+            if c.length.min(max_len as u8) == len as u8 && c.length > 0 {
                 vals.push(sym as u8);
             }
         }
@@ -256,9 +259,10 @@ fn build_jpeg_table(freqs: &[u32], is_dc: bool) -> ([u8; 16], Vec<u8>, Vec<HuffC
     // Map to HuffCode
     let mut codes = Vec::with_capacity(raw_codes.len());
     for rc in raw_codes {
+        let len = rc.length.min(max_len as u8);
         codes.push(HuffCode {
             code: rc.code,
-            length: rc.length,
+            length: len,
         });
     }
 

@@ -158,6 +158,7 @@ fn main() {
                         quality: 85,
                         subsampling: jpeg::Subsampling::S444,
                         restart_interval: None,
+                        optimize_huffman: false,
                     },
                 )
                 .unwrap();
@@ -167,6 +168,29 @@ fn main() {
                 "JPEG comprs q85 444: {:.3} ms, {} bytes",
                 t_jpeg_comprs_444.as_secs_f64() * 1000.0,
                 sz_jpeg_comprs_444
+            );
+
+            // JPEG comprs Q85 4:4:4 with optimized Huffman
+            let mut jpeg_buf_444_opt = Vec::new();
+            let mut opts_444_opt = jpeg::JpegOptions::max_quality();
+            opts_444_opt.quality = 85;
+            let (t_jpeg_comprs_444_opt, sz_jpeg_comprs_444_opt) = mean_time_and_size(|| {
+                jpeg::encode_with_options_into(
+                    &mut jpeg_buf_444_opt,
+                    &pixels,
+                    w,
+                    h,
+                    opts_444_opt.quality,
+                    ColorType::Rgb,
+                    &opts_444_opt,
+                )
+                .unwrap();
+                jpeg_buf_444_opt.clone()
+            });
+            println!(
+                "JPEG comprs q85 444 opt: {:.3} ms, {} bytes",
+                t_jpeg_comprs_444_opt.as_secs_f64() * 1000.0,
+                sz_jpeg_comprs_444_opt
             );
 
             // JPEG preset fast (uses 4:2:0, Q75)
@@ -205,6 +229,7 @@ fn main() {
                         quality: 85,
                         subsampling: jpeg::Subsampling::S420,
                         restart_interval: None,
+                        optimize_huffman: false,
                     },
                 )
                 .unwrap();
