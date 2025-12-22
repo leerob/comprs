@@ -63,16 +63,8 @@ pub fn match_length(data: &[u8], pos1: usize, pos2: usize, max_len: usize) -> us
 
     // Compare 8 bytes at a time using u64
     while length + 8 <= max_len {
-        let a = u64::from_ne_bytes(
-            data[pos1 + length..pos1 + length + 8]
-                .try_into()
-                .unwrap(),
-        );
-        let b = u64::from_ne_bytes(
-            data[pos2 + length..pos2 + length + 8]
-                .try_into()
-                .unwrap(),
-        );
+        let a = u64::from_ne_bytes(data[pos1 + length..pos1 + length + 8].try_into().unwrap());
+        let b = u64::from_ne_bytes(data[pos2 + length..pos2 + length + 8].try_into().unwrap());
         if a != b {
             let xor = a ^ b;
             #[cfg(target_endian = "little")]
@@ -119,5 +111,16 @@ pub fn filter_sub(row: &[u8], bpp: usize, output: &mut Vec<u8>) {
 pub fn filter_up(row: &[u8], prev_row: &[u8], output: &mut Vec<u8>) {
     for (i, &byte) in row.iter().enumerate() {
         output.push(byte.wrapping_sub(prev_row[i]));
+    }
+}
+
+/// Apply Average filter (scalar fallback).
+#[inline]
+pub fn filter_average(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<u8>) {
+    for (i, &byte) in row.iter().enumerate() {
+        let left = if i >= bpp { row[i - bpp] as u16 } else { 0 };
+        let above = prev_row[i] as u16;
+        let avg = ((left + above) / 2) as u8;
+        output.push(byte.wrapping_sub(avg));
     }
 }
