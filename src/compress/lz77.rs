@@ -120,8 +120,8 @@ impl Lz77Compressor {
             1 => (4, false),
             2 => (6, false),
             3 => (10, false),
-            4 => (32, true),
-            5 => (64, true),
+            4 => (24, true),
+            5 => (48, true),
             6 => (64, true), // trimmed further for speed at default level
             7 => (256, true),
             8 => (512, true),
