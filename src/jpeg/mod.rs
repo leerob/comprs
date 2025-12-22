@@ -42,7 +42,17 @@ pub fn encode(data: &[u8], width: u32, height: u32, quality: u8) -> Result<Vec<u
         subsampling: Subsampling::S444,
         restart_interval: None,
     };
-    encode_with_options(data, width, height, quality, ColorType::Rgb, &options)
+    let mut output = Vec::new();
+    encode_with_options_into(
+        &mut output,
+        data,
+        width,
+        height,
+        quality,
+        ColorType::Rgb,
+        &options,
+    )?;
+    Ok(output)
 }
 
 /// Encode raw pixel data as JPEG with specified color type.
@@ -58,7 +68,17 @@ pub fn encode_with_color(
         subsampling: Subsampling::S444,
         restart_interval: None,
     };
-    encode_with_options(data, width, height, quality, color_type, &options)
+    let mut output = Vec::new();
+    encode_with_options_into(
+        &mut output,
+        data,
+        width,
+        height,
+        quality,
+        color_type,
+        &options,
+    )?;
+    Ok(output)
 }
 
 /// Chroma subsampling options.
@@ -100,6 +120,32 @@ pub fn encode_with_options(
     color_type: ColorType,
     options: &JpegOptions,
 ) -> Result<Vec<u8>> {
+    let mut output = Vec::new();
+    encode_with_options_into(
+        &mut output,
+        data,
+        width,
+        height,
+        _quality,
+        color_type,
+        options,
+    )?;
+    Ok(output)
+}
+
+/// Encode raw pixel data as JPEG with options into a caller-provided buffer.
+///
+/// The `output` buffer will be cleared and reused, allowing callers to avoid
+/// repeated allocations across multiple encodes.
+pub fn encode_with_options_into(
+    output: &mut Vec<u8>,
+    data: &[u8],
+    width: u32,
+    height: u32,
+    _quality: u8,
+    color_type: ColorType,
+    options: &JpegOptions,
+) -> Result<()> {
     // Validate quality
     if options.quality == 0 || options.quality > 100 {
         return Err(Error::InvalidQuality(options.quality));
@@ -137,26 +183,27 @@ pub fn encode_with_options(
         });
     }
 
-    let mut output = Vec::with_capacity(expected_len / 4);
+    output.clear();
+    output.reserve(expected_len / 4);
 
     // Create quantization and Huffman tables
     let quant_tables = QuantizationTables::with_quality(options.quality);
     let huff_tables = HuffmanTables::default();
 
     // Write JPEG headers
-    write_soi(&mut output);
-    write_app0(&mut output);
-    write_dqt(&mut output, &quant_tables);
-    write_sof0(&mut output, width, height, color_type, options.subsampling);
-    write_dht(&mut output, &huff_tables);
+    write_soi(output);
+    write_app0(output);
+    write_dqt(output, &quant_tables);
+    write_sof0(output, width, height, color_type, options.subsampling);
+    write_dht(output, &huff_tables);
     if let Some(interval) = options.restart_interval {
-        write_dri(&mut output, interval);
+        write_dri(output, interval);
     }
 
     // Write scan data
-    write_sos(&mut output, color_type);
+    write_sos(output, color_type);
     encode_scan(
-        &mut output,
+        output,
         data,
         width,
         height,
@@ -168,9 +215,9 @@ pub fn encode_with_options(
     );
 
     // Write end marker
-    write_eoi(&mut output);
+    write_eoi(output);
 
-    Ok(output)
+    Ok(())
 }
 
 /// Write SOI (Start of Image) marker.
@@ -419,13 +466,7 @@ fn encode_scan(
                         extract_block(data, width, height, block_x, block_y, color_type);
                     let y_dct = dct_2d(&y_block);
                     let y_quant = quantize_block(&y_dct, &quant_tables.luminance_table);
-                    prev_dc_y = encode_block(
-                        &mut writer,
-                        &y_quant,
-                        prev_dc_y,
-                        true,
-                        huff_tables,
-                    );
+                    prev_dc_y = encode_block(&mut writer, &y_quant, prev_dc_y, true, huff_tables);
                     mcu_count += 1;
                     handle_restart(
                         &mut writer,
@@ -446,33 +487,17 @@ fn encode_scan(
 
                     let y_dct = dct_2d(&y_block);
                     let y_quant = quantize_block(&y_dct, &quant_tables.luminance_table);
-                    prev_dc_y = encode_block(
-                        &mut writer,
-                        &y_quant,
-                        prev_dc_y,
-                        true,
-                        huff_tables,
-                    );
+                    prev_dc_y = encode_block(&mut writer, &y_quant, prev_dc_y, true, huff_tables);
 
                     let cb_dct = dct_2d(&cb_block);
                     let cb_quant = quantize_block(&cb_dct, &quant_tables.chrominance_table);
-                    prev_dc_cb = encode_block(
-                        &mut writer,
-                        &cb_quant,
-                        prev_dc_cb,
-                        false,
-                        huff_tables,
-                    );
+                    prev_dc_cb =
+                        encode_block(&mut writer, &cb_quant, prev_dc_cb, false, huff_tables);
 
                     let cr_dct = dct_2d(&cr_block);
                     let cr_quant = quantize_block(&cr_dct, &quant_tables.chrominance_table);
-                    prev_dc_cr = encode_block(
-                        &mut writer,
-                        &cr_quant,
-                        prev_dc_cr,
-                        false,
-                        huff_tables,
-                    );
+                    prev_dc_cr =
+                        encode_block(&mut writer, &cr_quant, prev_dc_cr, false, huff_tables);
 
                     mcu_count += 1;
                     handle_restart(
@@ -498,34 +523,19 @@ fn encode_scan(
                     for y_block in &y_blocks {
                         let y_dct = dct_2d(y_block);
                         let y_quant = quantize_block(&y_dct, &quant_tables.luminance_table);
-                        prev_dc_y = encode_block(
-                            &mut writer,
-                            &y_quant,
-                            prev_dc_y,
-                            true,
-                            huff_tables,
-                        );
+                        prev_dc_y =
+                            encode_block(&mut writer, &y_quant, prev_dc_y, true, huff_tables);
                     }
 
                     let cb_dct = dct_2d(&cb_block);
                     let cb_quant = quantize_block(&cb_dct, &quant_tables.chrominance_table);
-                    prev_dc_cb = encode_block(
-                        &mut writer,
-                        &cb_quant,
-                        prev_dc_cb,
-                        false,
-                        huff_tables,
-                    );
+                    prev_dc_cb =
+                        encode_block(&mut writer, &cb_quant, prev_dc_cb, false, huff_tables);
 
                     let cr_dct = dct_2d(&cr_block);
                     let cr_quant = quantize_block(&cr_dct, &quant_tables.chrominance_table);
-                    prev_dc_cr = encode_block(
-                        &mut writer,
-                        &cr_quant,
-                        prev_dc_cr,
-                        false,
-                        huff_tables,
-                    );
+                    prev_dc_cr =
+                        encode_block(&mut writer, &cr_quant, prev_dc_cr, false, huff_tables);
 
                     mcu_count += 1;
                     handle_restart(
@@ -692,5 +702,28 @@ mod tests {
         let pixels = vec![128; 64]; // 8x8 gray
         let jpeg = encode_with_color(&pixels, 8, 8, 85, ColorType::Gray).unwrap();
         assert_eq!(&jpeg[0..2], &SOI.to_be_bytes());
+    }
+
+    #[test]
+    fn test_encode_with_options_into_reuses_buffer() {
+        let mut output = Vec::with_capacity(256);
+        let pixels1 = vec![0u8; 3]; // 1x1 black
+        let opts = JpegOptions {
+            quality: 85,
+            subsampling: Subsampling::S444,
+            restart_interval: None,
+        };
+
+        encode_with_options_into(&mut output, &pixels1, 1, 1, 85, ColorType::Rgb, &opts).unwrap();
+        let first = output.clone();
+        let first_cap = output.capacity();
+        assert!(!first.is_empty());
+
+        let pixels2 = vec![255u8, 0, 0]; // 1x1 red
+        encode_with_options_into(&mut output, &pixels2, 1, 1, 85, ColorType::Rgb, &opts).unwrap();
+
+        assert_ne!(first, output);
+        assert!(output.capacity() >= first_cap);
+        assert_eq!(&output[0..2], &SOI.to_be_bytes());
     }
 }

@@ -187,6 +187,115 @@ pub unsafe fn match_length_sse2(data: &[u8], pos1: usize, pos2: usize, max_len: 
     length
 }
 
+/// Compute match length using AVX2 32-byte comparison.
+///
+/// # Safety
+/// Caller must ensure AVX2 is available on the current CPU.
+#[target_feature(enable = "avx2")]
+pub unsafe fn match_length_avx2(data: &[u8], pos1: usize, pos2: usize, max_len: usize) -> usize {
+    let mut length = 0;
+
+    // Compare 32 bytes at a time
+    while length + 32 <= max_len {
+        let a = _mm256_loadu_si256(data[pos1 + length..].as_ptr() as *const __m256i);
+        let b = _mm256_loadu_si256(data[pos2 + length..].as_ptr() as *const __m256i);
+        let cmp = _mm256_cmpeq_epi8(a, b);
+        let mask = _mm256_movemask_epi8(cmp) as u32;
+
+        if mask != 0xFFFF_FFFF {
+            // Find first differing byte
+            let diff = (!mask) & 0xFFFF_FFFF;
+            return length + diff.trailing_zeros() as usize;
+        }
+        length += 32;
+    }
+
+    // Fall back to SSE2 for remaining bytes (at most 31 bytes)
+    if length < max_len {
+        length + match_length_sse2(data, pos1 + length, pos2 + length, max_len - length)
+    } else {
+        length
+    }
+}
+
+/// Compute Adler-32 checksum using AVX2 instructions (32-byte chunks).
+///
+/// # Safety
+/// Caller must ensure AVX2 is available on the current CPU.
+#[target_feature(enable = "avx2")]
+pub unsafe fn adler32_avx2(data: &[u8]) -> u32 {
+    const MOD_ADLER: u32 = 65_521;
+    const NMAX: usize = 5552; // same as scalar/SSSE3 path
+
+    let mut s1: u32 = 1;
+    let mut s2: u32 = 0;
+    let mut processed = 0usize;
+
+    let zeros = _mm256_setzero_si256();
+    // weights 32..1
+    let weights = _mm256_setr_epi8(
+        32, 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10,
+        9, 8, 7, 6, 5, 4, 3, 2, 1,
+    );
+
+    let mut chunks = data.chunks_exact(32);
+    for chunk in &mut chunks {
+        // Load chunk
+        let v = _mm256_loadu_si256(chunk.as_ptr() as *const __m256i);
+
+        // Sum of bytes via SAD
+        let sad = _mm256_sad_epu8(v, zeros);
+        let mut sad_buf = [0i64; 4];
+        _mm256_storeu_si256(sad_buf.as_mut_ptr() as *mut __m256i, sad);
+        let chunk_sum = (sad_buf[0] + sad_buf[1] + sad_buf[2] + sad_buf[3]) as u32;
+
+        // Weighted sum for s2
+        let v_lo = _mm256_unpacklo_epi8(v, zeros);
+        let v_hi = _mm256_unpackhi_epi8(v, zeros);
+        let w_lo = _mm256_unpacklo_epi8(weights, zeros);
+        let w_hi = _mm256_unpackhi_epi8(weights, zeros);
+
+        let prod_lo = _mm256_madd_epi16(v_lo, w_lo); // 8 i32 lanes
+        let prod_hi = _mm256_madd_epi16(v_hi, w_hi); // 8 i32 lanes
+        let sum_prod = _mm256_add_epi32(prod_lo, prod_hi);
+
+        // Horizontal sum of sum_prod
+        let tmp1 = _mm256_hadd_epi32(sum_prod, sum_prod);
+        let tmp2 = _mm256_hadd_epi32(tmp1, tmp1);
+        let mut prod_buf = [0i32; 8];
+        _mm256_storeu_si256(prod_buf.as_mut_ptr() as *mut __m256i, tmp2);
+        let weighted_sum = (prod_buf[0] as i64 + prod_buf[4] as i64) as u32;
+
+        s2 = s2.wrapping_add(s1.wrapping_mul(32));
+        s2 = s2.wrapping_add(weighted_sum);
+        s1 = s1.wrapping_add(chunk_sum);
+
+        processed += 32;
+        if processed >= NMAX {
+            s1 %= MOD_ADLER;
+            s2 %= MOD_ADLER;
+            processed = 0;
+        }
+    }
+
+    // Remainder (less than 32 bytes) scalar
+    for &b in chunks.remainder() {
+        s1 = s1.wrapping_add(b as u32);
+        s2 = s2.wrapping_add(s1);
+        processed += 1;
+        if processed >= NMAX {
+            s1 %= MOD_ADLER;
+            s2 %= MOD_ADLER;
+            processed = 0;
+        }
+    }
+
+    s1 %= MOD_ADLER;
+    s2 %= MOD_ADLER;
+
+    (s2 << 16) | s1
+}
+
 /// Score a filtered row using SSE2 SAD instruction.
 ///
 /// # Safety
@@ -240,6 +349,38 @@ pub unsafe fn score_filter_sse2(filtered: &[u8]) -> u64 {
     let mut result = _mm_cvtsi128_si64(total) as u64;
 
     // Process remaining bytes with scalar
+    for &b in remaining {
+        result += (b as i8).unsigned_abs() as u64;
+    }
+
+    result
+}
+
+/// Score a filtered row using AVX2 SAD instruction (32-byte chunks).
+///
+/// # Safety
+/// Caller must ensure AVX2 is available on the current CPU.
+#[target_feature(enable = "avx2")]
+pub unsafe fn score_filter_avx2(filtered: &[u8]) -> u64 {
+    let offset = _mm256_set1_epi8(-128i8); // 0x80
+    let mut acc = _mm256_setzero_si256();
+    let mut remaining = filtered;
+
+    while remaining.len() >= 32 {
+        let v = _mm256_loadu_si256(remaining.as_ptr() as *const __m256i);
+        // Convert signed to unsigned magnitude by XORing with 0x80, then SAD vs 0x80.
+        let adjusted = _mm256_xor_si256(v, offset);
+        let sad = _mm256_sad_epu8(adjusted, offset); // produces four u64 lanes
+        acc = _mm256_add_epi64(acc, sad);
+        remaining = &remaining[32..];
+    }
+
+    // Horizontal sum of acc
+    let mut buf = [0u64; 4];
+    _mm256_storeu_si256(buf.as_mut_ptr() as *mut __m256i, acc);
+    let mut result = buf.iter().sum::<u64>();
+
+    // Remainder scalar
     for &b in remaining {
         result += (b as i8).unsigned_abs() as u64;
     }
@@ -312,6 +453,127 @@ pub unsafe fn filter_up_sse2(row: &[u8], prev_row: &[u8], output: &mut Vec<u8>) 
     // Handle remaining bytes
     while i < len {
         output.push(row[i].wrapping_sub(prev_row[i]));
+        i += 1;
+    }
+}
+
+/// Apply Sub filter using AVX2 (32 bytes at a time).
+///
+/// # Safety
+/// Caller must ensure AVX2 is available on the current CPU.
+#[target_feature(enable = "avx2")]
+pub unsafe fn filter_sub_avx2(row: &[u8], bpp: usize, output: &mut Vec<u8>) {
+    let len = row.len();
+    output.reserve(len);
+
+    // First bpp bytes unchanged
+    output.extend_from_slice(&row[..bpp.min(len)]);
+
+    if len <= bpp {
+        return;
+    }
+
+    let remaining = &row[bpp..];
+    let left = &row[..len - bpp];
+
+    let mut i = 0;
+    let rem_len = remaining.len();
+
+    while i + 32 <= rem_len {
+        let curr = _mm256_loadu_si256(remaining[i..].as_ptr() as *const __m256i);
+        let prev = _mm256_loadu_si256(left[i..].as_ptr() as *const __m256i);
+        let diff = _mm256_sub_epi8(curr, prev);
+
+        let mut buf = [0u8; 32];
+        _mm256_storeu_si256(buf.as_mut_ptr() as *mut __m256i, diff);
+        output.extend_from_slice(&buf);
+        i += 32;
+    }
+
+    while i < rem_len {
+        output.push(remaining[i].wrapping_sub(left[i]));
+        i += 1;
+    }
+}
+
+/// Apply Up filter using AVX2 (32 bytes at a time).
+///
+/// # Safety
+/// Caller must ensure AVX2 is available on the current CPU.
+#[target_feature(enable = "avx2")]
+pub unsafe fn filter_up_avx2(row: &[u8], prev_row: &[u8], output: &mut Vec<u8>) {
+    let len = row.len();
+    output.reserve(len);
+
+    let mut i = 0;
+    while i + 32 <= len {
+        let curr = _mm256_loadu_si256(row[i..].as_ptr() as *const __m256i);
+        let prev = _mm256_loadu_si256(prev_row[i..].as_ptr() as *const __m256i);
+        let diff = _mm256_sub_epi8(curr, prev);
+
+        let mut buf = [0u8; 32];
+        _mm256_storeu_si256(buf.as_mut_ptr() as *mut __m256i, diff);
+        output.extend_from_slice(&buf);
+        i += 32;
+    }
+
+    while i < len {
+        output.push(row[i].wrapping_sub(prev_row[i]));
+        i += 1;
+    }
+}
+
+/// Apply Average filter using AVX2 (32 bytes at a time).
+///
+/// # Safety
+/// Caller must ensure AVX2 is available on the current CPU.
+#[target_feature(enable = "avx2")]
+pub unsafe fn filter_average_avx2(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<u8>) {
+    let len = row.len();
+    output.reserve(len);
+
+    // First bpp bytes: use scalar
+    for i in 0..bpp.min(len) {
+        let left = 0u8;
+        let above = prev_row[i];
+        let avg = ((left as u16 + above as u16) / 2) as u8;
+        output.push(row[i].wrapping_sub(avg));
+    }
+
+    if len <= bpp {
+        return;
+    }
+
+    let mut i = bpp;
+    while i + 32 <= len {
+        let curr = _mm256_loadu_si256(row[i..].as_ptr() as *const __m256i);
+        let above = _mm256_loadu_si256(prev_row[i..].as_ptr() as *const __m256i);
+        let left = _mm256_loadu_si256(row[i - bpp..].as_ptr() as *const __m256i);
+
+        // avg = (left + above) >> 1
+        let left_lo = _mm256_unpacklo_epi8(left, _mm256_setzero_si256());
+        let left_hi = _mm256_unpackhi_epi8(left, _mm256_setzero_si256());
+        let above_lo = _mm256_unpacklo_epi8(above, _mm256_setzero_si256());
+        let above_hi = _mm256_unpackhi_epi8(above, _mm256_setzero_si256());
+
+        let avg_lo = _mm256_srli_epi16(_mm256_add_epi16(left_lo, above_lo), 1);
+        let avg_hi = _mm256_srli_epi16(_mm256_add_epi16(left_hi, above_hi), 1);
+        let avg = _mm256_packus_epi16(avg_lo, avg_hi);
+
+        let diff = _mm256_sub_epi8(curr, avg);
+
+        let mut buf = [0u8; 32];
+        _mm256_storeu_si256(buf.as_mut_ptr() as *mut __m256i, diff);
+        output.extend_from_slice(&buf);
+        i += 32;
+    }
+
+    // Remainder scalar
+    while i < len {
+        let left = if i >= bpp { row[i - bpp] as u16 } else { 0 };
+        let above = prev_row[i] as u16;
+        let avg = ((left + above) / 2) as u8;
+        output.push(row[i].wrapping_sub(avg));
         i += 1;
     }
 }

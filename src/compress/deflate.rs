@@ -2,9 +2,14 @@
 //!
 //! Combines LZ77 compression with Huffman coding.
 
-use crate::bits::BitWriter;
+use crate::bits::BitWriter64;
+use crate::compress::lz77::{
+    Lz77Compressor, PackedToken, Token, MAX_MATCH_LENGTH, MIN_MATCH_LENGTH,
+};
 use crate::compress::{adler32::adler32, huffman};
-use crate::compress::lz77::{Lz77Compressor, Token, MAX_MATCH_LENGTH, MIN_MATCH_LENGTH};
+use std::sync::LazyLock;
+use std::time::Duration;
+use std::time::Instant;
 
 /// Length code base values (codes 257-285).
 const LENGTH_BASE: [u16; 29] = [
@@ -29,6 +34,45 @@ const DISTANCE_EXTRA: [u8; 30] = [
     13,
 ];
 
+/// Timing and accounting information for a single DEFLATE encode.
+#[derive(Debug, Clone)]
+pub struct DeflateStats {
+    /// Time spent in LZ77 match finding/tokenization.
+    pub lz77_time: Duration,
+    /// Time spent encoding with fixed Huffman codes.
+    pub fixed_huffman_time: Duration,
+    /// Time spent encoding with dynamic Huffman codes.
+    pub dynamic_huffman_time: Duration,
+    /// Time spent choosing the smaller of fixed vs dynamic outputs.
+    pub choose_time: Duration,
+    /// Number of tokens produced by the LZ77 stage.
+    pub token_count: usize,
+    /// Number of literal tokens.
+    pub literal_count: usize,
+    /// Number of match tokens.
+    pub match_count: usize,
+    /// Whether the final stream used dynamic Huffman codes.
+    pub used_dynamic: bool,
+    /// Whether the zlib wrapper selected stored (uncompressed) blocks.
+    pub used_stored_block: bool,
+}
+
+impl Default for DeflateStats {
+    fn default() -> Self {
+        Self {
+            lz77_time: Duration::ZERO,
+            fixed_huffman_time: Duration::ZERO,
+            dynamic_huffman_time: Duration::ZERO,
+            choose_time: Duration::ZERO,
+            token_count: 0,
+            literal_count: 0,
+            match_count: 0,
+            used_dynamic: false,
+            used_stored_block: false,
+        }
+    }
+}
+
 /// Lookup table for length codes: maps length (3-258) to (symbol, extra_bits).
 /// Index is (length - 3), value is (symbol - 257, extra_bits).
 const LENGTH_LOOKUP: [(u8, u8); 256] = {
@@ -39,7 +83,9 @@ const LENGTH_LOOKUP: [(u8, u8); 256] = {
         // Find the appropriate code
         let mut code_idx = 0usize;
         while code_idx < 28 {
-            if length >= LENGTH_BASE[code_idx] as usize && length < LENGTH_BASE[code_idx + 1] as usize {
+            if length >= LENGTH_BASE[code_idx] as usize
+                && length < LENGTH_BASE[code_idx + 1] as usize
+            {
                 break;
             }
             code_idx += 1;
@@ -124,7 +170,7 @@ fn distance_code(distance: u16) -> (u16, u8, u16) {
 pub fn deflate(data: &[u8], level: u8) -> Vec<u8> {
     if data.is_empty() {
         // Empty input: just output empty final block
-        let mut writer = BitWriter::new();
+        let mut writer = BitWriter64::with_capacity(16);
         writer.write_bits(1, 1); // BFINAL = 1
         writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
 
@@ -140,15 +186,299 @@ pub fn deflate(data: &[u8], level: u8) -> Vec<u8> {
     let mut lz77 = Lz77Compressor::new(level);
     let tokens = lz77.compress(data);
 
+    // Rough output estimate to reduce reallocations.
+    let est_bytes = estimated_deflate_size(data.len(), level);
+
     // Choose between fixed and dynamic Huffman based on output size.
-    let fixed = encode_fixed_huffman(&tokens);
-    let dynamic = encode_dynamic_huffman(&tokens);
+    let fixed = encode_fixed_huffman_with_capacity(&tokens, est_bytes);
+    let dynamic = encode_dynamic_huffman_with_capacity(&tokens, est_bytes);
 
     if dynamic.len() < fixed.len() {
         dynamic
     } else {
         fixed
     }
+}
+
+/// Compress data using DEFLATE algorithm with packed tokens (non-reusable).
+///
+/// This is an experimental fast path that avoids `Token` allocations by
+/// emitting packed tokens directly into the Huffman encoder.
+pub fn deflate_packed(data: &[u8], level: u8) -> Vec<u8> {
+    if data.is_empty() {
+        // Empty input: just output empty final block
+        let mut writer = BitWriter64::with_capacity(16);
+        writer.write_bits(1, 1); // BFINAL = 1
+        writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
+
+        // Write end-of-block symbol (256)
+        let (code, len) = fixed_literal_codes_rev()[256];
+        writer.write_bits(code, len);
+
+        return writer.finish();
+    }
+
+    // Use LZ77 to find matches
+    let mut lz77 = Lz77Compressor::new(level);
+    let tokens = lz77.compress_packed(data);
+
+    // Rough output estimate to reduce reallocations.
+    let est_bytes = estimated_deflate_size(data.len(), level);
+
+    // Choose between fixed and dynamic Huffman based on output size.
+    let fixed = encode_fixed_huffman_packed_with_capacity(&tokens, est_bytes);
+    let dynamic = encode_dynamic_huffman_packed_with_capacity(&tokens, est_bytes);
+
+    if dynamic.len() < fixed.len() {
+        dynamic
+    } else {
+        fixed
+    }
+}
+
+/// Reusable DEFLATE encoder that minimizes allocations by reusing buffers.
+pub struct Deflater {
+    level: u8,
+    lz77: Lz77Compressor,
+    tokens: Vec<Token>,
+    packed_tokens: Vec<PackedToken>,
+}
+
+impl Deflater {
+    /// Create a new reusable deflater for the given level.
+    pub fn new(level: u8) -> Self {
+        let level = level.clamp(1, 9);
+        Self {
+            level,
+            lz77: Lz77Compressor::new(level),
+            tokens: Vec::new(),
+            packed_tokens: Vec::new(),
+        }
+    }
+
+    /// Compress raw data into a DEFLATE stream.
+    pub fn compress(&mut self, data: &[u8]) -> Vec<u8> {
+        if data.is_empty() {
+            let mut writer = BitWriter64::with_capacity(16);
+            writer.write_bits(1, 1); // BFINAL = 1
+            writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
+
+            // Write end-of-block symbol (256)
+            let lit_codes = huffman::fixed_literal_codes();
+            let code = lit_codes[256];
+            writer.write_bits(reverse_bits(code.code, code.length), code.length);
+
+            return writer.finish();
+        }
+
+        self.tokens.clear();
+        self.tokens.reserve(data.len());
+        self.lz77.compress_into(data, &mut self.tokens);
+
+        let est_bytes = estimated_deflate_size(data.len(), self.level);
+        let fixed = encode_fixed_huffman_with_capacity(&self.tokens, est_bytes);
+        let dynamic = encode_dynamic_huffman_with_capacity(&self.tokens, est_bytes);
+
+        if dynamic.len() < fixed.len() {
+            dynamic
+        } else {
+            fixed
+        }
+    }
+
+    /// Compress data and wrap in a zlib container.
+    pub fn compress_zlib(&mut self, data: &[u8]) -> Vec<u8> {
+        if data.is_empty() {
+            let mut output = Vec::with_capacity(8);
+            output.extend_from_slice(&zlib_header(self.level));
+
+            let mut writer = BitWriter64::with_capacity(16);
+            writer.write_bits(1, 1); // BFINAL = 1
+            writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
+
+            let lit_codes = huffman::fixed_literal_codes();
+            let code = lit_codes[256];
+            writer.write_bits(reverse_bits(code.code, code.length), code.length);
+            output.extend_from_slice(&writer.finish());
+            output.extend_from_slice(&adler32(data).to_be_bytes());
+            return output;
+        }
+
+        self.tokens.clear();
+        self.tokens.reserve(data.len());
+        self.lz77.compress_into(data, &mut self.tokens);
+
+        let est_bytes = estimated_deflate_size(data.len(), self.level);
+        let deflated = {
+            let fixed = encode_fixed_huffman_with_capacity(&self.tokens, est_bytes);
+            let dynamic = encode_dynamic_huffman_with_capacity(&self.tokens, est_bytes);
+            if dynamic.len() < fixed.len() {
+                dynamic
+            } else {
+                fixed
+            }
+        };
+
+        let use_stored = should_use_stored(data.len(), deflated.len());
+
+        let mut output = Vec::with_capacity(deflated.len().min(data.len()) + 32);
+        output.extend_from_slice(&zlib_header(self.level));
+
+        if use_stored {
+            let stored_blocks = deflate_stored(data);
+            output.extend_from_slice(&stored_blocks);
+        } else {
+            output.extend_from_slice(&deflated);
+        }
+
+        output.extend_from_slice(&adler32(data).to_be_bytes());
+        output
+    }
+
+    /// Compress data using packed tokens into a raw DEFLATE stream.
+    pub fn compress_packed(&mut self, data: &[u8]) -> Vec<u8> {
+        if data.is_empty() {
+            let mut writer = BitWriter64::with_capacity(16);
+            writer.write_bits(1, 1); // BFINAL = 1
+            writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
+
+            let lit_codes = fixed_literal_codes_rev();
+            let (code, len) = lit_codes[256];
+            writer.write_bits(code, len);
+            return writer.finish();
+        }
+
+        self.packed_tokens.clear();
+        self.packed_tokens.reserve(data.len());
+        self.lz77
+            .compress_packed_into(data, &mut self.packed_tokens);
+
+        let est_bytes = estimated_deflate_size(data.len(), self.level);
+        let fixed = encode_fixed_huffman_packed_with_capacity(&self.packed_tokens, est_bytes);
+        let dynamic = encode_dynamic_huffman_packed_with_capacity(&self.packed_tokens, est_bytes);
+
+        if dynamic.len() < fixed.len() {
+            dynamic
+        } else {
+            fixed
+        }
+    }
+
+    /// Compress data using packed tokens and wrap in a zlib container.
+    pub fn compress_packed_zlib(&mut self, data: &[u8]) -> Vec<u8> {
+        if data.is_empty() {
+            let mut output = Vec::with_capacity(8);
+            output.extend_from_slice(&zlib_header(self.level));
+
+            let mut writer = BitWriter64::with_capacity(16);
+            writer.write_bits(1, 1); // BFINAL = 1
+            writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
+
+            let lit_codes = fixed_literal_codes_rev();
+            let (code, len) = lit_codes[256];
+            writer.write_bits(code, len);
+            output.extend_from_slice(&writer.finish());
+            output.extend_from_slice(&adler32(data).to_be_bytes());
+            return output;
+        }
+
+        self.packed_tokens.clear();
+        self.packed_tokens.reserve(data.len());
+        self.lz77
+            .compress_packed_into(data, &mut self.packed_tokens);
+
+        let est_bytes = estimated_deflate_size(data.len(), self.level);
+        let deflated = {
+            let fixed = encode_fixed_huffman_packed_with_capacity(&self.packed_tokens, est_bytes);
+            let dynamic =
+                encode_dynamic_huffman_packed_with_capacity(&self.packed_tokens, est_bytes);
+            if dynamic.len() < fixed.len() {
+                dynamic
+            } else {
+                fixed
+            }
+        };
+
+        let use_stored = should_use_stored(data.len(), deflated.len());
+
+        let mut output = Vec::with_capacity(deflated.len().min(data.len()) + 32);
+        output.extend_from_slice(&zlib_header(self.level));
+
+        if use_stored {
+            let stored_blocks = deflate_stored(data);
+            output.extend_from_slice(&stored_blocks);
+        } else {
+            output.extend_from_slice(&deflated);
+        }
+
+        output.extend_from_slice(&adler32(data).to_be_bytes());
+        output
+    }
+}
+
+/// Compress data using DEFLATE and return encoded bytes plus timing/accounting stats.
+///
+/// This leaves the main `deflate` fast path unchanged; callers opt-in to the
+/// additional instrumentation by using this entrypoint.
+pub fn deflate_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats) {
+    if data.is_empty() {
+        let mut writer = BitWriter64::with_capacity(16);
+        writer.write_bits(1, 1); // BFINAL = 1
+        writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
+
+        // Write end-of-block symbol (256)
+        let lit_codes = huffman::fixed_literal_codes();
+        let code = lit_codes[256];
+        writer.write_bits(reverse_bits(code.code, code.length), code.length);
+
+        return (
+            writer.finish(),
+            DeflateStats {
+                used_dynamic: false,
+                ..Default::default()
+            },
+        );
+    }
+
+    // LZ77 tokenization
+    let t0 = Instant::now();
+    let mut lz77 = Lz77Compressor::new(level);
+    let tokens = lz77.compress(data);
+    let lz77_time = t0.elapsed();
+
+    let (literal_count, match_count) = token_counts(&tokens);
+
+    // Fixed Huffman encode
+    let t1 = Instant::now();
+    let est_bytes = estimated_deflate_size(data.len(), level);
+
+    let fixed = encode_fixed_huffman_with_capacity(&tokens, est_bytes);
+    let fixed_time = t1.elapsed();
+
+    // Dynamic Huffman encode
+    let t2 = Instant::now();
+    let dynamic = encode_dynamic_huffman_with_capacity(&tokens, est_bytes);
+    let dynamic_time = t2.elapsed();
+
+    // Choose smaller stream
+    let choose_start = Instant::now();
+    let use_dynamic = dynamic.len() < fixed.len();
+    let encoded = if use_dynamic { dynamic } else { fixed };
+    let choose_time = choose_start.elapsed();
+
+    let stats = DeflateStats {
+        lz77_time,
+        fixed_huffman_time: fixed_time,
+        dynamic_huffman_time: dynamic_time,
+        choose_time,
+        token_count: tokens.len(),
+        literal_count,
+        match_count,
+        used_dynamic: use_dynamic,
+        used_stored_block: false,
+    };
+
+    (encoded, stats)
 }
 
 /// Compress data and wrap it in a zlib container (RFC 1950).
@@ -182,6 +512,68 @@ pub fn deflate_zlib(data: &[u8], level: u8) -> Vec<u8> {
     output
 }
 
+/// Compress data with packed tokens and wrap it in a zlib container.
+pub fn deflate_zlib_packed(data: &[u8], level: u8) -> Vec<u8> {
+    // For empty input, keep the fixed-Huffman minimal block.
+    if data.is_empty() {
+        let mut output = Vec::with_capacity(8);
+        output.extend_from_slice(&zlib_header(level));
+        output.extend_from_slice(&deflate_packed(data, level));
+        output.extend_from_slice(&adler32(data).to_be_bytes());
+        return output;
+    }
+
+    let deflated = deflate_packed(data, level);
+
+    let use_stored = should_use_stored(data.len(), deflated.len());
+
+    let mut output = Vec::with_capacity(deflated.len().min(data.len()) + 32);
+    output.extend_from_slice(&zlib_header(level));
+
+    if use_stored {
+        let stored_blocks = deflate_stored(data);
+        output.extend_from_slice(&stored_blocks);
+    } else {
+        output.extend_from_slice(&deflated);
+    }
+
+    output.extend_from_slice(&adler32(data).to_be_bytes());
+    output
+}
+
+/// Compress data using DEFLATE in a zlib container, returning encoded bytes plus stats.
+pub fn deflate_zlib_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats) {
+    // Empty input mirrors `deflate_zlib`
+    if data.is_empty() {
+        let mut output = Vec::with_capacity(8);
+        output.extend_from_slice(&zlib_header(level));
+
+        let (deflated, mut stats) = deflate_with_stats(data, level);
+        output.extend_from_slice(&deflated);
+        output.extend_from_slice(&adler32(data).to_be_bytes());
+        stats.used_stored_block = false;
+        return (output, stats);
+    }
+
+    let (deflated, mut stats) = deflate_with_stats(data, level);
+
+    let use_stored = should_use_stored(data.len(), deflated.len());
+    let mut output = Vec::with_capacity(deflated.len().min(data.len()) + 32);
+    output.extend_from_slice(&zlib_header(level));
+
+    if use_stored {
+        let stored_blocks = deflate_stored(data);
+        output.extend_from_slice(&stored_blocks);
+    } else {
+        output.extend_from_slice(&deflated);
+    }
+
+    output.extend_from_slice(&adler32(data).to_be_bytes());
+
+    stats.used_stored_block = use_stored;
+    (output, stats)
+}
+
 /// Decide whether stored blocks would be smaller than the compressed stream.
 fn should_use_stored(data_len: usize, deflated_len: usize) -> bool {
     // Stored block size: data + 5 bytes per 65535 chunk
@@ -192,11 +584,15 @@ fn should_use_stored(data_len: usize, deflated_len: usize) -> bool {
 }
 
 /// Encode tokens using fixed Huffman codes.
-fn encode_fixed_huffman(tokens: &[Token]) -> Vec<u8> {
-    let lit_codes = huffman::fixed_literal_codes();
-    let dist_codes = huffman::fixed_distance_codes();
+pub fn encode_fixed_huffman(tokens: &[Token]) -> Vec<u8> {
+    encode_fixed_huffman_with_capacity(tokens, 1024)
+}
 
-    let mut writer = BitWriter::new();
+fn encode_fixed_huffman_with_capacity(tokens: &[Token], capacity_hint: usize) -> Vec<u8> {
+    let lit_rev = fixed_literal_codes_rev();
+    let dist_rev = fixed_distance_codes_rev();
+
+    let mut writer = BitWriter64::with_capacity(capacity_hint);
 
     // Block header: BFINAL=1 (last block), BTYPE=01 (fixed Huffman)
     writer.write_bits(1, 1); // BFINAL
@@ -205,14 +601,14 @@ fn encode_fixed_huffman(tokens: &[Token]) -> Vec<u8> {
     for token in tokens {
         match *token {
             Token::Literal(byte) => {
-                let code = lit_codes[byte as usize];
-                writer.write_bits(reverse_bits(code.code, code.length), code.length);
+                let (code, len) = lit_rev[byte as usize];
+                writer.write_bits(code, len);
             }
             Token::Match { length, distance } => {
                 // Encode length
                 let (len_symbol, len_extra_bits, len_extra_value) = length_code(length);
-                let len_code = lit_codes[len_symbol as usize];
-                writer.write_bits(reverse_bits(len_code.code, len_code.length), len_code.length);
+                let (len_code, len_len) = lit_rev[len_symbol as usize];
+                writer.write_bits(len_code, len_len);
 
                 if len_extra_bits > 0 {
                     writer.write_bits(len_extra_value as u32, len_extra_bits);
@@ -220,11 +616,8 @@ fn encode_fixed_huffman(tokens: &[Token]) -> Vec<u8> {
 
                 // Encode distance
                 let (dist_symbol, dist_extra_bits, dist_extra_value) = distance_code(distance);
-                let dist_code = dist_codes[dist_symbol as usize];
-                writer.write_bits(
-                    reverse_bits(dist_code.code, dist_code.length),
-                    dist_code.length,
-                );
+                let (dist_code, dist_len) = dist_rev[dist_symbol as usize];
+                writer.write_bits(dist_code, dist_len);
 
                 if dist_extra_bits > 0 {
                     writer.write_bits(dist_extra_value as u32, dist_extra_bits);
@@ -234,14 +627,62 @@ fn encode_fixed_huffman(tokens: &[Token]) -> Vec<u8> {
     }
 
     // End of block symbol (256)
-    let eob_code = lit_codes[256];
-    writer.write_bits(reverse_bits(eob_code.code, eob_code.length), eob_code.length);
+    let (eob_code, eob_len) = lit_rev[256];
+    writer.write_bits(eob_code, eob_len);
+
+    writer.finish()
+}
+
+/// Encode packed tokens using fixed Huffman codes (fast path).
+pub fn encode_fixed_huffman_packed(tokens: &[PackedToken]) -> Vec<u8> {
+    encode_fixed_huffman_packed_with_capacity(tokens, 1024)
+}
+
+fn encode_fixed_huffman_packed_with_capacity(
+    tokens: &[PackedToken],
+    capacity_hint: usize,
+) -> Vec<u8> {
+    let lit_rev = fixed_literal_codes_rev();
+    let dist_rev = fixed_distance_codes_rev();
+
+    let mut writer = BitWriter64::with_capacity(capacity_hint);
+
+    writer.write_bits(1, 1); // BFINAL
+    writer.write_bits(1, 2); // BTYPE fixed
+
+    for token in tokens {
+        if let Some(b) = token.as_literal() {
+            let (code, len) = lit_rev[b as usize];
+            writer.write_bits(code, len);
+        } else if let Some((length, distance)) = token.as_match() {
+            let (len_symbol, len_extra_bits, len_extra_value) = length_code(length);
+            let (len_code, len_len) = lit_rev[len_symbol as usize];
+            writer.write_bits(len_code, len_len);
+            if len_extra_bits > 0 {
+                writer.write_bits(len_extra_value as u32, len_extra_bits);
+            }
+
+            let (dist_symbol, dist_extra_bits, dist_extra_value) = distance_code(distance);
+            let (dist_code, dist_len) = dist_rev[dist_symbol as usize];
+            writer.write_bits(dist_code, dist_len);
+            if dist_extra_bits > 0 {
+                writer.write_bits(dist_extra_value as u32, dist_extra_bits);
+            }
+        }
+    }
+
+    let (eob_code, eob_len) = lit_rev[256];
+    writer.write_bits(eob_code, eob_len);
 
     writer.finish()
 }
 
 /// Encode tokens using dynamic Huffman codes (RFC 1951).
-fn encode_dynamic_huffman(tokens: &[Token]) -> Vec<u8> {
+pub fn encode_dynamic_huffman(tokens: &[Token]) -> Vec<u8> {
+    encode_dynamic_huffman_with_capacity(tokens, 1024)
+}
+
+fn encode_dynamic_huffman_with_capacity(tokens: &[Token], capacity_hint: usize) -> Vec<u8> {
     // Frequencies
     let mut lit_freqs = vec![0u32; 286]; // 0-285
     let mut dist_freqs = vec![0u32; 30]; // 0-29
@@ -268,6 +709,8 @@ fn encode_dynamic_huffman(tokens: &[Token]) -> Vec<u8> {
 
     let lit_codes = huffman::build_codes(&lit_freqs, huffman::MAX_CODE_LENGTH);
     let dist_codes = huffman::build_codes(&dist_freqs, huffman::MAX_CODE_LENGTH);
+    let lit_rev = prepare_reversed_codes(&lit_codes);
+    let dist_rev = prepare_reversed_codes(&dist_codes);
 
     // Code lengths
     let mut lit_lengths: Vec<u8> = lit_codes.iter().map(|c| c.length).collect();
@@ -286,9 +729,12 @@ fn encode_dynamic_huffman(tokens: &[Token]) -> Vec<u8> {
 
     // Build code length codes (max len 7)
     let cl_codes = huffman::build_codes(&cl_freqs, 7);
+    let cl_rev = prepare_reversed_codes(&cl_codes);
 
     // Determine HCLEN (last non-zero in order)
-    let cl_order: [usize; 19] = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+    let cl_order: [usize; 19] = [
+        16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
+    ];
     let mut hclen = 0;
     for (i, &idx) in cl_order.iter().enumerate().rev() {
         if cl_codes[idx].length > 0 {
@@ -297,7 +743,7 @@ fn encode_dynamic_huffman(tokens: &[Token]) -> Vec<u8> {
         }
     }
 
-    let mut writer = BitWriter::new();
+    let mut writer = BitWriter64::with_capacity(capacity_hint);
     writer.write_bits(1, 1); // BFINAL (single block)
     writer.write_bits(2, 2); // BTYPE=10 (dynamic)
 
@@ -307,13 +753,14 @@ fn encode_dynamic_huffman(tokens: &[Token]) -> Vec<u8> {
 
     // Write code length code lengths in order
     for &idx in cl_order.iter().take(hclen as usize + 4) {
-        writer.write_bits(cl_codes[idx].length as u32, 3);
+        let (code, len) = cl_rev[idx];
+        writer.write_bits(code, len);
     }
 
     // Write the RLE-encoded code lengths
     for (sym, extra_bits, extra_len) in rle {
-        let code = cl_codes[sym as usize];
-        writer.write_bits(reverse_bits(code.code, code.length), code.length);
+        let (code, len) = cl_rev[sym as usize];
+        writer.write_bits(code, len);
         if extra_len > 0 {
             writer.write_bits(extra_bits as u32, extra_len);
         }
@@ -323,20 +770,20 @@ fn encode_dynamic_huffman(tokens: &[Token]) -> Vec<u8> {
     for token in tokens {
         match *token {
             Token::Literal(byte) => {
-                let code = lit_codes[byte as usize];
-                writer.write_bits(reverse_bits(code.code, code.length), code.length);
+                let (code, len) = lit_rev[byte as usize];
+                writer.write_bits(code, len);
             }
             Token::Match { length, distance } => {
                 let (len_symbol, len_extra_bits, len_extra_value) = length_code(length);
-                let len_code = lit_codes[len_symbol as usize];
-                writer.write_bits(reverse_bits(len_code.code, len_code.length), len_code.length);
+                let (len_code, len_len) = lit_rev[len_symbol as usize];
+                writer.write_bits(len_code, len_len);
                 if len_extra_bits > 0 {
                     writer.write_bits(len_extra_value as u32, len_extra_bits);
                 }
 
                 let (dist_symbol, dist_extra_bits, dist_extra_value) = distance_code(distance);
-                let dist_code = dist_codes[dist_symbol as usize];
-                writer.write_bits(reverse_bits(dist_code.code, dist_code.length), dist_code.length);
+                let (dist_code, dist_len) = dist_rev[dist_symbol as usize];
+                writer.write_bits(dist_code, dist_len);
                 if dist_extra_bits > 0 {
                     writer.write_bits(dist_extra_value as u32, dist_extra_bits);
                 }
@@ -345,8 +792,118 @@ fn encode_dynamic_huffman(tokens: &[Token]) -> Vec<u8> {
     }
 
     // End of block
-    let eob_code = lit_codes[256];
-    writer.write_bits(reverse_bits(eob_code.code, eob_code.length), eob_code.length);
+    let (eob_code, eob_len) = lit_rev[256];
+    writer.write_bits(eob_code, eob_len);
+
+    writer.finish()
+}
+
+/// Encode packed tokens using dynamic Huffman codes.
+pub fn encode_dynamic_huffman_packed(tokens: &[PackedToken]) -> Vec<u8> {
+    encode_dynamic_huffman_packed_with_capacity(tokens, 1024)
+}
+
+fn encode_dynamic_huffman_packed_with_capacity(
+    tokens: &[PackedToken],
+    capacity_hint: usize,
+) -> Vec<u8> {
+    // Frequencies
+    let mut lit_freqs = vec![0u32; 286]; // 0-285
+    let mut dist_freqs = vec![0u32; 30]; // 0-29
+
+    for token in tokens {
+        if let Some(b) = token.as_literal() {
+            lit_freqs[b as usize] += 1;
+        } else if let Some((length, distance)) = token.as_match() {
+            let (len_symbol, _, _) = length_code(length);
+            lit_freqs[len_symbol as usize] += 1;
+
+            let (dist_symbol, _, _) = distance_code(distance);
+            dist_freqs[dist_symbol as usize] += 1;
+        }
+    }
+    // End-of-block
+    lit_freqs[256] += 1;
+
+    if dist_freqs.iter().all(|&f| f == 0) {
+        dist_freqs[0] = 1;
+    }
+
+    let lit_codes = huffman::build_codes(&lit_freqs, huffman::MAX_CODE_LENGTH);
+    let dist_codes = huffman::build_codes(&dist_freqs, huffman::MAX_CODE_LENGTH);
+    let lit_rev = prepare_reversed_codes(&lit_codes);
+    let dist_rev = prepare_reversed_codes(&dist_codes);
+
+    let mut lit_lengths: Vec<u8> = lit_codes.iter().map(|c| c.length).collect();
+    let mut dist_lengths: Vec<u8> = dist_codes.iter().map(|c| c.length).collect();
+
+    let hlit = (last_nonzero(&lit_lengths).saturating_sub(257)).min(29);
+    let hdist = (last_nonzero(&dist_lengths).saturating_sub(1)).min(29);
+
+    lit_lengths.truncate(257 + hlit as usize);
+    dist_lengths.truncate(1 + hdist as usize);
+
+    let mut cl_freqs = vec![0u32; 19];
+    let rle = rle_code_lengths(&lit_lengths, &dist_lengths, &mut cl_freqs);
+
+    let cl_codes = huffman::build_codes(&cl_freqs, 7);
+    let cl_rev = prepare_reversed_codes(&cl_codes);
+
+    let cl_order: [usize; 19] = [
+        16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
+    ];
+    let mut hclen = 0;
+    for (i, &idx) in cl_order.iter().enumerate().rev() {
+        if cl_codes[idx].length > 0 {
+            hclen = i as u8;
+            break;
+        }
+    }
+
+    let mut writer = BitWriter64::with_capacity(capacity_hint);
+    writer.write_bits(1, 1); // BFINAL (single block)
+    writer.write_bits(2, 2); // BTYPE=10 (dynamic)
+
+    writer.write_bits(hlit as u32, 5); // HLIT
+    writer.write_bits(hdist as u32, 5); // HDIST
+    writer.write_bits(hclen as u32, 4); // HCLEN
+
+    for &idx in cl_order.iter().take(hclen as usize + 4) {
+        let (code, len) = cl_rev[idx];
+        writer.write_bits(code, len);
+    }
+
+    for (sym, extra_bits, extra_len) in rle {
+        let (code, len) = cl_rev[sym as usize];
+        writer.write_bits(code, len);
+        if extra_len > 0 {
+            writer.write_bits(extra_bits as u32, extra_len);
+        }
+    }
+
+    for token in tokens {
+        if let Some(b) = token.as_literal() {
+            let (code, len) = lit_rev[b as usize];
+            writer.write_bits(code, len);
+        } else if let Some((length, distance)) = token.as_match() {
+            let (len_symbol, len_extra_bits, len_extra_value) = length_code(length);
+            let (len_code, len_len) = lit_rev[len_symbol as usize];
+            writer.write_bits(len_code, len_len);
+            if len_extra_bits > 0 {
+                writer.write_bits(len_extra_value as u32, len_extra_bits);
+            }
+
+            let (dist_symbol, dist_extra_bits, dist_extra_value) = distance_code(distance);
+            let (dist_code, dist_len) = dist_rev[dist_symbol as usize];
+            writer.write_bits(dist_code, dist_len);
+            if dist_extra_bits > 0 {
+                writer.write_bits(dist_extra_value as u32, dist_extra_bits);
+            }
+        }
+    }
+
+    let (eob_code, eob_len) = lit_rev[256];
+    writer.write_bits(eob_code, eob_len);
 
     writer.finish()
 }
@@ -357,6 +914,30 @@ fn last_nonzero(lengths: &[u8]) -> usize {
         .rposition(|&l| l != 0)
         .map(|i| i + 1)
         .unwrap_or(1) // minimum 1 code
+}
+
+/// Count literal and match tokens for stats.
+fn token_counts(tokens: &[Token]) -> (usize, usize) {
+    let mut literal_count = 0;
+    let mut match_count = 0;
+    for token in tokens {
+        match token {
+            Token::Literal(_) => literal_count += 1,
+            Token::Match { .. } => match_count += 1,
+        }
+    }
+    (literal_count, match_count)
+}
+
+/// Heuristic estimate for compressed size in bytes to pre-allocate writers.
+fn estimated_deflate_size(data_len: usize, level: u8) -> usize {
+    let est = match level {
+        1..=3 => data_len.saturating_mul(9) / 10, // fast modes ~90%
+        4..=6 => data_len.saturating_mul(7) / 10, // default ~70%
+        7..=9 => data_len.saturating_mul(6) / 10, // max ~60%
+        _ => data_len,
+    };
+    est.max(1024)
 }
 
 /// RLE encode literal/dist code lengths and collect code length code frequencies.
@@ -444,11 +1025,53 @@ const REVERSE_BYTE: [u8; 256] = {
 /// Uses a lookup table for O(1) byte reversal.
 #[inline]
 fn reverse_bits(code: u16, length: u8) -> u32 {
+    if length == 0 {
+        return 0;
+    }
     // Reverse all 16 bits using byte lookup table, then shift to correct position
     let low = REVERSE_BYTE[code as u8 as usize] as u16;
     let high = REVERSE_BYTE[(code >> 8) as u8 as usize] as u16;
     let reversed = (low << 8) | high;
     (reversed >> (16 - length)) as u32
+}
+
+/// Precompute reversed codes for a slice of Huffman codes.
+#[inline]
+fn prepare_reversed_codes(codes: &[huffman::HuffmanCode]) -> Vec<(u32, u8)> {
+    codes
+        .iter()
+        .map(|c| (reverse_bits(c.code, c.length), c.length))
+        .collect()
+}
+
+/// Cached reversed fixed literal codes.
+static FIXED_LIT_REV: LazyLock<[(u32, u8); 288]> = LazyLock::new(|| {
+    let codes = huffman::fixed_literal_codes();
+    let mut out = [(0u32, 0u8); 288];
+    for (i, c) in codes.iter().enumerate() {
+        out[i] = (reverse_bits(c.code, c.length), c.length);
+    }
+    out
+});
+
+/// Cached reversed fixed distance codes.
+static FIXED_DIST_REV: LazyLock<[(u32, u8); 32]> = LazyLock::new(|| {
+    let codes = huffman::fixed_distance_codes();
+    let mut out = [(0u32, 0u8); 32];
+    for (i, c) in codes.iter().enumerate() {
+        out[i] = (reverse_bits(c.code, c.length), c.length);
+    }
+    out
+});
+
+#[inline]
+fn fixed_literal_codes_rev() -> &'static [(u32, u8); 288] {
+    &*FIXED_LIT_REV
+}
+
+#[inline]
+fn fixed_distance_codes_rev() -> &'static [(u32, u8); 32] {
+    &*FIXED_DIST_REV
 }
 
 /// Build the two-byte zlib header for the given compression level.
@@ -458,9 +1081,9 @@ fn zlib_header(level: u8) -> [u8; 2] {
 
     // Map level to FLEVEL (informative only)
     let flevel = match level {
-        0 | 1 | 2 => 1,        // fast
-        3..=6 => 2,            // default
-        _ => 3,                // maximum
+        0 | 1 | 2 => 1, // fast
+        3..=6 => 2,     // default
+        _ => 3,         // maximum
     };
 
     let mut flg: u8 = flevel << 6; // FDICT=0
@@ -616,6 +1239,26 @@ mod tests {
     }
 
     #[test]
+    fn test_deflate_zlib_packed_roundtrip_random_small() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1001);
+        for len in [0usize, 1, 2, 5, 32, 128, 1024, 4096] {
+            let mut data = vec![0u8; len];
+            rng.fill(data.as_mut_slice());
+            let encoded = deflate_zlib_packed(&data, 6);
+            let decoded = decompress_zlib(&encoded);
+            assert_eq!(decoded, data, "mismatch at len={}", len);
+        }
+    }
+
+    #[test]
+    fn test_deflate_zlib_packed_matches_standard_output() {
+        let data = b"The quick brown fox jumps over the lazy dog. Pack me tightly!";
+        let std_encoded = deflate_zlib(data, 6);
+        let packed_encoded = deflate_zlib_packed(data, 6);
+        assert_eq!(std_encoded, packed_encoded);
+    }
+
+    #[test]
     fn test_deflate_zlib_incompressible_prefers_stored() {
         let mut data = vec![0u8; 10_000];
         // High-entropy pattern to discourage compression
@@ -628,5 +1271,47 @@ mod tests {
         // stored overhead per 65535 block is 5 bytes + header/adler
         let stored_overhead = (data.len() / 65_535 + 1) * 5 + 2 + 4;
         assert!(encoded.len() <= data.len() + stored_overhead);
+    }
+
+    #[test]
+    fn test_packed_fixed_matches_standard() {
+        let data = b"aaaaabbbbccddeeffgg";
+        let mut lz = Lz77Compressor::new(6);
+        let tokens = lz.compress(data);
+
+        let mut packed = Vec::with_capacity(tokens.len());
+        for t in &tokens {
+            match t {
+                Token::Literal(b) => packed.push(PackedToken::literal(*b)),
+                Token::Match { length, distance } => {
+                    packed.push(PackedToken::match_(*length, *distance))
+                }
+            }
+        }
+
+        let std_out = encode_fixed_huffman(&tokens);
+        let packed_out = encode_fixed_huffman_packed(&packed);
+        assert_eq!(std_out, packed_out);
+    }
+
+    #[test]
+    fn test_packed_dynamic_matches_standard() {
+        let data = b"The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog.";
+        let mut lz = Lz77Compressor::new(6);
+        let tokens = lz.compress(data);
+
+        let mut packed = Vec::with_capacity(tokens.len());
+        for t in &tokens {
+            match t {
+                Token::Literal(b) => packed.push(PackedToken::literal(*b)),
+                Token::Match { length, distance } => {
+                    packed.push(PackedToken::match_(*length, *distance))
+                }
+            }
+        }
+
+        let std_out = encode_dynamic_huffman(&tokens);
+        let packed_out = encode_dynamic_huffman_packed(&packed);
+        assert_eq!(std_out, packed_out);
     }
 }

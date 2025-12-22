@@ -55,8 +55,7 @@ pub fn build_codes(frequencies: &[u32], max_length: usize) -> Vec<HuffmanCode> {
     let non_zero: Vec<(u16, u32)> = frequencies
         .iter()
         .enumerate()
-        .filter(|(_, &f)| f > 0)
-        .map(|(i, &f)| (i as u16, f))
+        .filter_map(|(i, &f)| (f > 0).then_some((i as u16, f)))
         .collect();
 
     if non_zero.is_empty() {

@@ -6,7 +6,7 @@ pub mod chunk;
 pub mod filter;
 
 use crate::color::ColorType;
-use crate::compress::deflate::deflate_zlib;
+use crate::compress::deflate::deflate_zlib_packed;
 use crate::error::{Error, Result};
 
 /// PNG file signature (magic bytes).
@@ -48,6 +48,15 @@ pub enum FilterStrategy {
     Paeth,
     /// Choose best filter per row (best compression, slower).
     Adaptive,
+    /// Adaptive but with early cut and limited trials (faster).
+    AdaptiveFast,
+    /// Adaptive on sampled rows, reuse chosen filter on intervening rows.
+    /// `interval` must be >= 1. Example: interval=4 runs full adaptive
+    /// every 4th row and reuses the last chosen filter for others.
+    AdaptiveSampled {
+        /// Number of rows between full adaptive evaluations (minimum 1).
+        interval: u32,
+    },
 }
 
 /// Encode raw pixel data as PNG.
@@ -61,7 +70,16 @@ pub enum FilterStrategy {
 /// # Returns
 /// Complete PNG file as bytes.
 pub fn encode(data: &[u8], width: u32, height: u32, color_type: ColorType) -> Result<Vec<u8>> {
-    encode_with_options(data, width, height, color_type, &PngOptions::default())
+    let mut output = Vec::new();
+    encode_into(
+        &mut output,
+        data,
+        width,
+        height,
+        color_type,
+        &PngOptions::default(),
+    )?;
+    Ok(output)
 }
 
 /// Encode raw pixel data as PNG with custom options.
@@ -72,6 +90,23 @@ pub fn encode_with_options(
     color_type: ColorType,
     options: &PngOptions,
 ) -> Result<Vec<u8>> {
+    let mut output = Vec::new();
+    encode_into(&mut output, data, width, height, color_type, options)?;
+    Ok(output)
+}
+
+/// Encode raw pixel data as PNG into a caller-provided buffer.
+///
+/// The `output` buffer will be cleared before writing. This API allows callers
+/// to reuse an allocation across multiple encodes.
+pub fn encode_into(
+    output: &mut Vec<u8>,
+    data: &[u8],
+    width: u32,
+    height: u32,
+    color_type: ColorType,
+    options: &PngOptions,
+) -> Result<()> {
     if !(1..=9).contains(&options.compression_level) {
         return Err(Error::InvalidCompressionLevel(options.compression_level));
     }
@@ -99,26 +134,28 @@ pub fn encode_with_options(
         });
     }
 
+    output.clear();
+
     // Estimate output size (compressed data + overhead)
-    let mut output = Vec::with_capacity(expected_len / 2 + 1024);
+    output.reserve(expected_len / 2 + 1024);
 
     // Write PNG signature
     output.extend_from_slice(&PNG_SIGNATURE);
 
     // Write IHDR chunk
-    write_ihdr(&mut output, width, height, color_type);
+    write_ihdr(output, width, height, color_type);
 
     // Apply filtering and compression
     let filtered = filter::apply_filters(data, width, height, bytes_per_pixel, options);
-    let compressed = deflate_zlib(&filtered, options.compression_level);
+    let compressed = deflate_zlib_packed(&filtered, options.compression_level);
 
     // Write IDAT chunk(s)
-    write_idat_chunks(&mut output, &compressed);
+    write_idat_chunks(output, &compressed);
 
     // Write IEND chunk
-    write_iend(&mut output);
+    write_iend(output);
 
-    Ok(output)
+    Ok(())
 }
 
 /// Write IHDR (image header) chunk.
@@ -151,8 +188,8 @@ fn write_ihdr(output: &mut Vec<u8>, width: u32, height: u32, color_type: ColorTy
 
 /// Write IDAT (image data) chunks.
 fn write_idat_chunks(output: &mut Vec<u8>, compressed: &[u8]) {
-    // Write in chunks of up to 8KB to avoid huge chunks
-    const CHUNK_SIZE: usize = 8192;
+    // Write in moderately large chunks to reduce per-chunk overhead (CRC/length)
+    const CHUNK_SIZE: usize = 32 * 1024;
 
     for chunk_data in compressed.chunks(CHUNK_SIZE) {
         chunk::write_chunk(output, b"IDAT", chunk_data);
@@ -200,6 +237,42 @@ mod tests {
         let pixels = vec![255, 0]; // Too short for 1x1 RGB
         let result = encode(&pixels, 1, 1, ColorType::Rgb);
         assert!(matches!(result, Err(Error::InvalidDataLength { .. })));
+    }
+
+    #[test]
+    fn test_encode_into_reuses_buffer() {
+        let mut output = Vec::with_capacity(64);
+        let pixels1 = vec![0u8, 0, 0]; // black 1x1 RGB
+        encode_into(
+            &mut output,
+            &pixels1,
+            1,
+            1,
+            ColorType::Rgb,
+            &PngOptions::default(),
+        )
+        .unwrap();
+        let first = output.clone();
+        let first_cap = output.capacity();
+        assert!(!first.is_empty());
+
+        let pixels2 = vec![255u8, 0, 0]; // red 1x1 RGB
+        encode_into(
+            &mut output,
+            &pixels2,
+            1,
+            1,
+            ColorType::Rgb,
+            &PngOptions::default(),
+        )
+        .unwrap();
+
+        assert_ne!(
+            first, output,
+            "buffer should have been reused and rewritten"
+        );
+        assert!(output.capacity() >= first_cap);
+        assert_eq!(&output[0..8], &PNG_SIGNATURE);
     }
 
     #[test]

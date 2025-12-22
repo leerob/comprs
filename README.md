@@ -12,7 +12,7 @@ A minimal-dependency, high-performance image compression library written in Rust
 
 ## Toolchain
 
-The test and bench suites currently require **Rust nightly** (e.g., `rustc 1.94.0-nightly`) because transitive dependencies (`aligned` via `image`) opt into `edition2024`. Use `rustup override set nightly` in this workspace to match the CI/tooling expectation.
+The project builds and tests on **stable Rust 1.82+**. Dev-dependencies are pinned to avoid `edition2024` transitive pulls, so no nightly toolchain is required.
 
 ## Installation
 
@@ -64,6 +64,39 @@ let options = JpegOptions {
 let jpeg_data = jpeg::encode_with_options(&pixels, 1, 1, 85, ColorType::Rgb, &options).unwrap();
 ```
 
+### Buffer reuse (PNG & JPEG)
+
+Both encoders support writing into a caller-provided buffer to avoid repeated allocations when encoding multiple images in a loop:
+
+```rust
+// PNG
+let mut png_buf = Vec::new();
+png::encode_into(
+    &mut png_buf,
+    &pixels,
+    3,
+    1,
+    ColorType::Rgb,
+    &PngOptions::default(),
+).unwrap();
+
+// JPEG
+let mut jpg_buf = Vec::new();
+jpeg::encode_with_options_into(
+    &mut jpg_buf,
+    &pixels,
+    3,
+    1,
+    85,
+    ColorType::Rgb,
+    &jpeg::JpegOptions {
+        quality: 85,
+        subsampling: jpeg::Subsampling::S444,
+        restart_interval: None,
+    },
+).unwrap();
+```
+
 ### Command-Line Interface
 
 The library includes a CLI tool for quick image compression from the terminal. It only supports PNG and JPEG images in and out.
@@ -98,6 +131,10 @@ comprs photo.png -o photo.jpg --subsampling s420
 # PNG with specific filter strategy
 comprs input.jpg -o output.png --filter paeth
 
+# Adaptive fast (reduced trials) or sampled (every Nth row) strategies
+comprs input.jpg -o output.png --filter adaptive-fast
+comprs input.jpg -o output.png --filter adaptive-sampled --adaptive-sample-interval 8
+
 # Convert to grayscale
 comprs color.png -o gray.jpg --grayscale
 
@@ -114,7 +151,8 @@ comprs input.png -o output.jpg -v
 | `-q, --quality`     | JPEG quality (1-100)                                             | 85                         |
 | `-c, --compression` | PNG compression level (1-9)                                      | 6                          |
 | `--subsampling`     | JPEG chroma subsampling (`s444`, `s420`)                         | s444                       |
-| `--filter`          | PNG filter (`none`, `sub`, `up`, `average`, `paeth`, `adaptive`) | adaptive                   |
+| `--filter`          | PNG filter (`none`, `sub`, `up`, `average`, `paeth`, `adaptive`, `adaptive-fast`, `adaptive-sampled`) | adaptive                   |
+| `--adaptive-sample-interval` | Rows between full adaptive evaluations when using `adaptive-sampled` | 4 |
 | `--grayscale`       | Convert to grayscale                                             | false                      |
 | `-v, --verbose`     | Show detailed output                                             | false                      |
 

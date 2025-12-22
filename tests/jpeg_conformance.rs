@@ -5,8 +5,8 @@
 
 use comprs::{jpeg, ColorType};
 use image::GenericImageView;
-use rand::{rngs::StdRng, Rng, SeedableRng};
 use proptest::prelude::*;
+use rand::{rngs::StdRng, Rng, SeedableRng};
 mod support;
 use support::jpeg_corpus::read_jpeg_corpus;
 
@@ -82,7 +82,13 @@ fn test_various_sizes() {
         assert!(result.is_ok(), "Failed for size {}x{}", width, height);
 
         let data = result.unwrap();
-        assert_eq!(&data[0..2], &[0xFF, 0xD8], "Missing SOI for {}x{}", width, height);
+        assert_eq!(
+            &data[0..2],
+            &[0xFF, 0xD8],
+            "Missing SOI for {}x{}",
+            width,
+            height
+        );
         assert_eq!(
             &data[data.len() - 2..],
             &[0xFF, 0xD9],
@@ -370,11 +376,11 @@ fn test_jpeg_marker_structure_with_restart() {
         );
 
         match marker {
-            0xE0 => saw_app0 = true,      // APP0
-            0xDB => saw_dqt = true,       // DQT
-            0xC0 => saw_sof0 = true,      // SOF0
-            0xC4 => saw_dht = true,       // DHT
-            0xDD => saw_dri = true,       // DRI
+            0xE0 => saw_app0 = true, // APP0
+            0xDB => saw_dqt = true,  // DQT
+            0xC0 => saw_sof0 = true, // SOF0
+            0xC4 => saw_dht = true,  // DHT
+            0xDD => saw_dri = true,  // DRI
             0xDA => {
                 saw_sos = true; // SOS
                 break; // after SOS, entropy-coded data continues until EOI
@@ -417,46 +423,38 @@ fn test_jpeg_no_restart_marker_without_interval() {
     );
 }
 
-fn jpeg_case_strategy(
-) -> impl Strategy<Value = (u32, u32, u8, ColorType, jpeg::Subsampling, Option<u16>, Vec<u8>)> {
-    (1u32..24, 1u32..24, 30u8..96)
-        .prop_flat_map(|(w, h, q)| {
-            prop_oneof![Just(ColorType::Rgb), Just(ColorType::Gray)].prop_flat_map(
-                move |color_type| {
-                    let bytes_per_pixel = match color_type {
-                        ColorType::Rgb => 3,
-                        ColorType::Gray => 1,
-                        _ => unreachable!(),
-                    };
-                    let subsampling = if matches!(color_type, ColorType::Rgb) {
-                        prop_oneof![
-                            Just(jpeg::Subsampling::S444),
-                            Just(jpeg::Subsampling::S420),
-                        ]
-                        .boxed()
-                    } else {
-                        Just(jpeg::Subsampling::S444).boxed()
-                    };
-                    let restart = prop_oneof![Just(None), (1u16..8u16).prop_map(Some)];
-                    (subsampling, restart).prop_flat_map(move |(subsampling, restart_interval)| {
-                        let len = (w * h) as usize * bytes_per_pixel;
-                        proptest::collection::vec(any::<u8>(), len).prop_map(
-                            move |data| {
-                                (
-                                    w,
-                                    h,
-                                    q,
-                                    color_type,
-                                    subsampling,
-                                    restart_interval,
-                                    data,
-                                )
-                            },
-                        )
-                    })
-                },
-            )
+fn jpeg_case_strategy() -> impl Strategy<
+    Value = (
+        u32,
+        u32,
+        u8,
+        ColorType,
+        jpeg::Subsampling,
+        Option<u16>,
+        Vec<u8>,
+    ),
+> {
+    (1u32..24, 1u32..24, 30u8..96).prop_flat_map(|(w, h, q)| {
+        prop_oneof![Just(ColorType::Rgb), Just(ColorType::Gray)].prop_flat_map(move |color_type| {
+            let bytes_per_pixel = match color_type {
+                ColorType::Rgb => 3,
+                ColorType::Gray => 1,
+                _ => unreachable!(),
+            };
+            let subsampling = if matches!(color_type, ColorType::Rgb) {
+                prop_oneof![Just(jpeg::Subsampling::S444), Just(jpeg::Subsampling::S420),].boxed()
+            } else {
+                Just(jpeg::Subsampling::S444).boxed()
+            };
+            let restart = prop_oneof![Just(None), (1u16..8u16).prop_map(Some)];
+            (subsampling, restart).prop_flat_map(move |(subsampling, restart_interval)| {
+                let len = (w * h) as usize * bytes_per_pixel;
+                proptest::collection::vec(any::<u8>(), len).prop_map(move |data| {
+                    (w, h, q, color_type, subsampling, restart_interval, data)
+                })
+            })
         })
+    })
 }
 
 proptest! {

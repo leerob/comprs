@@ -58,6 +58,7 @@ pub fn apply_filters(
 ) -> Vec<u8> {
     let row_bytes = width as usize * bytes_per_pixel;
     let filtered_row_size = row_bytes + 1; // +1 for filter type byte
+    let zero_row = vec![0u8; row_bytes];
 
     // Parallel path (only for adaptive; other strategies are trivial)
     #[cfg(feature = "parallel")]
@@ -78,18 +79,56 @@ pub fn apply_filters(
     let mut output = Vec::with_capacity(filtered_row_size * height as usize);
     let mut prev_row = vec![0u8; row_bytes];
     let mut adaptive_scratch = AdaptiveScratch::new(row_bytes);
+    let mut last_filter: u8 = FILTER_PAETH; // default guess for sampled reuse
 
     for y in 0..height as usize {
         let row_start = y * row_bytes;
         let row = &data[row_start..row_start + row_bytes];
-        filter_row(
-            row,
-            if y == 0 { &[] } else { &prev_row },
-            bytes_per_pixel,
-            options.filter_strategy,
-            &mut output,
-            &mut adaptive_scratch,
-        );
+        match options.filter_strategy {
+            FilterStrategy::AdaptiveSampled { interval } if interval > 1 => {
+                let interval = interval.max(1) as usize;
+                let prev = if y == 0 { &zero_row[..] } else { &prev_row[..] };
+                if y % interval == 0 {
+                    let base = output.len();
+                    adaptive_filter(
+                        row,
+                        prev,
+                        bytes_per_pixel,
+                        &mut output,
+                        &mut adaptive_scratch,
+                    );
+                    if let Some(&f) = output.get(base) {
+                        last_filter = f;
+                    }
+                } else {
+                    output.push(last_filter);
+                    apply_filter_type(
+                        last_filter,
+                        row,
+                        prev,
+                        bytes_per_pixel,
+                        &mut output,
+                        &mut adaptive_scratch,
+                    );
+                }
+            }
+            _ => {
+                let base = output.len();
+                filter_row(
+                    row,
+                    if y == 0 { &zero_row[..] } else { &prev_row[..] },
+                    bytes_per_pixel,
+                    options.filter_strategy,
+                    &mut output,
+                    &mut adaptive_scratch,
+                );
+                if matches!(options.filter_strategy, FilterStrategy::AdaptiveFast) {
+                    if let Some(&f) = output.get(base) {
+                        last_filter = f;
+                    }
+                }
+            }
+        }
 
         // Update previous row
         prev_row.copy_from_slice(row);
@@ -133,11 +172,20 @@ fn filter_up(row: &[u8], prev_row: &[u8], output: &mut Vec<u8>) {
 
 /// Average filter: difference from average of left and above.
 fn filter_average(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<u8>) {
-    for (i, &byte) in row.iter().enumerate() {
-        let left = if i >= bpp { row[i - bpp] as u16 } else { 0 };
-        let above = prev_row[i] as u16;
-        let avg = ((left + above) / 2) as u8;
-        output.push(byte.wrapping_sub(avg));
+    #[cfg(feature = "simd")]
+    {
+        simd::filter_average(row, prev_row, bpp, output);
+        return;
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        for (i, &byte) in row.iter().enumerate() {
+            let left = if i >= bpp { row[i - bpp] as u16 } else { 0 };
+            let above = prev_row[i] as u16;
+            let avg = ((left + above) / 2) as u8;
+            output.push(byte.wrapping_sub(avg));
+        }
     }
 }
 
@@ -188,6 +236,8 @@ fn adaptive_filter(
 
     let mut best_filter = FILTER_NONE;
     let mut best_score = u64::MAX;
+    // Early-stop threshold: if a candidate beats this, skip remaining filters.
+    let early_stop = (row.len() as u64 / 8).saturating_add(1);
 
     // Try None filter first
     scratch.none.extend_from_slice(row);
@@ -195,6 +245,11 @@ fn adaptive_filter(
     if score < best_score {
         best_score = score;
         best_filter = FILTER_NONE;
+        if best_score <= early_stop {
+            output.push(best_filter);
+            output.extend_from_slice(&scratch.none);
+            return;
+        }
     }
 
     // A score of 0 means all zeros - can't do better
@@ -210,7 +265,7 @@ fn adaptive_filter(
     if score < best_score {
         best_score = score;
         best_filter = FILTER_SUB;
-        if best_score == 0 {
+        if best_score == 0 || best_score <= early_stop {
             output.push(best_filter);
             output.extend_from_slice(&scratch.sub);
             return;
@@ -223,7 +278,7 @@ fn adaptive_filter(
     if score < best_score {
         best_score = score;
         best_filter = FILTER_UP;
-        if best_score == 0 {
+        if best_score == 0 || best_score <= early_stop {
             output.push(best_filter);
             output.extend_from_slice(&scratch.up);
             return;
@@ -236,7 +291,7 @@ fn adaptive_filter(
     if score < best_score {
         best_score = score;
         best_filter = FILTER_AVERAGE;
-        if best_score == 0 {
+        if best_score == 0 || best_score <= early_stop {
             output.push(best_filter);
             output.extend_from_slice(&scratch.avg);
             return;
@@ -262,6 +317,62 @@ fn adaptive_filter(
     }
 }
 
+/// Adaptive filtering with a faster heuristic and early cutoffs.
+fn adaptive_filter_fast(
+    row: &[u8],
+    prev_row: &[u8],
+    bpp: usize,
+    output: &mut Vec<u8>,
+    scratch: &mut AdaptiveScratch,
+) {
+    scratch.clear();
+
+    // Try Sub first (good for high-frequency data)
+    filter_sub(row, bpp, &mut scratch.sub);
+    let mut best_filter = FILTER_SUB;
+    let mut best_score = score_filter(&scratch.sub);
+
+    // Early stop threshold: very low score, stop immediately.
+    let early_stop = (row.len() as u64 / 10).saturating_add(1);
+    if best_score <= early_stop {
+        output.push(best_filter);
+        output.extend_from_slice(&scratch.sub);
+        return;
+    }
+
+    // Try Up (good for smooth gradients)
+    filter_up(row, prev_row, &mut scratch.up);
+    let up_score = score_filter(&scratch.up);
+    if up_score < best_score {
+        best_score = up_score;
+        best_filter = FILTER_UP;
+    }
+    if best_score <= early_stop {
+        output.push(best_filter);
+        match best_filter {
+            FILTER_SUB => output.extend_from_slice(&scratch.sub),
+            FILTER_UP => output.extend_from_slice(&scratch.up),
+            _ => {}
+        }
+        return;
+    }
+
+    // Try Paeth last (more expensive)
+    filter_paeth(row, prev_row, bpp, &mut scratch.paeth);
+    let paeth_score = score_filter(&scratch.paeth);
+    if paeth_score < best_score {
+        best_filter = FILTER_PAETH;
+    }
+
+    output.push(best_filter);
+    match best_filter {
+        FILTER_SUB => output.extend_from_slice(&scratch.sub),
+        FILTER_UP => output.extend_from_slice(&scratch.up),
+        FILTER_PAETH => output.extend_from_slice(&scratch.paeth),
+        _ => unreachable!(),
+    }
+}
+
 /// Filter a single row with the configured strategy.
 fn filter_row(
     row: &[u8],
@@ -282,46 +393,45 @@ fn filter_row(
         }
         FilterStrategy::Up => {
             output.push(FILTER_UP);
-            let mut zero = Vec::new();
-            let p = if prev_row.is_empty() {
-                zero.resize(row.len(), 0);
-                &zero[..]
-            } else {
-                prev_row
-            };
-            filter_up(row, p, output);
+            filter_up(row, prev_row, output);
         }
         FilterStrategy::Average => {
             output.push(FILTER_AVERAGE);
-            let mut zero = Vec::new();
-            let p = if prev_row.is_empty() {
-                zero.resize(row.len(), 0);
-                &zero[..]
-            } else {
-                prev_row
-            };
-            filter_average(row, p, bpp, output);
+            filter_average(row, prev_row, bpp, output);
         }
         FilterStrategy::Paeth => {
             output.push(FILTER_PAETH);
-            let mut zero = Vec::new();
-            let p = if prev_row.is_empty() {
-                zero.resize(row.len(), 0);
-                &zero[..]
-            } else {
-                prev_row
-            };
-            filter_paeth(row, p, bpp, output);
+            filter_paeth(row, prev_row, bpp, output);
         }
         FilterStrategy::Adaptive => {
-            let mut zero = Vec::new();
-            let p = if prev_row.is_empty() {
-                zero.resize(row.len(), 0);
-                &zero[..]
-            } else {
-                prev_row
-            };
-            adaptive_filter(row, p, bpp, output, scratch);
+            adaptive_filter(row, prev_row, bpp, output, scratch);
+        }
+        FilterStrategy::AdaptiveFast => {
+            adaptive_filter_fast(row, prev_row, bpp, output, scratch);
+        }
+        FilterStrategy::AdaptiveSampled { .. } => {
+            // Fallback to full adaptive; sampled handling lives in apply_filters loop.
+            adaptive_filter(row, prev_row, bpp, output, scratch);
+        }
+    }
+}
+
+fn apply_filter_type(
+    filter: u8,
+    row: &[u8],
+    prev_row: &[u8],
+    bpp: usize,
+    output: &mut Vec<u8>,
+    scratch: &mut AdaptiveScratch,
+) {
+    match filter {
+        FILTER_NONE => output.extend_from_slice(row),
+        FILTER_SUB => filter_sub(row, bpp, output),
+        FILTER_UP => filter_up(row, prev_row, output),
+        FILTER_AVERAGE => filter_average(row, prev_row, bpp, output),
+        FILTER_PAETH => filter_paeth(row, prev_row, bpp, output),
+        _ => {
+            adaptive_filter(row, prev_row, bpp, output, scratch);
         }
     }
 }
@@ -372,7 +482,10 @@ fn score_filter(filtered: &[u8]) -> u64 {
 
     #[cfg(not(feature = "simd"))]
     {
-        filtered.iter().map(|&b| (b as i8).unsigned_abs() as u64).sum()
+        filtered
+            .iter()
+            .map(|&b| (b as i8).unsigned_abs() as u64)
+            .sum()
     }
 }
 
@@ -458,5 +571,51 @@ mod tests {
         assert_eq!(filtered.len(), 2 * (1 + 6)); // 2 rows * (1 filter + 6 data)
         assert_eq!(filtered[0], FILTER_NONE);
         assert_eq!(filtered[7], FILTER_NONE);
+    }
+
+    #[test]
+    fn test_apply_filters_adaptive_fast() {
+        let data = vec![
+            10, 20, 30, 40, 50, 60, // Row 1
+            70, 80, 90, 100, 110, 120, // Row 2
+        ];
+        let options = PngOptions {
+            filter_strategy: FilterStrategy::AdaptiveFast,
+            ..Default::default()
+        };
+
+        let filtered = apply_filters(&data, 2, 2, 3, &options);
+
+        // Two rows, each 1 filter byte + 6 bytes
+        assert_eq!(filtered.len(), 2 * (1 + 6));
+        // Filter bytes should be one of the defined filters
+        assert!(matches!(filtered[0], FILTER_SUB | FILTER_UP | FILTER_PAETH));
+        assert!(matches!(filtered[7], FILTER_SUB | FILTER_UP | FILTER_PAETH));
+    }
+
+    #[test]
+    fn test_apply_filters_adaptive_sampled_reuses_filter() {
+        let data = vec![
+            10, 20, 30, 40, 50, 60, // Row 1
+            11, 21, 31, 41, 51, 61, // Row 2
+            12, 22, 32, 42, 52, 62, // Row 3
+            13, 23, 33, 43, 53, 63, // Row 4
+        ];
+        let options = PngOptions {
+            filter_strategy: FilterStrategy::AdaptiveSampled { interval: 2 },
+            ..Default::default()
+        };
+
+        let filtered = apply_filters(&data, 2, 4, 3, &options);
+
+        // 4 rows, each with filter byte + 6 data bytes
+        assert_eq!(filtered.len(), 4 * (1 + 6));
+        let f1 = filtered[0];
+        let f2 = filtered[7];
+        let f3 = filtered[14];
+        let f4 = filtered[21];
+        // Rows 2 and 4 reuse previous filters
+        assert_eq!(f2, f1);
+        assert_eq!(f4, f3);
     }
 }

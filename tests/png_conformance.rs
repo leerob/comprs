@@ -3,11 +3,11 @@
 //! Tests PNG encoding against expected output and validates
 //! that encoded images can be decoded correctly.
 
+use comprs::compress::crc32::crc32;
 use comprs::{png, ColorType, Error};
 use image::GenericImageView;
-use rand::{rngs::StdRng, Rng, SeedableRng};
 use proptest::prelude::*;
-use comprs::compress::crc32::crc32;
+use rand::{rngs::StdRng, Rng, SeedableRng};
 mod support;
 use support::pngsuite::read_pngsuite;
 
@@ -163,9 +163,10 @@ fn test_png_roundtrip_random_small() {
             let mut pixels = vec![0u8; (w * h) as usize * bpp];
             rng.fill(pixels.as_mut_slice());
 
-            let encoded =
-                png::encode(&pixels, w as u32, h as u32, ct).expect("encode random png");
-            let decoded = image::load_from_memory(&encoded).expect("decode").to_rgba8();
+            let encoded = png::encode(&pixels, w as u32, h as u32, ct).expect("encode random png");
+            let decoded = image::load_from_memory(&encoded)
+                .expect("decode")
+                .to_rgba8();
 
             assert_eq!(decoded.width(), w as u32);
             assert_eq!(decoded.height(), h as u32);
@@ -229,20 +230,18 @@ fn test_png_chunk_crc_and_lengths() {
 }
 
 fn png_image_strategy() -> impl Strategy<Value = (u32, u32, ColorType, Vec<u8>)> {
-    (1u32..16, 1u32..16)
-        .prop_flat_map(|(w, h)| {
-            prop_oneof![
-                Just(ColorType::Gray),
-                Just(ColorType::GrayAlpha),
-                Just(ColorType::Rgb),
-                Just(ColorType::Rgba),
-            ]
-            .prop_flat_map(move |ct| {
-                let len = (w * h) as usize * ct.bytes_per_pixel();
-                proptest::collection::vec(any::<u8>(), len)
-                    .prop_map(move |data| (w, h, ct, data))
-            })
+    (1u32..16, 1u32..16).prop_flat_map(|(w, h)| {
+        prop_oneof![
+            Just(ColorType::Gray),
+            Just(ColorType::GrayAlpha),
+            Just(ColorType::Rgb),
+            Just(ColorType::Rgba),
+        ]
+        .prop_flat_map(move |ct| {
+            let len = (w * h) as usize * ct.bytes_per_pixel();
+            proptest::collection::vec(any::<u8>(), len).prop_map(move |data| (w, h, ct, data))
         })
+    })
 }
 
 proptest! {
@@ -340,7 +339,10 @@ fn test_filter_strategies() {
         let result = png::encode_with_options(&pixels, 16, 16, ColorType::Rgb, &options).unwrap();
 
         // All should produce valid PNG files
-        assert_eq!(&result[0..8], &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+        assert_eq!(
+            &result[0..8],
+            &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+        );
     }
 }
 
@@ -408,7 +410,10 @@ fn test_large_image() {
     let result = png::encode(&pixels, 1000, 1000, ColorType::Rgb).unwrap();
 
     // Should produce valid PNG
-    assert_eq!(&result[0..8], &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+    assert_eq!(
+        &result[0..8],
+        &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+    );
 
     // IHDR should have correct dimensions
     assert_eq!(&result[16..20], &[0, 0, 0x03, 0xE8]); // 1000 in big-endian

@@ -13,6 +13,9 @@
 //! - **JPEG encoding** with DCT, quantization, and Huffman coding
 //! - Optional SIMD acceleration via `simd` feature
 //! - Optional parallel processing via `parallel` feature
+//! - Buffer reuse helpers: `png::encode_into` and
+//!   `jpeg::encode_with_options_into` let you supply the output buffer to
+//!   avoid repeated allocations when encoding multiple images.
 //!
 //! ## Example
 //!

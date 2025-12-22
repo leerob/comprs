@@ -118,6 +118,78 @@ impl Default for BitWriter {
     }
 }
 
+/// A fast bit writer using a 64-bit accumulator (LSB-first) for DEFLATE.
+#[derive(Debug)]
+pub struct BitWriter64 {
+    buffer: Vec<u8>,
+    acc: u64,
+    bits_in_acc: u8,
+}
+
+impl BitWriter64 {
+    /// Create a new bit writer with default capacity.
+    pub fn new() -> Self {
+        Self::with_capacity(1024)
+    }
+
+    /// Create a new bit writer with specified byte capacity.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            buffer: Vec::with_capacity(capacity),
+            acc: 0,
+            bits_in_acc: 0,
+        }
+    }
+
+    /// Write bits to the stream, LSB first.
+    #[inline]
+    pub fn write_bits(&mut self, value: u32, num_bits: u8) {
+        debug_assert!(num_bits <= 32);
+        debug_assert!(self.bits_in_acc <= 63);
+        let val64 = (value & ((1u32 << num_bits) - 1)) as u64;
+        self.acc |= val64 << self.bits_in_acc;
+        self.bits_in_acc += num_bits;
+
+        // Flush full bytes
+        while self.bits_in_acc >= 8 {
+            self.buffer.push(self.acc as u8);
+            self.acc >>= 8;
+            self.bits_in_acc -= 8;
+        }
+    }
+
+    /// Write a single bit.
+    #[inline]
+    pub fn write_bit(&mut self, bit: bool) {
+        self.write_bits(bit as u32, 1);
+    }
+
+    /// Flush any remaining bits, padding with zeros.
+    pub fn flush(&mut self) {
+        if self.bits_in_acc > 0 {
+            self.buffer.push(self.acc as u8);
+            self.acc = 0;
+            self.bits_in_acc = 0;
+        }
+    }
+
+    /// Consume the writer and return the byte buffer.
+    pub fn finish(mut self) -> Vec<u8> {
+        self.flush();
+        self.buffer
+    }
+
+    /// Get the current length in bytes (not counting partial byte).
+    pub fn len(&self) -> usize {
+        self.buffer.len()
+    }
+
+    /// Check if the writer is empty.
+    pub fn is_empty(&self) -> bool {
+        self.buffer.is_empty() && self.bits_in_acc == 0
+    }
+}
+
 /// A bit writer that packs bits MSB first (for JPEG).
 #[derive(Debug)]
 pub struct BitWriterMsb {

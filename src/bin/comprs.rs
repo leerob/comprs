@@ -49,6 +49,14 @@ struct Args {
     #[arg(long, value_enum, default_value = "adaptive")]
     filter: FilterArg,
 
+    /// Interval for adaptive-sampled filter (rows between full evaluations)
+    #[arg(
+        long,
+        default_value = "4",
+        value_parser = clap::value_parser!(u32).range(1..=1_000_000)
+    )]
+    adaptive_sample_interval: u32,
+
     /// Convert to grayscale
     #[arg(long)]
     grayscale: bool,
@@ -99,17 +107,25 @@ enum FilterArg {
     Paeth,
     /// Adaptive filter selection (best compression)
     Adaptive,
+    /// Adaptive with reduced trials and early cutoffs (faster)
+    AdaptiveFast,
+    /// Adaptive on sampled rows, reuse chosen filter between samples
+    AdaptiveSampled,
 }
 
-impl From<FilterArg> for FilterStrategy {
-    fn from(arg: FilterArg) -> Self {
-        match arg {
+impl FilterArg {
+    fn to_strategy(self, sampled_interval: u32) -> FilterStrategy {
+        match self {
             FilterArg::None => FilterStrategy::None,
             FilterArg::Sub => FilterStrategy::Sub,
             FilterArg::Up => FilterStrategy::Up,
             FilterArg::Average => FilterStrategy::Average,
             FilterArg::Paeth => FilterStrategy::Paeth,
             FilterArg::Adaptive => FilterStrategy::Adaptive,
+            FilterArg::AdaptiveFast => FilterStrategy::AdaptiveFast,
+            FilterArg::AdaptiveSampled => FilterStrategy::AdaptiveSampled {
+                interval: sampled_interval.max(1),
+            },
         }
     }
 }
@@ -190,9 +206,7 @@ fn decode_jpeg(path: &PathBuf) -> Result<DecodedImage, Box<dyn std::error::Error
 
     let color_type = match info.pixel_format {
         jpeg_decoder::PixelFormat::L8 => ColorType::Gray,
-        jpeg_decoder::PixelFormat::L16 => {
-            return Err("16-bit grayscale JPEG not supported.".into())
-        }
+        jpeg_decoder::PixelFormat::L16 => return Err("16-bit grayscale JPEG not supported.".into()),
         jpeg_decoder::PixelFormat::RGB24 => ColorType::Rgb,
         jpeg_decoder::PixelFormat::CMYK32 => {
             return Err("CMYK JPEG not supported. Convert to RGB first.".into())
@@ -221,9 +235,11 @@ fn decode_pnm(path: &PathBuf) -> Result<DecodedImage, Box<dyn std::error::Error>
         "P5" => (ColorType::Gray, "PGM"),
         "P6" => (ColorType::Rgb, "PPM"),
         _ => {
-            return Err(
-                format!("Unsupported format '{}'. Expected P5 (PGM) or P6 (PPM)", magic).into(),
+            return Err(format!(
+                "Unsupported format '{}'. Expected P5 (PGM) or P6 (PPM)",
+                magic
             )
+            .into())
         }
     };
 
@@ -242,13 +258,11 @@ fn decode_pnm(path: &PathBuf) -> Result<DecodedImage, Box<dyn std::error::Error>
     let max_val: u32 = token.parse()?;
 
     if max_val != 255 {
-        return Err(
-            format!(
-                "Unsupported max value {}. Only 8-bit (255) supported",
-                max_val
-            )
-            .into(),
-        );
+        return Err(format!(
+            "Unsupported max value {}. Only 8-bit (255) supported",
+            max_val
+        )
+        .into());
     }
 
     // Read pixel data
@@ -430,13 +444,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // Encode
     let encode_start = Instant::now();
-    let output_data = match format {
+    let mut output_data = Vec::new();
+    match format {
         OutputFormat::Png => {
             let options = PngOptions {
                 compression_level: args.compression,
-                filter_strategy: args.filter.into(),
+                filter_strategy: args.filter.to_strategy(args.adaptive_sample_interval),
             };
-            comprs::png::encode_with_options(&pixels, width, height, color_type, &options)?
+            comprs::png::encode_into(
+                &mut output_data,
+                &pixels,
+                width,
+                height,
+                color_type,
+                &options,
+            )?
         }
         OutputFormat::Jpeg | OutputFormat::Jpg => {
             let options = JpegOptions {
@@ -444,7 +466,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 subsampling: args.subsampling.into(),
                 restart_interval: None,
             };
-            comprs::jpeg::encode_with_options(
+            comprs::jpeg::encode_with_options_into(
+                &mut output_data,
                 &pixels,
                 width,
                 height,

@@ -1,7 +1,5 @@
 //! PNG chunk handling.
 
-use crate::compress::crc32;
-
 /// Write a PNG chunk to the output buffer.
 ///
 /// Chunk format:
@@ -10,6 +8,15 @@ use crate::compress::crc32;
 /// - N bytes: chunk data
 /// - 4 bytes: CRC32 of type + data
 pub fn write_chunk(output: &mut Vec<u8>, chunk_type: &[u8; 4], data: &[u8]) {
+    // Reserve space upfront: length (4) + type (4) + data + crc (4)
+    output.reserve(12 + data.len());
+
+    // Compute CRC without extra allocation
+    let mut crc = crate::compress::crc32::Crc32::new();
+    crc.update(chunk_type);
+    crc.update(data);
+    let crc = crc.finalize();
+
     // Length (big-endian)
     output.extend_from_slice(&(data.len() as u32).to_be_bytes());
 
@@ -20,10 +27,6 @@ pub fn write_chunk(output: &mut Vec<u8>, chunk_type: &[u8; 4], data: &[u8]) {
     output.extend_from_slice(data);
 
     // CRC32 of type + data
-    let mut crc_data = Vec::with_capacity(4 + data.len());
-    crc_data.extend_from_slice(chunk_type);
-    crc_data.extend_from_slice(data);
-    let crc = crc32(&crc_data);
     output.extend_from_slice(&crc.to_be_bytes());
 }
 
@@ -46,10 +49,7 @@ mod tests {
         assert_eq!(&output[4..8], b"IEND");
 
         // CRC of "IEND" should be 0xAE426082
-        assert_eq!(
-            &output[8..12],
-            &0xAE426082_u32.to_be_bytes()
-        );
+        assert_eq!(&output[8..12], &0xAE426082_u32.to_be_bytes());
     }
 
     #[test]
