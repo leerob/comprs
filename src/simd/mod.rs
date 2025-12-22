@@ -125,3 +125,18 @@ pub fn filter_up(row: &[u8], prev_row: &[u8], output: &mut Vec<u8>) {
 
     fallback::filter_up(row, prev_row, output)
 }
+
+/// Apply Average filter using the best available implementation.
+#[inline]
+pub fn filter_average(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<u8>) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx2") {
+            // Safety: We've verified AVX2 is available
+            unsafe { x86_64::filter_average_avx2(row, prev_row, bpp, output) };
+            return;
+        }
+    }
+
+    fallback::filter_average(row, prev_row, bpp, output)
+}

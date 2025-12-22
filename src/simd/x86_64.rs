@@ -522,3 +522,58 @@ pub unsafe fn filter_up_avx2(row: &[u8], prev_row: &[u8], output: &mut Vec<u8>) 
         i += 1;
     }
 }
+
+/// Apply Average filter using AVX2 (32 bytes at a time).
+///
+/// # Safety
+/// Caller must ensure AVX2 is available on the current CPU.
+#[target_feature(enable = "avx2")]
+pub unsafe fn filter_average_avx2(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<u8>) {
+    let len = row.len();
+    output.reserve(len);
+
+    // First bpp bytes: use scalar
+    for i in 0..bpp.min(len) {
+        let left = 0u8;
+        let above = prev_row[i];
+        let avg = ((left as u16 + above as u16) / 2) as u8;
+        output.push(row[i].wrapping_sub(avg));
+    }
+
+    if len <= bpp {
+        return;
+    }
+
+    let mut i = bpp;
+    while i + 32 <= len {
+        let curr = _mm256_loadu_si256(row[i..].as_ptr() as *const __m256i);
+        let above = _mm256_loadu_si256(prev_row[i..].as_ptr() as *const __m256i);
+        let left = _mm256_loadu_si256(row[i - bpp..].as_ptr() as *const __m256i);
+
+        // avg = (left + above) >> 1
+        let left_lo = _mm256_unpacklo_epi8(left, _mm256_setzero_si256());
+        let left_hi = _mm256_unpackhi_epi8(left, _mm256_setzero_si256());
+        let above_lo = _mm256_unpacklo_epi8(above, _mm256_setzero_si256());
+        let above_hi = _mm256_unpackhi_epi8(above, _mm256_setzero_si256());
+
+        let avg_lo = _mm256_srli_epi16(_mm256_add_epi16(left_lo, above_lo), 1);
+        let avg_hi = _mm256_srli_epi16(_mm256_add_epi16(left_hi, above_hi), 1);
+        let avg = _mm256_packus_epi16(avg_lo, avg_hi);
+
+        let diff = _mm256_sub_epi8(curr, avg);
+
+        let mut buf = [0u8; 32];
+        _mm256_storeu_si256(buf.as_mut_ptr() as *mut __m256i, diff);
+        output.extend_from_slice(&buf);
+        i += 32;
+    }
+
+    // Remainder scalar
+    while i < len {
+        let left = if i >= bpp { row[i - bpp] as u16 } else { 0 };
+        let above = prev_row[i] as u16;
+        let avg = ((left + above) / 2) as u8;
+        output.push(row[i].wrapping_sub(avg));
+        i += 1;
+    }
+}

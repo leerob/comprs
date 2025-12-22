@@ -133,11 +133,20 @@ fn filter_up(row: &[u8], prev_row: &[u8], output: &mut Vec<u8>) {
 
 /// Average filter: difference from average of left and above.
 fn filter_average(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<u8>) {
-    for (i, &byte) in row.iter().enumerate() {
-        let left = if i >= bpp { row[i - bpp] as u16 } else { 0 };
-        let above = prev_row[i] as u16;
-        let avg = ((left + above) / 2) as u8;
-        output.push(byte.wrapping_sub(avg));
+    #[cfg(feature = "simd")]
+    {
+        simd::filter_average(row, prev_row, bpp, output);
+        return;
+    }
+
+    #[cfg(not(feature = "simd"))]
+    {
+        for (i, &byte) in row.iter().enumerate() {
+            let left = if i >= bpp { row[i - bpp] as u16 } else { 0 };
+            let above = prev_row[i] as u16;
+            let avg = ((left + above) / 2) as u8;
+            output.push(byte.wrapping_sub(avg));
+        }
     }
 }
 
