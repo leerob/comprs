@@ -77,6 +77,21 @@ pub fn apply_filters(
         strategy = FilterStrategy::AdaptiveSampled { interval };
     }
 
+    // Fast high-entropy detection: if the first row has almost no identical
+    // neighboring bytes (indicative of noisy data) and the image is reasonably
+    // large, skip adaptive filtering entirely and use None to save scoring work.
+    if area >= 16_384
+        && matches!(
+            strategy,
+            FilterStrategy::Adaptive | FilterStrategy::AdaptiveFast | FilterStrategy::AdaptiveSampled { .. }
+        )
+    {
+        let first_row = &data[..row_bytes];
+        if is_high_entropy_row(first_row) {
+            strategy = FilterStrategy::None;
+        }
+    }
+
     // Parallel path (only for adaptive; other strategies are trivial)
     #[cfg(feature = "parallel")]
     {
@@ -533,6 +548,36 @@ fn score_filter(filtered: &[u8]) -> u64 {
             .map(|&b| (b as i8).unsigned_abs() as u64)
             .sum()
     }
+}
+
+/// Simple high-entropy detector:
+/// - Fewer than 1% of neighboring bytes are equal (no runs)
+/// - The most common delta between neighbors accounts for <10% of positions
+/// This avoids misclassifying smooth gradients (constant delta).
+/// Guarded to rows >= 1024 bytes to avoid noise.
+fn is_high_entropy_row(row: &[u8]) -> bool {
+    if row.len() < 1024 {
+        return false;
+    }
+    let mut equal_neighbors = 0usize;
+    let mut delta_hist = [0u32; 256];
+    let mut total_deltas = 0usize;
+    for w in row.windows(2) {
+        if w[0] == w[1] {
+            equal_neighbors += 1;
+        }
+        let delta = w[1].wrapping_sub(w[0]);
+        delta_hist[delta as usize] += 1;
+        total_deltas += 1;
+    }
+    let ratio = equal_neighbors as f32 / (row.len().saturating_sub(1) as f32);
+    let max_delta = delta_hist.iter().copied().max().unwrap_or(0);
+    let max_delta_ratio = if total_deltas == 0 {
+        1.0
+    } else {
+        max_delta as f32 / total_deltas as f32
+    };
+    ratio < 0.01 && max_delta_ratio < 0.10
 }
 
 #[cfg(test)]
