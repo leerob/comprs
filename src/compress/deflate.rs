@@ -585,11 +585,13 @@ pub fn deflate_zlib(data: &[u8], level: u8) -> Vec<u8> {
     }
 
     // Small inputs: skip dynamic Huffman selection to avoid double-encoding overhead.
-    let deflated = if data.len() <= SMALL_INPUT_BYTES {
-        with_reusable_deflater(level, |d| d.compress_fixed_only(data))
-    } else {
-        deflate(data, level)
-    };
+    let deflated = with_reusable_deflater(level, |d| {
+        if data.len() <= SMALL_INPUT_BYTES {
+            d.compress_fixed_only(data)
+        } else {
+            d.compress(data)
+        }
+    });
 
     let use_stored = should_use_stored(data.len(), deflated.len());
 
@@ -618,11 +620,13 @@ pub fn deflate_zlib_packed(data: &[u8], level: u8) -> Vec<u8> {
         return output;
     }
 
-    let deflated = if data.len() <= SMALL_INPUT_BYTES {
-        with_reusable_deflater(level, |d| d.compress_fixed_only_packed(data))
-    } else {
-        deflate_packed(data, level)
-    };
+    let deflated = with_reusable_deflater(level, |d| {
+        if data.len() <= SMALL_INPUT_BYTES {
+            d.compress_fixed_only_packed(data)
+        } else {
+            d.compress_packed(data)
+        }
+    });
 
     let use_stored = should_use_stored(data.len(), deflated.len());
 
