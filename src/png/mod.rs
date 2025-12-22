@@ -28,7 +28,8 @@ impl Default for PngOptions {
     fn default() -> Self {
         Self {
             compression_level: 6,
-            filter_strategy: FilterStrategy::Adaptive,
+            // AdaptiveFast reduces per-row work with minimal compression impact.
+            filter_strategy: FilterStrategy::AdaptiveFast,
         }
     }
 }
