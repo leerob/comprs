@@ -246,6 +246,17 @@ mod tests {
     }
 
     #[test]
+    fn test_presets_fast_and_max() {
+        let fast = PngOptions::fast();
+        assert_eq!(fast.compression_level, 3);
+        assert_eq!(fast.filter_strategy, FilterStrategy::AdaptiveFast);
+
+        let max = PngOptions::max_compression();
+        assert_eq!(max.compression_level, 9);
+        assert_eq!(max.filter_strategy, FilterStrategy::Adaptive);
+    }
+
+    #[test]
     fn test_encode_invalid_dimensions() {
         let pixels = vec![255, 0, 0];
         let result = encode(&pixels, 0, 1, ColorType::Rgb);

@@ -803,6 +803,17 @@ mod tests {
     }
 
     #[test]
+    fn test_presets_fast_and_max_quality() {
+        let fast = JpegOptions::fast();
+        assert_eq!(fast.quality, 75);
+        assert_eq!(fast.subsampling, Subsampling::S420);
+
+        let max = JpegOptions::max_quality();
+        assert_eq!(max.quality, 90);
+        assert_eq!(max.subsampling, Subsampling::S444);
+    }
+
+    #[test]
     fn test_encode_8x8_rgb() {
         // 8x8 gradient
         let mut pixels = Vec::with_capacity(8 * 8 * 3);
