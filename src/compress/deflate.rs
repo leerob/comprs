@@ -692,10 +692,10 @@ pub fn deflate_zlib(data: &[u8], level: u8) -> Vec<u8> {
 
 /// Compress data with packed tokens and wrap it in a zlib container.
 pub fn deflate_zlib_packed(data: &[u8], level: u8) -> Vec<u8> {
-    if data.len() >= HIGH_ENTROPY_BAIL_BYTES && is_high_entropy_data(data) {
-        return deflate_zlib_stored(data, level);
-    }
-    with_reusable_deflater(level, |d| d.compress_packed_zlib(data))
+    // The packed path previously produced corrupted streams on some real-world
+    // image data. Until it is fixed, route through the validated non-packed
+    // encoder to guarantee correctness while preserving API shape.
+    deflate_zlib(data, level)
 }
 
 /// Emit zlib wrapper with stored (uncompressed) DEFLATE blocks.
@@ -758,47 +758,8 @@ pub fn deflate_zlib_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats
 /// Compress data with packed tokens into a zlib container, returning stats.
 #[cfg(feature = "timing")]
 pub fn deflate_zlib_packed_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats) {
-    if data.is_empty() {
-        let mut output = Vec::with_capacity(8);
-        output.extend_from_slice(&zlib_header(level));
-
-        let (deflated, mut stats) = deflate_packed_with_stats(data, level);
-        output.extend_from_slice(&deflated);
-        output.extend_from_slice(&adler32(data).to_be_bytes());
-        stats.used_stored_block = false;
-        return (output, stats);
-    }
-
-    if data.len() >= HIGH_ENTROPY_BAIL_BYTES && is_high_entropy_data(data) {
-        let mut output = Vec::with_capacity(data.len() + 16);
-        output.extend_from_slice(&zlib_header(level));
-        let stored_blocks = deflate_stored(data);
-        output.extend_from_slice(&stored_blocks);
-        output.extend_from_slice(&adler32(data).to_be_bytes());
-        let stats = DeflateStats {
-            used_stored_block: true,
-            ..Default::default()
-        };
-        return (output, stats);
-    }
-
-    let (deflated, mut stats) = deflate_packed_with_stats(data, level);
-
-    let use_stored = should_use_stored(data.len(), deflated.len());
-    let mut output = Vec::with_capacity(deflated.len().min(data.len()) + 32);
-    output.extend_from_slice(&zlib_header(level));
-
-    if use_stored {
-        let stored_blocks = deflate_stored(data);
-        output.extend_from_slice(&stored_blocks);
-    } else {
-        output.extend_from_slice(&deflated);
-    }
-
-    output.extend_from_slice(&adler32(data).to_be_bytes());
-
-    stats.used_stored_block = use_stored;
-    (output, stats)
+    // See `deflate_zlib_packed`: delegate to the proven non-packed path for correctness.
+    deflate_zlib_with_stats(data, level)
 }
 
 /// Decide whether stored blocks would be smaller than the compressed stream.
