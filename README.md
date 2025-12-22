@@ -194,6 +194,27 @@ Note: JPEG only supports `Gray` and `Rgb` color types.
 - `parallel` feature enables rayon-powered parallel PNG adaptive filtering.
 - `simd` (planned) is reserved for future SIMD acceleration paths.
 
+### Feature flags
+
+- `png` (default) — build PNG support
+- `jpeg` (default) — build JPEG support
+- `wasm` — enable wasm-bindgen bindings (requires png/jpeg as needed)
+- `cli` — build the CLI binary (requires png + jpeg)
+- `parallel` — enable rayon-powered parallel PNG filtering
+- `simd` — enable SIMD-accelerated paths where available
+
+Examples:
+```bash
+# PNG-only build
+cargo build --no-default-features --features png
+
+# JPEG-only build
+cargo build --no-default-features --features jpeg
+
+# WASM build (PNG+JPEG by default)
+cargo build --release --target wasm32-unknown-unknown --features wasm
+```
+
 ## Architecture
 
 The library is organized into modular components:
