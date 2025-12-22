@@ -69,6 +69,11 @@ let options = JpegOptions {
 let jpeg_data = jpeg::encode_with_options(&pixels, 1, 1, 85, ColorType::Rgb, &options).unwrap();
 ```
 
+#### Presets
+
+- **Fast**: `JpegOptions::fast()` — Q=75 with 4:2:0 subsampling.
+- **Max quality**: `JpegOptions::max_quality()` — Q=90 with 4:4:4 subsampling.
+
 ### Buffer reuse (PNG & JPEG)
 
 Both encoders support writing into a caller-provided buffer to avoid repeated allocations when encoding multiple images in a loop:
