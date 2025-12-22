@@ -77,7 +77,7 @@ pub fn apply_filters(
 
     // Sequential path
     let mut output = Vec::with_capacity(filtered_row_size * height as usize);
-    let mut prev_row = vec![0u8; row_bytes];
+    let mut prev_row: &[u8] = &zero_row;
     let mut adaptive_scratch = AdaptiveScratch::new(row_bytes);
     let mut last_filter: u8 = FILTER_PAETH; // default guess for sampled reuse
 
@@ -87,7 +87,7 @@ pub fn apply_filters(
         match options.filter_strategy {
             FilterStrategy::AdaptiveSampled { interval } if interval > 1 => {
                 let interval = interval.max(1) as usize;
-                let prev = if y == 0 { &zero_row[..] } else { &prev_row[..] };
+                let prev = if y == 0 { &zero_row[..] } else { prev_row };
                 if y % interval == 0 {
                     let base = output.len();
                     adaptive_filter(
@@ -116,7 +116,7 @@ pub fn apply_filters(
                 let base = output.len();
                 filter_row(
                     row,
-                    if y == 0 { &zero_row[..] } else { &prev_row[..] },
+                    if y == 0 { &zero_row[..] } else { prev_row },
                     bytes_per_pixel,
                     options.filter_strategy,
                     &mut output,
@@ -130,8 +130,8 @@ pub fn apply_filters(
             }
         }
 
-        // Update previous row
-        prev_row.copy_from_slice(row);
+        // Update previous row reference
+        prev_row = row;
     }
 
     output
