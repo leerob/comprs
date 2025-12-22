@@ -31,3 +31,8 @@ JPEG image q85:      7.630 ms, 104302 bytes
 ```
 
 Use this as a rough reference; rerun on your hardware to track regressions.```
+
+WASM size (local, release, feature=wasm, raw/gz):
+- Raw: 90,473 bytes
+- Gzipped: 30,065 bytes
+(wasm-opt not available in this environment)
