@@ -69,7 +69,7 @@ fn main() {
             let label = format!("{} {}x{}", name, w, h);
             println!("==> {}", label);
 
-            // PNG comprs
+            // PNG comprs (default)
             let mut png_buf = Vec::new();
             let (t_png_comprs, sz_png_comprs) = mean_time_and_size(|| {
                 png::encode_into(
@@ -87,6 +87,46 @@ fn main() {
                 "PNG comprs: {:.3} ms, {} bytes",
                 t_png_comprs.as_secs_f64() * 1000.0,
                 sz_png_comprs
+            );
+
+            // PNG fast preset
+            let mut png_buf_fast = Vec::new();
+            let (t_png_fast, sz_png_fast) = mean_time_and_size(|| {
+                png::encode_into(
+                    &mut png_buf_fast,
+                    &pixels,
+                    w,
+                    h,
+                    ColorType::Rgb,
+                    &png::PngOptions::fast(),
+                )
+                .unwrap();
+                png_buf_fast.clone()
+            });
+            println!(
+                "PNG comprs fast: {:.3} ms, {} bytes",
+                t_png_fast.as_secs_f64() * 1000.0,
+                sz_png_fast
+            );
+
+            // PNG max preset
+            let mut png_buf_max = Vec::new();
+            let (t_png_max, sz_png_max) = mean_time_and_size(|| {
+                png::encode_into(
+                    &mut png_buf_max,
+                    &pixels,
+                    w,
+                    h,
+                    ColorType::Rgb,
+                    &png::PngOptions::max_compression(),
+                )
+                .unwrap();
+                png_buf_max.clone()
+            });
+            println!(
+                "PNG comprs max: {:.3} ms, {} bytes",
+                t_png_max.as_secs_f64() * 1000.0,
+                sz_png_max
             );
 
             // PNG image crate
@@ -127,6 +167,28 @@ fn main() {
                 "JPEG comprs q85 444: {:.3} ms, {} bytes",
                 t_jpeg_comprs_444.as_secs_f64() * 1000.0,
                 sz_jpeg_comprs_444
+            );
+
+            // JPEG preset fast (uses 4:2:0, Q75)
+            let mut jpeg_buf_fast = Vec::new();
+            let fast_opts = jpeg::JpegOptions::fast();
+            let (t_jpeg_fast, sz_jpeg_fast) = mean_time_and_size(|| {
+                jpeg::encode_with_options_into(
+                    &mut jpeg_buf_fast,
+                    &pixels,
+                    w,
+                    h,
+                    fast_opts.quality,
+                    ColorType::Rgb,
+                    &fast_opts,
+                )
+                .unwrap();
+                jpeg_buf_fast.clone()
+            });
+            println!(
+                "JPEG comprs fast:   {:.3} ms, {} bytes",
+                t_jpeg_fast.as_secs_f64() * 1000.0,
+                sz_jpeg_fast
             );
 
             // JPEG comprs Q85 4:2:0
