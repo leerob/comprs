@@ -2,6 +2,8 @@
 
 A minimal-dependency, high-performance image compression library written in Rust.
 
+This is a work-in-progress and exploration of coding agents.
+
 ## Features
 
 - **Zero runtime dependencies by default** - All compression algorithms implemented from scratch
@@ -307,10 +309,6 @@ We provide comprehensive documentation explaining the algorithms and compression
 - **[JPEG Encoding](./docs/jpeg-encoding.md)** — Lossy compression pipeline overview
 - **[Discrete Cosine Transform (DCT)](./docs/dct.md)** — The mathematical heart of JPEG
 - **[JPEG Quantization](./docs/quantization.md)** — How JPEG achieves dramatic compression ratios
-
-## License
-
-MIT
 
 ## References
 
