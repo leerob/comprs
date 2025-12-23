@@ -519,6 +519,48 @@ fn test_jpeg_corpus_reencode_decode() {
     }
 }
 
+/// Optimized Huffman tables should be valid and not larger on a structured image.
+#[test]
+fn test_jpeg_optimize_huffman_structured_image() {
+    let width = 16;
+    let height = 16;
+    let mut rgb = Vec::with_capacity((width * height * 3) as usize);
+    for y in 0..height {
+        for x in 0..width {
+            let v = ((x + y) % 256) as u8;
+            rgb.extend_from_slice(&[v, v / 2, 255 - v]);
+        }
+    }
+
+    let base_opts = jpeg::JpegOptions {
+        quality: 85,
+        subsampling: jpeg::Subsampling::S444,
+        restart_interval: None,
+        optimize_huffman: false,
+    };
+    let opt_opts = jpeg::JpegOptions {
+        optimize_huffman: true,
+        ..base_opts
+    };
+
+    let default_bytes =
+        jpeg::encode_with_options(&rgb, width, height, 85, ColorType::Rgb, &base_opts).unwrap();
+    let optimized_bytes =
+        jpeg::encode_with_options(&rgb, width, height, 85, ColorType::Rgb, &opt_opts).unwrap();
+
+    assert!(
+        optimized_bytes.len() <= default_bytes.len(),
+        "optimized Huffman larger than default ({} > {})",
+        optimized_bytes.len(),
+        default_bytes.len()
+    );
+
+    let dec_default = image::load_from_memory(&default_bytes).expect("decode default jpeg");
+    let dec_opt = image::load_from_memory(&optimized_bytes).expect("decode optimized jpeg");
+    assert_eq!(dec_default.dimensions(), (width, height));
+    assert_eq!(dec_opt.dimensions(), (width, height));
+}
+
 /// Test that DQT tables are present.
 #[test]
 fn test_dqt_present() {
