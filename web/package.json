@@ -16,17 +16,16 @@
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "^7.0.0",
-		"@sveltejs/kit": "^2.49.1",
+		"@sveltejs/kit": "^2.49.2",
 		"@sveltejs/vite-plugin-svelte": "^6.2.1",
-		"@types/node": "^22.15.2",
-		"autoprefixer": "^10.4.23",
+		"@tailwindcss/vite": "^4.1.18",
+		"@types/node": "^22.19.3",
 		"playwright": "^1.57.0",
-		"postcss": "^8.5.6",
-		"svelte": "^5.45.6",
-		"svelte-check": "^4.3.4",
-		"tailwindcss": "^3.4.14",
+		"svelte": "^5.46.0",
+		"svelte-check": "^4.3.5",
+		"tailwindcss": "^4.1.18",
 		"typescript": "^5.9.3",
-		"vite": "^7.2.6"
+		"vite": "^7.3.0"
 	},
 	"dependencies": {
 		"jszip": "^3.10.1"

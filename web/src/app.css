@@ -1,3 +1,5 @@
+@import 'tailwindcss';
+
 @font-face {
 	font-family: 'Berkeley Mono';
 	src: url('/BerkeleyMono-Regular.woff2') format('woff2');
@@ -6,18 +8,23 @@
 	font-display: swap;
 }
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@theme {
+	--font-mono: 'Berkeley Mono', 'SF Mono', 'Fira Code', monospace;
+
+	--color-surface-0: #0a0a0a;
+	--color-surface-1: #111111;
+	--color-surface-2: #1a1a1a;
+	--color-surface-3: #222222;
+
+	--color-border: #2a2a2a;
+	--color-border-hover: #333333;
+
+	--color-terminal-green: #22c55e;
+	--color-terminal-red: #ef4444;
+}
 
 :root {
 	color-scheme: dark;
-	--bg-primary: #0a0a0a;
-	--bg-surface: #111111;
-	--border: #2a2a2a;
-	--text-primary: #e5e5e5;
-	--text-muted: #666666;
-	--accent-green: #22c55e;
 }
 
 body {
