@@ -150,6 +150,82 @@ export function encodeJpeg(data, width, height, quality, color_type, subsampling
 }
 
 /**
+ * Encode JPEG with preset: 0=fast, 1=balanced, 2=max.
+ *
+ * # Arguments
+ *
+ * * `data` - Raw pixel data as Uint8Array (row-major order)
+ * * `width` - Image width in pixels
+ * * `height` - Image height in pixels
+ * * `quality` - Quality level 1-100 (85 recommended)
+ * * `color_type` - Color type: 0=Gray, 2=Rgb (JPEG only supports these)
+ * * `preset` - Preset: 0=fast, 1=balanced, 2=max
+ *
+ * # Returns
+ *
+ * JPEG file bytes as Uint8Array.
+ * @param {Uint8Array} data
+ * @param {number} width
+ * @param {number} height
+ * @param {number} quality
+ * @param {number} color_type
+ * @param {number} preset
+ * @returns {Uint8Array}
+ */
+export function encodeJpegPreset(data, width, height, quality, color_type, preset) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.encodeJpegPreset(retptr, ptr0, len0, width, height, quality, color_type, preset);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+        if (r3) {
+            throw takeObject(r2);
+        }
+        var v2 = getArrayU8FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export2(r0, r1 * 1, 1);
+        return v2;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * Encode JPEG with an explicit optimize_huffman toggle.
+ * @param {Uint8Array} data
+ * @param {number} width
+ * @param {number} height
+ * @param {number} quality
+ * @param {number} color_type
+ * @param {boolean} subsampling_420
+ * @param {boolean} optimize_huffman
+ * @returns {Uint8Array}
+ */
+export function encodeJpegWithOptions(data, width, height, quality, color_type, subsampling_420, optimize_huffman) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.encodeJpegWithOptions(retptr, ptr0, len0, width, height, quality, color_type, subsampling_420, optimize_huffman);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+        if (r3) {
+            throw takeObject(r2);
+        }
+        var v2 = getArrayU8FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export2(r0, r1 * 1, 1);
+        return v2;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
  * Encode raw pixel data as PNG.
  *
  * # Arguments
@@ -192,6 +268,96 @@ export function encodePng(data, width, height, color_type, compression_level) {
 }
 
 /**
+ * Encode PNG with preset: 0=fast, 1=balanced, 2=max.
+ *
+ * # Arguments
+ *
+ * * `data` - Raw pixel data as Uint8Array (row-major order)
+ * * `width` - Image width in pixels
+ * * `height` - Image height in pixels
+ * * `color_type` - Color type: 0=Gray, 1=GrayAlpha, 2=Rgb, 3=Rgba
+ * * `preset` - Preset: 0=fast, 1=balanced, 2=max
+ *
+ * # Returns
+ *
+ * PNG file bytes as Uint8Array.
+ * @param {Uint8Array} data
+ * @param {number} width
+ * @param {number} height
+ * @param {number} color_type
+ * @param {number} preset
+ * @returns {Uint8Array}
+ */
+export function encodePngPreset(data, width, height, color_type, preset) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.encodePngPreset(retptr, ptr0, len0, width, height, color_type, preset);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+        if (r3) {
+            throw takeObject(r2);
+        }
+        var v2 = getArrayU8FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export2(r0, r1 * 1, 1);
+        return v2;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * Encode PNG with preset and lossless flag.
+ *
+ * When `lossless` is false, enables auto-quantization for potentially
+ * significant size reduction (lossy compression). This can reduce file
+ * sizes by 50-80% for images with limited color palettes.
+ *
+ * # Arguments
+ *
+ * * `data` - Raw pixel data as Uint8Array (row-major order)
+ * * `width` - Image width in pixels
+ * * `height` - Image height in pixels
+ * * `color_type` - Color type: 0=Gray, 1=GrayAlpha, 2=Rgb, 3=Rgba
+ * * `preset` - Preset: 0=fast, 1=balanced, 2=max
+ * * `lossless` - If true, disable quantization (lossless). If false, enable auto-quantization (lossy).
+ *
+ * # Returns
+ *
+ * PNG file bytes as Uint8Array.
+ * @param {Uint8Array} data
+ * @param {number} width
+ * @param {number} height
+ * @param {number} color_type
+ * @param {number} preset
+ * @param {boolean} lossless
+ * @returns {Uint8Array}
+ */
+export function encodePngPresetLossy(data, width, height, color_type, preset, lossless) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.encodePngPresetLossy(retptr, ptr0, len0, width, height, color_type, preset, lossless);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+        if (r3) {
+            throw takeObject(r2);
+        }
+        var v2 = getArrayU8FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export2(r0, r1 * 1, 1);
+        return v2;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
  * Encode raw pixel data as PNG with a specific filter strategy.
  *
  * # Arguments
@@ -201,7 +367,7 @@ export function encodePng(data, width, height, color_type, compression_level) {
  * * `height` - Image height in pixels
  * * `color_type` - Color type: 0=Gray, 1=GrayAlpha, 2=Rgb, 3=Rgba
  * * `compression_level` - Compression level 1-9 (6 recommended)
- * * `filter` - Filter strategy: 0=None, 1=Sub, 2=Up, 3=Average, 4=Paeth, 5=Adaptive, 6=AdaptiveFast
+ * * `filter` - Filter strategy: 0=None, 1=Sub, 2=Up, 3=Average, 4=Paeth, 5=Adaptive, 6=AdaptiveFast, 7=MinSum
  *
  * # Returns
  *

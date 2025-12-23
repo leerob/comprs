@@ -21,8 +21,9 @@ cargo bench --bench comparison -- --summary-only
 Comprehensive benchmark comparing comprs against all major alternatives:
 
 - **All three presets**: Fast, Balanced, Max for PNG and JPEG
-- **External tools**: oxipng, mozjpeg (if installed)
-- **Rust alternatives**: image crate, flate2
+- **Lossy PNG**: Quantization comparison (comprs vs imagequant vs pngquant)
+- **External tools**: oxipng, mozjpeg, pngquant (if installed)
+- **Rust alternatives**: image crate, flate2, imagequant
 - **Summary tables**: WASM binary sizes, output sizes, timing
 
 ```bash
@@ -84,12 +85,56 @@ For complete benchmarks, install the reference tools:
 
 ```bash
 # macOS (Homebrew)
-brew install oxipng mozjpeg
+brew install oxipng mozjpeg pngquant
 
 # Verify installation
 oxipng --version
 cjpeg -version
+pngquant --version
 ```
+
+## Lossy PNG Compression
+
+The comparison benchmark includes lossy PNG compression using palette quantization:
+
+### comprs Lossy Mode
+
+comprs supports lossy PNG compression via `QuantizationMode`:
+
+```rust
+use comprs::png::{PngOptions, QuantizationMode, QuantizationOptions};
+
+let mut opts = PngOptions::balanced();
+opts.quantization = QuantizationOptions {
+    mode: QuantizationMode::Auto,  // Auto-detect when beneficial
+    max_colors: 256,               // Maximum palette size
+    dithering: false,              // Floyd-Steinberg dithering
+};
+
+let png = png::encode_with_options(&pixels, width, height, ColorType::Rgb, &opts)?;
+```
+
+**Quantization Modes:**
+
+- `Off`: Lossless PNG (default)
+- `Auto`: Apply quantization when beneficial (moderate color count)
+- `Force`: Always quantize RGB/RGBA images
+
+### Comparison Tools
+
+| Tool | Type | Description |
+|------|------|-------------|
+| comprs | Rust | Built-in median-cut quantization |
+| imagequant | Rust crate | libimagequant bindings (high quality) |
+| pngquant | CLI | Reference tool, excellent quality |
+
+### Expected Results
+
+Lossy PNG compression typically achieves 50-80% size reduction compared to lossless:
+
+- **comprs**: Fast, good quality, ~70% smaller
+- **imagequant**: Slower, excellent quality, ~75% smaller
+- **pngquant**: Reference quality, ~75% smaller
 
 ## Benchmark Results
 

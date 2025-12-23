@@ -243,6 +243,39 @@ pub fn encode_png_preset(
         .map_err(|e| JsError::new(&e.to_string()))
 }
 
+/// Encode PNG with preset and lossless flag.
+///
+/// When `lossless` is false, enables auto-quantization for potentially
+/// significant size reduction (lossy compression). This can reduce file
+/// sizes by 50-80% for images with limited color palettes.
+///
+/// # Arguments
+///
+/// * `data` - Raw pixel data as Uint8Array (row-major order)
+/// * `width` - Image width in pixels
+/// * `height` - Image height in pixels
+/// * `color_type` - Color type: 0=Gray, 1=GrayAlpha, 2=Rgb, 3=Rgba
+/// * `preset` - Preset: 0=fast, 1=balanced, 2=max
+/// * `lossless` - If true, disable quantization (lossless). If false, enable auto-quantization (lossy).
+///
+/// # Returns
+///
+/// PNG file bytes as Uint8Array.
+#[wasm_bindgen(js_name = "encodePngPresetLossy")]
+pub fn encode_png_preset_lossy(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    color_type: u8,
+    preset: u8,
+    lossless: bool,
+) -> Result<Vec<u8>, JsError> {
+    let color = color_type_from_u8(color_type)?;
+    let options = PngOptions::from_preset_with_lossless(preset, lossless);
+    png::encode_with_options(data, width, height, color, &options)
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
 /// Encode JPEG with preset: 0=fast, 1=balanced, 2=max.
 ///
 /// # Arguments

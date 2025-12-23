@@ -51,6 +51,7 @@ sha2 = "0.10"
 proptest = "1.5"
 flate2 = "1.0"
 url = { version = "=2.4.1", default-features = true }
+imagequant = "4"
 
 
 [[bench]]

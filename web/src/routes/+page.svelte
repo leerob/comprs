@@ -43,6 +43,7 @@
     filter: "adaptive" as PngFilter,
     subsampling420: true,
     pngPreset: 1 as PresetLevel, // 0=faster, 1=auto, 2=smallest
+    pngLossless: false, // Default OFF = lossy enabled for smaller PNGs
   });
 
   let detectedFormat = $derived.by(() => {
@@ -232,6 +233,8 @@
         hasAlpha: job.hasAlpha,
         // Use preset-based encoding: PNG uses inverted pngPreset, JPEG uses auto (1)
         preset: jobFormat === "png" ? pngPresetValue : 1 as PresetLevel,
+        // Pass lossless option for PNG
+        lossless: jobFormat === "png" ? globalOptions.pngLossless : undefined,
       });
       const url = URL.createObjectURL(blob);
       if (job.result?.url) URL.revokeObjectURL(job.result.url);
@@ -852,6 +855,16 @@
             data-testid="png-preset-slider"
           />
           <span class="text-neutral-500 whitespace-nowrap">Faster</span>
+        </label>
+        <label class="flex items-center gap-2 text-xs cursor-pointer" title="Enable lossless compression (larger files, preserves all colors)">
+          <input
+            type="checkbox"
+            class="accent-neutral-400"
+            bind:checked={globalOptions.pngLossless}
+            onchange={recompressAll}
+            data-testid="png-lossless-checkbox"
+          />
+          <span class="text-neutral-400">Lossless</span>
         </label>
       {/if}
       <!-- When mixed, no format-specific controls are shown -->

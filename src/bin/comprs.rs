@@ -482,6 +482,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     reduce_palette: args.png_reduce_color,
                     verbose_filter_log: args.verbose,
                     optimal_compression: false,
+                    quantization: comprs::png::QuantizationOptions::default(),
                 },
             };
             // Allow explicit overrides if preset is provided but user also set flags.

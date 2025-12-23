@@ -20,6 +20,7 @@ export type CompressOptions = {
 	hasAlpha?: boolean; // If false, strip alpha channel for smaller output
 	optimizeHuffman?: boolean; // JPEG: optimize Huffman tables (smaller, slower)
 	preset?: PresetLevel; // Preset level: 0=faster, 1=auto, 2=smallest
+	lossless?: boolean; // PNG: if true, disable quantization (lossless). Default: false (lossy enabled)
 };
 
 export type CompressResult = {
@@ -79,18 +80,29 @@ export async function compressImage(imageData: ImageData, options: CompressOptio
 		const colorType = useRgb ? 2 : 3;
 		const pixelData = useRgb ? rgbaToRgb(imageData.data) : new Uint8Array(imageData.data);
 
-		// Use preset-based encoding if a preset is specified
+		// Default to lossy (lossless = false) for smaller files
+		const lossless = options.lossless ?? false;
+
+		// Use preset-based encoding with lossy support if a preset is specified
 		if (options.preset !== undefined) {
-			const encodePngPreset = (wasmModule as any).encodePngPreset as
+			const encodePngPresetLossy = (wasmModule as any).encodePngPresetLossy as
 				| undefined
-				| ((d: Uint8Array, w: number, h: number, ct: number, preset: number) => Uint8Array);
-			if (encodePngPreset) {
-				bytes = encodePngPreset(pixelData, imageData.width, imageData.height, colorType, options.preset);
+				| ((d: Uint8Array, w: number, h: number, ct: number, preset: number, lossless: boolean) => Uint8Array);
+			if (encodePngPresetLossy) {
+				bytes = encodePngPresetLossy(pixelData, imageData.width, imageData.height, colorType, options.preset, lossless);
 			} else {
-				// Fallback to filter-based encoding
-				const compressionLevel = clamp(options.compressionLevel ?? 6, 1, 9);
-				const filterCode = filterMap[options.filter ?? 'adaptive'];
-				bytes = wasmModule.encodePngWithFilter(pixelData, imageData.width, imageData.height, colorType, compressionLevel, filterCode);
+				// Fallback to non-lossy preset encoding
+				const encodePngPreset = (wasmModule as any).encodePngPreset as
+					| undefined
+					| ((d: Uint8Array, w: number, h: number, ct: number, preset: number) => Uint8Array);
+				if (encodePngPreset) {
+					bytes = encodePngPreset(pixelData, imageData.width, imageData.height, colorType, options.preset);
+				} else {
+					// Fallback to filter-based encoding
+					const compressionLevel = clamp(options.compressionLevel ?? 6, 1, 9);
+					const filterCode = filterMap[options.filter ?? 'adaptive'];
+					bytes = wasmModule.encodePngWithFilter(pixelData, imageData.width, imageData.height, colorType, compressionLevel, filterCode);
+				}
 			}
 		} else {
 			const compressionLevel = clamp(options.compressionLevel ?? 6, 1, 9);

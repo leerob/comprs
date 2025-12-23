@@ -32,6 +32,29 @@ export function bytesPerPixel(color_type: number): number;
 export function encodeJpeg(data: Uint8Array, width: number, height: number, quality: number, color_type: number, subsampling_420: boolean): Uint8Array;
 
 /**
+ * Encode JPEG with preset: 0=fast, 1=balanced, 2=max.
+ *
+ * # Arguments
+ *
+ * * `data` - Raw pixel data as Uint8Array (row-major order)
+ * * `width` - Image width in pixels
+ * * `height` - Image height in pixels
+ * * `quality` - Quality level 1-100 (85 recommended)
+ * * `color_type` - Color type: 0=Gray, 2=Rgb (JPEG only supports these)
+ * * `preset` - Preset: 0=fast, 1=balanced, 2=max
+ *
+ * # Returns
+ *
+ * JPEG file bytes as Uint8Array.
+ */
+export function encodeJpegPreset(data: Uint8Array, width: number, height: number, quality: number, color_type: number, preset: number): Uint8Array;
+
+/**
+ * Encode JPEG with an explicit optimize_huffman toggle.
+ */
+export function encodeJpegWithOptions(data: Uint8Array, width: number, height: number, quality: number, color_type: number, subsampling_420: boolean, optimize_huffman: boolean): Uint8Array;
+
+/**
  * Encode raw pixel data as PNG.
  *
  * # Arguments
@@ -49,6 +72,45 @@ export function encodeJpeg(data: Uint8Array, width: number, height: number, qual
 export function encodePng(data: Uint8Array, width: number, height: number, color_type: number, compression_level: number): Uint8Array;
 
 /**
+ * Encode PNG with preset: 0=fast, 1=balanced, 2=max.
+ *
+ * # Arguments
+ *
+ * * `data` - Raw pixel data as Uint8Array (row-major order)
+ * * `width` - Image width in pixels
+ * * `height` - Image height in pixels
+ * * `color_type` - Color type: 0=Gray, 1=GrayAlpha, 2=Rgb, 3=Rgba
+ * * `preset` - Preset: 0=fast, 1=balanced, 2=max
+ *
+ * # Returns
+ *
+ * PNG file bytes as Uint8Array.
+ */
+export function encodePngPreset(data: Uint8Array, width: number, height: number, color_type: number, preset: number): Uint8Array;
+
+/**
+ * Encode PNG with preset and lossless flag.
+ *
+ * When `lossless` is false, enables auto-quantization for potentially
+ * significant size reduction (lossy compression). This can reduce file
+ * sizes by 50-80% for images with limited color palettes.
+ *
+ * # Arguments
+ *
+ * * `data` - Raw pixel data as Uint8Array (row-major order)
+ * * `width` - Image width in pixels
+ * * `height` - Image height in pixels
+ * * `color_type` - Color type: 0=Gray, 1=GrayAlpha, 2=Rgb, 3=Rgba
+ * * `preset` - Preset: 0=fast, 1=balanced, 2=max
+ * * `lossless` - If true, disable quantization (lossless). If false, enable auto-quantization (lossy).
+ *
+ * # Returns
+ *
+ * PNG file bytes as Uint8Array.
+ */
+export function encodePngPresetLossy(data: Uint8Array, width: number, height: number, color_type: number, preset: number, lossless: boolean): Uint8Array;
+
+/**
  * Encode raw pixel data as PNG with a specific filter strategy.
  *
  * # Arguments
@@ -58,7 +120,7 @@ export function encodePng(data: Uint8Array, width: number, height: number, color
  * * `height` - Image height in pixels
  * * `color_type` - Color type: 0=Gray, 1=GrayAlpha, 2=Rgb, 3=Rgba
  * * `compression_level` - Compression level 1-9 (6 recommended)
- * * `filter` - Filter strategy: 0=None, 1=Sub, 2=Up, 3=Average, 4=Paeth, 5=Adaptive, 6=AdaptiveFast
+ * * `filter` - Filter strategy: 0=None, 1=Sub, 2=Up, 3=Average, 4=Paeth, 5=Adaptive, 6=AdaptiveFast, 7=MinSum
  *
  * # Returns
  *
@@ -73,7 +135,11 @@ export interface InitOutput {
   readonly encodePng: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
   readonly encodePngWithFilter: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
   readonly encodeJpeg: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
+  readonly encodeJpegWithOptions: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
   readonly bytesPerPixel: (a: number, b: number) => void;
+  readonly encodePngPreset: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+  readonly encodePngPresetLossy: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
+  readonly encodeJpegPreset: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
   readonly __wbindgen_add_to_stack_pointer: (a: number) => number;
   readonly __wbindgen_export: (a: number, b: number) => number;
   readonly __wbindgen_export2: (a: number, b: number, c: number) => void;

@@ -19,6 +19,7 @@ use flate2::{write::ZlibEncoder, Compression};
 use image::ImageEncoder;
 
 use comprs::compress::deflate::deflate_zlib;
+use comprs::png::{QuantizationMode, QuantizationOptions};
 use comprs::{jpeg, png, ColorType};
 
 // ============================================================================
@@ -96,6 +97,18 @@ fn find_cjpeg() -> Option<PathBuf> {
         "vendor/mozjpeg/cjpeg",
         "/usr/local/bin/cjpeg",
         "/opt/homebrew/bin/cjpeg",
+    ];
+    paths
+        .iter()
+        .find(|p| Path::new(p).exists())
+        .map(PathBuf::from)
+}
+
+fn find_pngquant() -> Option<PathBuf> {
+    let paths = [
+        "/usr/local/bin/pngquant",
+        "/opt/homebrew/bin/pngquant",
+        "/usr/bin/pngquant",
     ];
     paths
         .iter()
@@ -196,6 +209,95 @@ fn encode_with_mozjpeg(
     }
 }
 
+/// Encode PNG with pngquant (lossy) and return (size, duration)
+fn encode_with_pngquant(
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+    tmp_dir: &Path,
+) -> Option<(usize, Duration)> {
+    let pngquant_bin = find_pngquant()?;
+
+    // Write input PNG using image crate
+    let input_path = tmp_dir.join("pngquant_input.png");
+    let output_path = tmp_dir.join("pngquant_output.png");
+
+    {
+        let mut file = fs::File::create(&input_path).ok()?;
+        let encoder = image::codecs::png::PngEncoder::new(&mut file);
+        encoder
+            .write_image(pixels, width, height, image::ColorType::Rgb8)
+            .ok()?;
+    }
+
+    let start = Instant::now();
+    let status = Command::new(&pngquant_bin)
+        .args([
+            "--quality=65-80",
+            "--speed=4",
+            "--force",
+            "--output",
+            output_path.to_str()?,
+            input_path.to_str()?,
+        ])
+        .output()
+        .ok()?;
+    let duration = start.elapsed();
+
+    if status.status.success() {
+        let size = fs::metadata(&output_path).ok()?.len() as usize;
+        Some((size, duration))
+    } else {
+        None
+    }
+}
+
+/// Quantize with imagequant crate and encode as PNG
+fn encode_with_imagequant(pixels: &[u8], width: u32, height: u32) -> Option<(usize, Duration)> {
+    use imagequant::RGBA;
+
+    let start = Instant::now();
+
+    // Create RGBA buffer (imagequant requires Vec<RGBA>)
+    let rgba: Vec<RGBA> = pixels
+        .chunks_exact(3)
+        .map(|chunk| RGBA::new(chunk[0], chunk[1], chunk[2], 255))
+        .collect();
+
+    let mut liq = imagequant::new();
+    liq.set_quality(0, 80).ok()?;
+
+    let mut img = liq
+        .new_image(rgba, width as usize, height as usize, 0.0)
+        .ok()?;
+
+    let mut res = liq.quantize(&mut img).ok()?;
+    res.set_dithering_level(1.0).ok()?;
+
+    let (palette, indices) = res.remapped(&mut img).ok()?;
+
+    // Convert palette to RGB format for PNG encoding
+    let rgb_palette: Vec<[u8; 3]> = palette.iter().map(|c| [c.r, c.g, c.b]).collect();
+    let alpha: Vec<u8> = palette.iter().map(|c| c.a).collect();
+
+    // Use comprs to encode the indexed PNG
+    let mut opts = png::PngOptions::balanced();
+    opts.quantization.mode = QuantizationMode::Off; // Already quantized
+
+    let png_data = png::encode_indexed_with_options(
+        &indices,
+        width,
+        height,
+        &rgb_palette,
+        Some(&alpha),
+        &opts,
+    )
+    .ok()?;
+
+    let duration = start.elapsed();
+    Some((png_data.len(), duration))
+}
+
 // ============================================================================
 // PNG Encoding Comparison (all presets)
 // ============================================================================
@@ -281,6 +383,103 @@ fn bench_png_all_presets(c: &mut Criterion) {
                         .unwrap();
                     output
                 });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+// ============================================================================
+// PNG Lossy Comparison (quantization)
+// ============================================================================
+
+fn bench_png_lossy_comparison(c: &mut Criterion) {
+    let mut group = c.benchmark_group("PNG Lossy Comparison");
+
+    for size in [256, 512].iter() {
+        let gradient = generate_gradient_image(*size, *size);
+        let pixel_bytes = (*size as u64) * (*size as u64) * 3;
+
+        group.throughput(Throughput::Bytes(pixel_bytes));
+
+        let mut png_buf = Vec::new();
+
+        // comprs lossless (baseline)
+        group.bench_with_input(
+            BenchmarkId::new("comprs_lossless", format!("{size}x{size}")),
+            &gradient,
+            |b, pixels| {
+                b.iter(|| {
+                    png::encode_into(
+                        &mut png_buf,
+                        black_box(pixels),
+                        *size,
+                        *size,
+                        ColorType::Rgb,
+                        &png::PngOptions::balanced(),
+                    )
+                    .unwrap()
+                });
+            },
+        );
+
+        // comprs lossy with auto quantization
+        let mut lossy_opts = png::PngOptions::balanced();
+        lossy_opts.quantization = QuantizationOptions {
+            mode: QuantizationMode::Auto,
+            max_colors: 256,
+            dithering: false,
+        };
+        group.bench_with_input(
+            BenchmarkId::new("comprs_lossy_auto", format!("{size}x{size}")),
+            &gradient,
+            |b, pixels| {
+                b.iter(|| {
+                    png::encode_into(
+                        &mut png_buf,
+                        black_box(pixels),
+                        *size,
+                        *size,
+                        ColorType::Rgb,
+                        &lossy_opts,
+                    )
+                    .unwrap()
+                });
+            },
+        );
+
+        // comprs lossy with forced quantization
+        let mut force_opts = png::PngOptions::balanced();
+        force_opts.quantization = QuantizationOptions {
+            mode: QuantizationMode::Force,
+            max_colors: 256,
+            dithering: false,
+        };
+        group.bench_with_input(
+            BenchmarkId::new("comprs_lossy_force", format!("{size}x{size}")),
+            &gradient,
+            |b, pixels| {
+                b.iter(|| {
+                    png::encode_into(
+                        &mut png_buf,
+                        black_box(pixels),
+                        *size,
+                        *size,
+                        ColorType::Rgb,
+                        &force_opts,
+                    )
+                    .unwrap()
+                });
+            },
+        );
+
+        // imagequant crate
+        group.bench_with_input(
+            BenchmarkId::new("imagequant", format!("{size}x{size}")),
+            &gradient,
+            |b, pixels| {
+                b.iter(|| encode_with_imagequant(black_box(pixels), *size, *size));
             },
         );
     }
@@ -569,6 +768,119 @@ fn print_summary_report() {
     println!("└────────────────────┴─────────────┴─────────────┴───────────────────────────────────────────────┘");
     println!();
 
+    // --- PNG Lossy Comparison ---
+    println!("┌────────────────────────────────────────────────────────────────────────────────────────────────┐");
+    println!("│ PNG Lossy Compression (512x512 gradient image, quantization)                                   │");
+    println!("├────────────────────┬─────────────┬─────────────┬───────────────────────────────────────────────┤");
+    println!("│ Encoder            │ Size        │ Time        │ Notes                                         │");
+    println!("├────────────────────┼─────────────┼─────────────┼───────────────────────────────────────────────┤");
+
+    // comprs lossless (baseline)
+    println!(
+        "│ {:<18} │ {:>11} │ {:>11} │ {:<45} │",
+        "comprs Lossless",
+        format_size(balanced_size),
+        format_duration(balanced_time),
+        "Baseline (no quantization)"
+    );
+
+    // comprs lossy with forced quantization
+    let mut lossy_opts = png::PngOptions::balanced();
+    lossy_opts.quantization = QuantizationOptions {
+        mode: QuantizationMode::Force,
+        max_colors: 256,
+        dithering: false,
+    };
+    let (lossy_size, lossy_time) = measure_png_encode(&gradient, 512, 512, &lossy_opts);
+    let lossy_savings = (1.0 - lossy_size as f64 / balanced_size as f64) * 100.0;
+    println!(
+        "│ {:<18} │ {:>11} │ {:>11} │ {:<45} │",
+        "comprs Lossy",
+        format_size(lossy_size),
+        format_duration(lossy_time),
+        format!("256 colors, no dithering (-{:.1}%)", lossy_savings)
+    );
+
+    // imagequant crate
+    if let Some((iq_size, iq_time)) = encode_with_imagequant(&gradient, 512, 512) {
+        let iq_savings = (1.0 - iq_size as f64 / balanced_size as f64) * 100.0;
+        println!(
+            "│ {:<18} │ {:>11} │ {:>11} │ {:<45} │",
+            "imagequant",
+            format_size(iq_size),
+            format_duration(iq_time),
+            format!("libimagequant bindings (-{:.1}%)", iq_savings)
+        );
+    }
+
+    // pngquant (if available)
+    let pngquant_available = find_pngquant().is_some();
+    if let Some((pq_size, pq_time)) = encode_with_pngquant(&gradient, 512, 512, &tmp_dir) {
+        let pq_savings = (1.0 - pq_size as f64 / balanced_size as f64) * 100.0;
+        println!(
+            "│ {:<18} │ {:>11} │ {:>11} │ {:<45} │",
+            "pngquant",
+            format_size(pq_size),
+            format_duration(pq_time),
+            format!("--quality=65-80 (-{:.1}%)", pq_savings)
+        );
+    } else {
+        println!(
+            "│ {:<18} │ {:>11} │ {:>11} │ {:<45} │",
+            "pngquant", "N/A", "N/A", "not installed (brew install pngquant)"
+        );
+    }
+
+    println!("└────────────────────┴─────────────┴─────────────┴───────────────────────────────────────────────┘");
+    println!();
+
+    // --- Real Image Lossy Comparison ---
+    println!("┌────────────────────────────────────────────────────────────────────────────────────────────────┐");
+    println!("│ PNG Lossy Compression (Real Images: comprs vs pngquant)                                        │");
+    println!("├────────────────────┬─────────────┬─────────────┬─────────────┬──────────────────────────────────┤");
+    println!("│ Image              │ comprs Lossy│ pngquant    │ Delta       │ Notes                            │");
+    println!("├────────────────────┼─────────────┼─────────────┼─────────────┼──────────────────────────────────┤");
+
+    let real_images = [
+        ("avatar-color.png", "tests/fixtures/avatar-color.png"),
+        ("rocket.png", "tests/fixtures/rocket.png"),
+    ];
+
+    for (name, path) in real_images {
+        if let Some((comprs_size, _comprs_time, pq_size, _pq_time)) =
+            compare_real_image_lossy(path, &tmp_dir)
+        {
+            let delta = (comprs_size as f64 / pq_size as f64 - 1.0) * 100.0;
+            let delta_str = format!("{:+.0}%", delta);
+            let note = if delta < 0.0 { "comprs wins" } else { "pngquant wins" };
+            println!(
+                "│ {:<18} │ {:>11} │ {:>11} │ {:>11} │ {:<32} │",
+                name,
+                format_size(comprs_size),
+                format_size(pq_size),
+                delta_str,
+                note
+            );
+        } else {
+            println!(
+                "│ {:<18} │ {:>11} │ {:>11} │ {:>11} │ {:<32} │",
+                name, "N/A", "N/A", "N/A", "image not found"
+            );
+        }
+    }
+
+    println!("└────────────────────┴─────────────┴─────────────┴─────────────┴──────────────────────────────────┘");
+    println!();
+
+    // Update external tool status
+    println!(
+        "External tools: oxipng={}, mozjpeg={}, pngquant={}",
+        if oxipng_available { "found" } else { "missing" },
+        if mozjpeg_available { "found" } else { "missing" },
+        if pngquant_available { "found" } else { "missing" }
+    );
+    println!();
+
     // --- JPEG Comparison (all presets + external tools) ---
     println!("┌────────────────────────────────────────────────────────────────────────────────────────────────┐");
     println!("│ JPEG Compression (512x512 gradient image, quality 85)                                          │");
@@ -685,6 +997,74 @@ fn print_summary_report() {
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+/// Compare comprs lossy vs pngquant on a real image file
+/// Returns (comprs_size, comprs_time, pngquant_size, pngquant_time)
+fn compare_real_image_lossy(
+    path: &str,
+    tmp_dir: &Path,
+) -> Option<(usize, Duration, usize, Duration)> {
+    use image::GenericImageView;
+
+    if !Path::new(path).exists() {
+        return None;
+    }
+
+    let img = image::open(path).ok()?;
+    let rgba = img.to_rgba8();
+    let (width, height) = img.dimensions();
+    let pixels = rgba.as_raw();
+
+    // comprs lossy
+    let mut lossy_opts = png::PngOptions::balanced();
+    lossy_opts.quantization = QuantizationOptions {
+        mode: QuantizationMode::Force,
+        max_colors: 256,
+        dithering: false,
+    };
+
+    let start = Instant::now();
+    let mut lossy_buf = Vec::new();
+    png::encode_into(
+        &mut lossy_buf,
+        pixels,
+        width,
+        height,
+        ColorType::Rgba,
+        &lossy_opts,
+    )
+    .ok()?;
+    let comprs_time = start.elapsed();
+
+    // pngquant - first encode lossless for input
+    let lossless = png::encode(pixels, width, height, ColorType::Rgba).ok()?;
+    let input_path = tmp_dir.join("real_pq_input.png");
+    let output_path = tmp_dir.join("real_pq_output.png");
+    fs::write(&input_path, &lossless).ok()?;
+
+    let pngquant_bin = find_pngquant()?;
+    let start = Instant::now();
+    let status = Command::new(&pngquant_bin)
+        .args([
+            "--quality=65-80",
+            "--speed=4",
+            "--force",
+            "--output",
+            output_path.to_str()?,
+            input_path.to_str()?,
+        ])
+        .output()
+        .ok()?;
+    let pq_time = start.elapsed();
+
+    if !status.status.success() {
+        return None;
+    }
+
+    let pq_size = fs::metadata(&output_path).ok()?.len() as usize;
+
+    Some((lossy_buf.len(), comprs_time, pq_size, pq_time))
+}
 
 fn measure_png_encode(
     pixels: &[u8],
@@ -840,7 +1220,7 @@ fn custom_criterion() -> Criterion {
 criterion_group! {
     name = benches;
     config = custom_criterion();
-    targets = bench_png_all_presets, bench_jpeg_all_presets, bench_deflate_comparison
+    targets = bench_png_all_presets, bench_png_lossy_comparison, bench_jpeg_all_presets, bench_deflate_comparison
 }
 
 // Custom main that prints summary after benchmarks
