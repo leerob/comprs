@@ -1,0 +1,19 @@
+{
+  "name": "comprs-js-bench",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bench": "node run.mjs",
+    "bench:quick": "QUICK=1 node run.mjs"
+  },
+  "dependencies": {
+    "@squoosh/lib": "^0.5.3",
+    "browser-image-compression": "^2.0.2",
+    "jimp": "^0.22.12",
+    "jpeg-js": "^0.4.4",
+    "pngjs": "^7.0.0",
+    "sharp": "^0.33.5",
+    "tinybench": "^2.9.0"
+  }
+}
