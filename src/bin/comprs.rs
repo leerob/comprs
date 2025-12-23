@@ -11,7 +11,7 @@ use std::time::Instant;
 use clap::{Parser, ValueEnum};
 
 use comprs::jpeg::{JpegOptions, Subsampling};
-use comprs::png::{FilterStrategy, PngOptions};
+use comprs::png::{FilterStrategy, PngOptions, QuantizationMode, QuantizationOptions};
 use comprs::ColorType;
 
 /// A minimal-dependency, high-performance image compression tool.
