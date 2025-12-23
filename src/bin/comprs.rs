@@ -389,7 +389,6 @@ fn main() {
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
-    // Load input image
     let start = Instant::now();
     let img = load_image(&args.input)?;
     let load_time = start.elapsed();
@@ -408,7 +407,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("  Load time: {load_time:.2?}");
     }
 
-    // Determine output format
     let output_path = args.output.clone().unwrap_or_else(|| {
         let mut path = args.input.clone();
         let ext = match determine_format(&args) {
@@ -431,17 +429,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or(OutputFormat::Jpeg)
     });
 
-    // Convert to appropriate color format
     let (pixels, color_type) = if args.grayscale {
         (to_grayscale(&img.pixels, img.color_type), ColorType::Gray)
     } else {
         match format {
-            OutputFormat::Png => {
-                // PNG supports all color types
-                (img.pixels, img.color_type)
-            }
+            OutputFormat::Png => (img.pixels, img.color_type),
             OutputFormat::Jpeg | OutputFormat::Jpg => {
-                // JPEG only supports Gray and RGB
                 match img.color_type {
                     ColorType::Gray => (img.pixels, ColorType::Gray),
                     ColorType::GrayAlpha => (gray_alpha_to_gray(&img.pixels), ColorType::Gray),
@@ -452,7 +445,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    // Encode
     let encode_start = Instant::now();
     let mut output_data = Vec::new();
     match format {
@@ -466,7 +458,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     filter_strategy: args.filter.to_strategy(args.adaptive_sample_interval),
                 },
             };
-            // Allow explicit overrides if preset is provided but user also set flags.
             options.compression_level = args.compression;
             options.filter_strategy = args.filter.to_strategy(args.adaptive_sample_interval);
 
@@ -498,10 +489,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     let encode_time = encode_start.elapsed();
 
-    // Write output
     fs::write(&output_path, &output_data)?;
 
-    // Report results
     let input_size = fs::metadata(&args.input)?.len();
     let output_size = output_data.len() as u64;
     let ratio = if input_size > 0 {
