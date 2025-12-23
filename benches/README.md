@@ -109,6 +109,31 @@ These are the libraries we aim to benchmark across Rust and JS/Node. Some target
 
 Both Rust and JS runners should rely on these definitions to keep inputs consistent.
 
+### Running cross-language benchmarks
+1) **Rust summary JSON** (no Criterion run):
+```bash
+cargo bench --bench comparison -- --summary-only --export-json /tmp/rust-summary.json
+```
+
+2) **JS/Node benchmarks** (from `benchmarks/js`; first run `pnpm install`):
+```bash
+cd benchmarks/js
+pnpm bench:quick -- --output /tmp/js-bench.json   # QUICK=1, small iteration count
+# or for longer runs
+pnpm bench -- --output /tmp/js-bench.json         # default iterations=6, override with BENCH_ITERATIONS
+```
+- Results include speed, output sizes, and package sizes for sharp, jimp, pngjs, jpeg-js.
+- `browser-image-compression` is skipped (browser-only). `@squoosh/lib` currently errors on Node 22 due to a read-only global `navigator`; captured as `status=error`.
+
+3) **Aggregate + rankings**:
+```bash
+node benchmarks/aggregate.mjs \
+  --rust /tmp/rust-summary.json \
+  --js /tmp/js-bench.json \
+  --output /tmp/cross-bench.md
+```
+The aggregator builds Markdown tables ranking speed (PNG/JPEG), output size, and binary/package size across Rust and JS results.
+
 ---
 
 ## Library Comparison
