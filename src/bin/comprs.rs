@@ -49,6 +49,18 @@ struct Args {
     #[arg(long, value_enum, default_value = "adaptivefast")]
     filter: FilterArg,
 
+    /// PNG quantization mode (off, auto, force)
+    #[arg(long, value_enum, default_value = "off")]
+    quantize: QuantizeArg,
+
+    /// Maximum colors for PNG quantization (1-256)
+    #[arg(long, default_value = "256", value_parser = clap::value_parser!(u16).range(1..=256))]
+    max_colors: u16,
+
+    /// Enable dithering during PNG quantization
+    #[arg(long)]
+    dither: bool,
+
     /// PNG preset (overrides compression/filter when set)
     #[arg(long, value_enum)]
     png_preset: Option<PngPresetArg>,
@@ -118,6 +130,13 @@ enum FilterArg {
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
+enum QuantizeArg {
+    Off,
+    Auto,
+    Force,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
 enum PngPresetArg {
     /// Fastest settings (level 2, AdaptiveFast)
     Fast,
@@ -140,6 +159,16 @@ impl FilterArg {
             FilterArg::AdaptiveSampled => FilterStrategy::AdaptiveSampled {
                 interval: sampled_interval.max(1),
             },
+        }
+    }
+}
+
+impl From<QuantizeArg> for QuantizationMode {
+    fn from(arg: QuantizeArg) -> Self {
+        match arg {
+            QuantizeArg::Off => QuantizationMode::Off,
+            QuantizeArg::Auto => QuantizationMode::Auto,
+            QuantizeArg::Force => QuantizationMode::Force,
         }
     }
 }
@@ -464,11 +493,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 None => PngOptions {
                     compression_level: args.compression,
                     filter_strategy: args.filter.to_strategy(args.adaptive_sample_interval),
+                    ..Default::default()
                 },
             };
             // Allow explicit overrides if preset is provided but user also set flags.
             options.compression_level = args.compression;
             options.filter_strategy = args.filter.to_strategy(args.adaptive_sample_interval);
+            options.quantization = QuantizationOptions {
+                mode: args.quantize.into(),
+                max_colors: args.max_colors,
+                dithering: args.dither,
+            };
 
             comprs::png::encode_into(
                 &mut output_data,

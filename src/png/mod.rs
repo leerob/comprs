@@ -461,7 +461,14 @@ fn encode_internal_with_stats(
     let should_quantize = match options.quantization.mode {
         QuantizationMode::Off => false,
         QuantizationMode::Force => matches!(color_type, ColorType::Rgb | ColorType::Rgba),
-        QuantizationMode::Auto => matches!(color_type, ColorType::Rgb | ColorType::Rgba),
+        QuantizationMode::Auto => {
+            matches!(color_type, ColorType::Rgb | ColorType::Rgba)
+                && should_quantize_auto(
+                    data,
+                    bpp,
+                    options.quantization.max_colors.min(256) as usize,
+                )
+        }
     };
 
     if should_quantize {
@@ -860,6 +867,45 @@ fn quantize_image(
     }
 
     Ok((palette, indices))
+}
+
+fn should_quantize_auto(data: &[u8], bpp: usize, max_colors: usize) -> bool {
+    // Sample up to ~20k pixels to estimate color diversity.
+    let total_pixels = data.len() / bpp;
+    if total_pixels == 0 {
+        return false;
+    }
+    let sample_cap = 20_000usize;
+    let stride = (total_pixels / sample_cap).max(1);
+    let mut set = std::collections::HashSet::with_capacity(sample_cap.min(total_pixels));
+    let mut idx = 0usize;
+    while idx < data.len() {
+        let key = match bpp {
+            3 => {
+                let r = data[idx];
+                let g = data[idx + 1];
+                let b = data[idx + 2];
+                ((r as u32) << 16) | ((g as u32) << 8) | b as u32
+            }
+            4 => {
+                let r = data[idx];
+                let g = data[idx + 1];
+                let b = data[idx + 2];
+                let a = data[idx + 3];
+                ((r as u32) << 24) | ((g as u32) << 16) | ((b as u32) << 8) | a as u32
+            }
+            _ => return false,
+        };
+        set.insert(key);
+        if set.len() > max_colors.saturating_mul(32) {
+            // Too many distinct colors; likely a photo—skip auto quantization.
+            return false;
+        }
+        idx = idx.saturating_add(stride * bpp);
+    }
+
+    // Quantize when observed diversity is within the palette-friendly bound.
+    true
 }
 
 #[cfg(test)]
