@@ -26,7 +26,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::color::ColorType;
 use crate::jpeg::{self, JpegOptions, Subsampling};
-use crate::png::{self, FilterStrategy, PngOptions};
+use crate::png::{self, FilterStrategy, PngOptions, QuantizationMode, QuantizationOptions};
 
 /// Convert a u8 color type code to ColorType enum.
 ///
@@ -72,6 +72,11 @@ pub fn encode_png(
     let options = PngOptions {
         compression_level,
         filter_strategy: FilterStrategy::Adaptive,
+        quantization: QuantizationOptions {
+            mode: QuantizationMode::Auto,
+            max_colors: 256,
+            dithering: false,
+        },
     };
 
     png::encode_with_options(data, width, height, color, &options)
@@ -121,6 +126,11 @@ pub fn encode_png_with_filter(
     let options = PngOptions {
         compression_level,
         filter_strategy,
+        quantization: QuantizationOptions {
+            mode: QuantizationMode::Auto,
+            max_colors: 256,
+            dithering: false,
+        },
     };
 
     png::encode_with_options(data, width, height, color, &options)
