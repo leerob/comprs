@@ -48,11 +48,11 @@ test.describe('Smoke Tests', () => {
 			await page.goto('/');
 			await waitForWasm();
 			await uploadAndWaitForCompression(FIXTURES.PNG);
-			await expect(page.getByTestId('compression-level-slider')).toBeVisible();
-			await expect(page.getByTestId('filter-select')).toBeVisible();
+			await expect(page.getByTestId('png-preset-slider')).toBeVisible();
 			const initialSize = await page.getByTestId('total-compressed-size').textContent();
-			await page.getByTestId('compression-level-slider').fill('9');
-			await page.getByTestId('compression-level-slider').dispatchEvent('change');
+			// Change from default (1=Auto) to smaller (0)
+			await page.getByTestId('png-preset-slider').fill('0');
+			await page.getByTestId('png-preset-slider').dispatchEvent('change');
 			await expect(page.getByTestId('download-button')).toBeVisible({ timeout: 60000 });
 			await expect(page.getByTestId('total-compressed-size')).toBeVisible();
 		});
@@ -74,8 +74,8 @@ test.describe('Smoke Tests', () => {
 			await uploadAndWaitForCompression(FIXTURES.JPEG);
 			await expect(page.getByTestId('quality-slider')).toBeVisible();
 			await expect(page.getByTestId('quality-value')).toBeVisible();
-			await expect(page.getByTestId('compression-level-slider')).not.toBeVisible();
-			await expect(page.getByTestId('filter-select')).not.toBeVisible();
+			// PNG preset slider should not be visible for JPEG
+			await expect(page.getByTestId('png-preset-slider')).not.toBeVisible();
 		});
 	});
 
