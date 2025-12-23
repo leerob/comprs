@@ -725,14 +725,21 @@ fn quantize_image(
         return Err(Error::UnsupportedColorType);
     }
     let mut hist = std::collections::HashMap::<u32, u32>::new();
-    for chunk in data.chunks_exact(bpp) {
+    let total_pixels = data.len() / bpp;
+    let max_samples = 200_000usize;
+    let stride = (total_pixels / max_samples).max(1);
+    let mut idx = 0usize;
+    while idx + bpp <= data.len() {
+        let chunk = &data[idx..idx + bpp];
         let (r, g, b, a) = match (bpp, chunk) {
             (3, [r, g, b]) => (*r, *g, *b, 255u8),
             (4, [r, g, b, a]) => (*r, *g, *b, *a),
             _ => unreachable!(),
         };
         let key = ((r as u32) << 24) | ((g as u32) << 16) | ((b as u32) << 8) | a as u32;
-        *hist.entry(key).or_insert(0) += 1;
+        let entry = hist.entry(key).or_insert(0);
+        *entry = entry.saturating_add(stride as u32);
+        idx = idx.saturating_add(stride * bpp);
     }
 
     let colors: Vec<ColorCount> = hist
@@ -767,7 +774,9 @@ fn quantize_image(
                 _ => unreachable!(),
             };
             let key = ((r as u32) << 24) | ((g as u32) << 16) | ((b as u32) << 8) | a as u32;
-            let idx = *map.get(&key).unwrap();
+            let idx = *map
+                .get(&key)
+                .unwrap_or(&nearest_palette_index([r, g, b, a], &palette));
             indices.push(idx);
         }
         return Ok((palette, indices));
@@ -795,7 +804,9 @@ fn quantize_image(
                 _ => unreachable!(),
             };
             let key = ((r as u32) << 24) | ((g as u32) << 16) | ((b as u32) << 8) | a as u32;
-            let idx = *color_to_idx.get(&key).unwrap_or(&0);
+            let idx = *color_to_idx
+                .get(&key)
+                .unwrap_or(&nearest_palette_index([r, g, b, a], &palette));
             indices.push(idx);
         }
         return Ok((palette, indices));
