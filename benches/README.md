@@ -134,6 +134,14 @@ node benchmarks/aggregate.mjs \
 ```
 The aggregator builds Markdown tables ranking speed (PNG/JPEG), output size, and binary/package size across Rust and JS results.
 
+### One-shot helper
+Use the helper script to run quick Rust + JS benchmarks and aggregate in one go:
+```bash
+./benchmarks/run-cross-bench.sh
+# Optional overrides:
+#   RUST_OUT=/tmp/rust.json JS_OUT=/tmp/js.json SUMMARY_OUT=/tmp/cross.md ./benchmarks/run-cross-bench.sh
+```
+
 ---
 
 ## Library Comparison
