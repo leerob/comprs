@@ -2,6 +2,7 @@
 //!
 //! Implements PNG encoding according to the PNG specification (RFC 2083).
 
+mod bit_depth;
 pub mod chunk;
 pub mod filter;
 
@@ -10,6 +11,7 @@ use crate::compress::deflate::deflate_zlib_packed;
 #[cfg(feature = "timing")]
 use crate::compress::deflate::{deflate_zlib_packed_with_stats, DeflateStats};
 use crate::error::{Error, Result};
+// bit_depth module reserved for future bit-depth reductions.
 
 /// PNG file signature (magic bytes).
 const PNG_SIGNATURE: [u8; 8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
@@ -228,7 +230,11 @@ pub fn encode_into(
     }
 
     // Apply filtering and compression
-    let data = maybe_optimize_alpha(&reduced.data, reduced.effective_color_type, options.optimize_alpha);
+    let data = maybe_optimize_alpha(
+        &reduced.data,
+        reduced.effective_color_type,
+        options.optimize_alpha,
+    );
 
     let filtered = filter::apply_filters(&data, width, height, bytes_per_pixel, options);
     let compressed = deflate_zlib_packed(&filtered, options.compression_level);
@@ -325,13 +331,7 @@ pub fn encode_into_with_stats(
 }
 
 /// Write IHDR (image header) chunk.
-fn write_ihdr(
-    output: &mut Vec<u8>,
-    width: u32,
-    height: u32,
-    bit_depth: u8,
-    color_type_byte: u8,
-) {
+fn write_ihdr(output: &mut Vec<u8>, width: u32, height: u32, bit_depth: u8, color_type_byte: u8) {
     let mut ihdr_data = Vec::with_capacity(13);
 
     // Width (4 bytes, big-endian)
@@ -431,6 +431,18 @@ fn maybe_reduce_color_type<'a>(
     color_type: ColorType,
     options: &PngOptions,
 ) -> ReducedImage<'a> {
+    // Gray: optional bit-depth reduction
+    if matches!(color_type, ColorType::Gray) && options.reduce_color_type {
+        return ReducedImage {
+            data: std::borrow::Cow::Borrowed(data),
+            effective_color_type: ColorType::Gray,
+            color_type_byte: ColorType::Gray.png_color_type(),
+            bit_depth: 8,
+            bytes_per_pixel: 1,
+            palette: None,
+        };
+    }
+
     // Palette reduction takes priority if enabled and possible
     if options.reduce_palette {
         if let Some((indexed, palette)) = build_palette(data, color_type, width, height) {
@@ -833,6 +845,8 @@ mod tests {
         let png = encode_with_options(&pixels, 2, 1, ColorType::Rgba, &opts).unwrap();
         // Color type byte in IHDR should be 3 (palette)
         assert_eq!(png[25], 3);
+        // Bit depth should remain 8 (no bit packing yet)
+        assert_eq!(png[24], 8);
         assert!(png.windows(4).any(|w| w == b"PLTE"));
     }
 
