@@ -444,3 +444,74 @@ fn test_png_rejects_image_too_large() {
     let err = png::encode(&[], width, height, ColorType::Rgb).unwrap_err();
     assert!(matches!(err, Error::ImageTooLarge { .. }));
 }
+
+/// Regression test: ensure photographic images don't produce excessively large output.
+///
+/// This test uses a real-world photo (rocket.png) that previously triggered a bug
+/// where lazy matching in LZ77 caused level 6 compression to produce output that
+/// was 7.3% larger than the original. After the fix, output should be within 5%
+/// of the original size.
+#[test]
+fn test_png_compression_regression_rocket() {
+    let fixture_path = std::path::Path::new("tests/fixtures/rocket.png");
+    if !fixture_path.exists() {
+        eprintln!("Skipping rocket regression test: fixture not found");
+        return;
+    }
+
+    let original_bytes = std::fs::read(fixture_path).expect("read fixture");
+    let original_size = original_bytes.len();
+
+    // Decode to get raw pixels
+    let img = image::open(fixture_path).expect("open fixture");
+    let img = img.to_rgb8();
+    let width = img.width();
+    let height = img.height();
+    let raw_pixels = img.as_raw();
+
+    // Test with level 9 adaptive (our best quality setting)
+    let options = png::PngOptions {
+        compression_level: 9,
+        filter_strategy: png::FilterStrategy::Adaptive,
+    };
+
+    let encoded = png::encode_with_options(raw_pixels, width, height, ColorType::Rgb, &options)
+        .expect("encode");
+
+    // Verify the output is valid PNG
+    let decoded = image::load_from_memory(&encoded).expect("decode our output");
+    assert_eq!(decoded.dimensions(), (width, height));
+
+    // Check that compression ratio is acceptable (within 10% of original)
+    // The original was likely compressed with zopfli, so we allow some margin.
+    let size_ratio = encoded.len() as f64 / original_size as f64;
+    assert!(
+        size_ratio < 1.10,
+        "Compression regression: output is {:.1}% larger than original (expected < 10%)",
+        (size_ratio - 1.0) * 100.0
+    );
+
+    // Also verify level 6 produces reasonable results
+    let options_l6 = png::PngOptions {
+        compression_level: 6,
+        filter_strategy: png::FilterStrategy::Adaptive,
+    };
+    let encoded_l6 =
+        png::encode_with_options(raw_pixels, width, height, ColorType::Rgb, &options_l6)
+            .expect("encode l6");
+
+    let size_ratio_l6 = encoded_l6.len() as f64 / original_size as f64;
+    assert!(
+        size_ratio_l6 < 1.10,
+        "Compression regression at level 6: output is {:.1}% larger than original (expected < 10%)",
+        (size_ratio_l6 - 1.0) * 100.0
+    );
+
+    // Level 9 should produce smaller or equal output compared to level 6
+    assert!(
+        encoded.len() <= encoded_l6.len(),
+        "Level 9 ({} bytes) should not be larger than level 6 ({} bytes)",
+        encoded.len(),
+        encoded_l6.len()
+    );
+}

@@ -127,18 +127,21 @@ impl Lz77Compressor {
     pub fn new(level: u8) -> Self {
         let level = level.clamp(1, 9);
 
-        // Tune chain length and lazy matching based on level
+        // Tune chain length and lazy matching based on level.
+        // Note: Lazy matching is disabled because empirical testing shows it hurts
+        // compression ratio for PNG-style data with many short matches. The longer
+        // chain lengths at higher levels provide better compression without it.
         let (max_chain_length, lazy_matching) = match level {
             1 => (4, false),
-            2 => (6, false),
-            3 => (10, false),
-            4 => (24, true),
-            5 => (48, true),
-            6 => (64, true), // trimmed further for speed at default level
-            7 => (256, true),
-            8 => (512, true),
-            9 => (1024, true),
-            _ => (128, true),
+            2 => (8, false),
+            3 => (16, false),
+            4 => (32, false),
+            5 => (64, false),
+            6 => (128, false),
+            7 => (256, false),
+            8 => (1024, false),
+            9 => (4096, false), // Exhaustive search for maximum compression
+            _ => (128, false),
         };
 
         Self {
@@ -170,6 +173,8 @@ impl Lz77Compressor {
         let mut incompressible_mode = false;
         let mut probe_since_last = 0usize;
         let mut incompressible_updates = 0usize;
+        // Track pending match from lazy evaluation to prevent cascading deferrals
+        let mut pending_match: Option<(usize, usize)> = None;
 
         // Reset hash tables
         self.head.fill(-1);
@@ -220,24 +225,36 @@ impl Lz77Compressor {
                 self.max_chain_length
             };
 
-            let best_match = self.find_best_match(data, pos, chain_limit);
+            // If we have a pending match from lazy evaluation, use it directly
+            // (prevents cascading deferrals)
+            let best_match = if let Some(pending) = pending_match.take() {
+                Some(pending)
+            } else {
+                self.find_best_match(data, pos, chain_limit)
+            };
 
             if let Some((length, distance)) = best_match {
                 literal_streak = 0;
                 incompressible_mode = false;
                 probe_since_last = 0;
 
-                // Check for lazy match if enabled, but skip for "good enough" matches
-                // This is a common optimization used by zlib
+                // Check for lazy match if enabled, but skip for "good enough" matches.
+                // Only defer if the next match is significantly better (>= 3 bytes longer)
+                // to justify the cost of emitting a literal.
                 if self.lazy_matching && length < GOOD_MATCH_LENGTH && pos + 1 < data.len() {
-                    // Update hash for current position
+                    // Update hash for current position before looking ahead
                     self.update_hash(data, pos);
 
-                    if let Some((next_length, _)) = self.find_best_match(data, pos + 1, chain_limit)
+                    if let Some((next_length, next_distance)) =
+                        self.find_best_match(data, pos + 1, chain_limit)
                     {
-                        if next_length > length + 1 {
-                            // Better match at next position, emit literal
+                        // Require significant improvement to justify deferral.
+                        // A literal costs ~8-9 bits, so the next match should save more than that.
+                        // Length difference of 3+ bytes typically saves 24+ bits of match data.
+                        if next_length >= length + 3 {
+                            // Better match at next position, emit literal and store pending match
                             tokens.push(Token::Literal(data[pos]));
+                            pending_match = Some((next_length, next_distance));
                             pos += 1;
                             continue;
                         }
@@ -291,6 +308,8 @@ impl Lz77Compressor {
         let mut incompressible_mode = false;
         let mut probe_since_last = 0usize;
         let mut incompressible_updates = 0usize;
+        // Track pending match from lazy evaluation to prevent cascading deferrals
+        let mut pending_match: Option<(usize, usize)> = None;
 
         // Reset hash tables
         self.head.fill(-1);
@@ -335,20 +354,36 @@ impl Lz77Compressor {
                 self.max_chain_length
             };
 
-            let best_match = self.find_best_match(data, pos, chain_limit);
+            // If we have a pending match from lazy evaluation, use it directly
+            // (prevents cascading deferrals)
+            let best_match = if let Some(pending) = pending_match.take() {
+                Some(pending)
+            } else {
+                self.find_best_match(data, pos, chain_limit)
+            };
 
             if let Some((length, distance)) = best_match {
                 literal_streak = 0;
                 incompressible_mode = false;
                 probe_since_last = 0;
 
+                // Check for lazy match if enabled, but skip for "good enough" matches.
+                // Only defer if the next match is significantly better (>= 3 bytes longer)
+                // to justify the cost of emitting a literal.
                 if self.lazy_matching && length < GOOD_MATCH_LENGTH && pos + 1 < data.len() {
+                    // Update hash for current position before looking ahead
                     self.update_hash(data, pos);
 
-                    if let Some((next_length, _)) = self.find_best_match(data, pos + 1, chain_limit)
+                    if let Some((next_length, next_distance)) =
+                        self.find_best_match(data, pos + 1, chain_limit)
                     {
-                        if next_length > length + 1 {
+                        // Require significant improvement to justify deferral.
+                        // A literal costs ~8-9 bits, so the next match should save more than that.
+                        // Length difference of 3+ bytes typically saves 24+ bits of match data.
+                        if next_length >= length + 3 {
+                            // Better match at next position, emit literal and store pending match
                             tokens.push(PackedToken::literal(data[pos]));
+                            pending_match = Some((next_length, next_distance));
                             pos += 1;
                             continue;
                         }
