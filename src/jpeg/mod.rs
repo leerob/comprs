@@ -447,7 +447,7 @@ fn encode_scan(
                           mcu_count: u32,
                           rst_idx: &mut u8| {
         if let Some(interval) = restart_interval {
-            if interval > 0 && mcu_count.is_multiple_of(interval as u32) {
+            if interval > 0 && mcu_count % interval as u32 == 0 {
                 writer.flush();
                 writer.write_bytes(&[0xFF, 0xD0 + (*rst_idx & 0x07)]);
                 *rst_idx = (*rst_idx + 1) & 0x07;

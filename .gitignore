@@ -2,6 +2,7 @@
 /target/
 **/*.rs.bk
 *.pdb
+vendor/
 
 # Cargo
 Cargo.lock
