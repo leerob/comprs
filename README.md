@@ -274,6 +274,12 @@ COMPRS_PNG_PRESET=level4 \
 COMPRS_PNG_FILTER=brute \
 COMPRS_PNG_LEVEL=9 \
 cargo run --release --example codec_harness
+
+# Drive JPEG options via env (examples):
+COMPRS_JPEG_OPTIMIZE_HUFFMAN=true \
+COMPRS_JPEG_SUBSAMPLING=s420 \
+COMPRS_JPEG_RESTART=4 \
+cargo run --release --example codec_harness
 ```
 
 The harness prints PNG/JPEG sizes, timings, chosen comprs PNG options, and percentage deltas versus oxipng/mozjpeg when available.
