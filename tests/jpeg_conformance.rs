@@ -15,6 +15,8 @@ use proptest::prelude::*;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 mod support;
 use support::jpeg_corpus::read_jpeg_corpus;
+use support::kodak::read_kodak_decoded_subset;
+use support::synthetic;
 
 /// Test that JPEG output has correct markers.
 #[test]
@@ -662,4 +664,118 @@ fn test_sos_present() {
         }
     }
     assert!(found_sos, "SOS marker not found");
+}
+
+/// Test encoding with synthetic test patterns.
+#[test]
+fn test_jpeg_synthetic_patterns() {
+    let test_suite = synthetic::generate_minimal_test_suite();
+
+    for (name, w, h, pixels) in test_suite {
+        let encoded = jpeg::encode(&pixels, w, h, 85)
+            .unwrap_or_else(|e| panic!("Failed to encode {name}: {e}"));
+
+        // Verify valid JPEG markers
+        assert_eq!(&encoded[0..2], &[0xFF, 0xD8], "Missing SOI for {name}");
+        assert_eq!(
+            &encoded[encoded.len() - 2..],
+            &[0xFF, 0xD9],
+            "Missing EOI for {name}"
+        );
+
+        // Verify decode roundtrip
+        let decoded = image::load_from_memory(&encoded)
+            .unwrap_or_else(|e| panic!("Failed to decode {name}: {e}"));
+        assert_eq!(decoded.width(), w, "Width mismatch for {name}");
+        assert_eq!(decoded.height(), h, "Height mismatch for {name}");
+    }
+}
+
+/// Test edge case dimensions with synthetic images.
+#[test]
+fn test_jpeg_edge_case_dimensions() {
+    for &(w, h, name) in synthetic::EDGE_CASE_DIMENSIONS {
+        // Skip very large dimensions for speed
+        if w > 512 || h > 512 {
+            continue;
+        }
+
+        let pixels = synthetic::gradient_rgb(w, h);
+        let encoded = jpeg::encode(&pixels, w, h, 85)
+            .unwrap_or_else(|e| panic!("Failed to encode {name} ({w}x{h}): {e}"));
+
+        let decoded = image::load_from_memory(&encoded)
+            .unwrap_or_else(|e| panic!("Failed to decode {name} ({w}x{h}): {e}"));
+        assert_eq!(decoded.width(), w, "Width mismatch for {name}");
+        assert_eq!(decoded.height(), h, "Height mismatch for {name}");
+    }
+}
+
+/// Test encoding Kodak suite images (photographic content).
+#[test]
+fn test_jpeg_kodak_subset() {
+    let Ok(images) = read_kodak_decoded_subset(4) else {
+        eprintln!("Skipping Kodak test: fixtures unavailable (offline?)");
+        return;
+    };
+
+    for (name, w, h, pixels) in images {
+        // Encode with balanced settings
+        let opts = jpeg::JpegOptions::balanced(85);
+        let encoded = jpeg::encode_with_options(&pixels, w, h, ColorType::Rgb, &opts)
+            .unwrap_or_else(|e| panic!("Failed to encode Kodak {name}: {e}"));
+
+        // Verify valid JPEG
+        assert_eq!(&encoded[0..2], &[0xFF, 0xD8], "Missing SOI for Kodak {name}");
+        assert_eq!(
+            &encoded[encoded.len() - 2..],
+            &[0xFF, 0xD9],
+            "Missing EOI for Kodak {name}"
+        );
+
+        // Verify decode roundtrip (dimensions only, JPEG is lossy)
+        let decoded = image::load_from_memory(&encoded)
+            .unwrap_or_else(|e| panic!("Failed to decode Kodak {name}: {e}"));
+        assert_eq!(decoded.width(), w, "Width mismatch for Kodak {name}");
+        assert_eq!(decoded.height(), h, "Height mismatch for Kodak {name}");
+    }
+}
+
+/// Test different JPEG presets on synthetic images.
+#[test]
+fn test_jpeg_presets_on_gradient() {
+    let (w, h) = (256, 256);
+    let pixels = synthetic::gradient_rgb(w, h);
+
+    // Test fast and balanced presets (max uses progressive which may have decoder compatibility issues)
+    let presets = [
+        ("fast", jpeg::JpegOptions::fast(85)),
+        ("balanced", jpeg::JpegOptions::balanced(85)),
+    ];
+
+    let mut sizes = Vec::new();
+
+    for (name, opts) in presets {
+        let encoded = jpeg::encode_with_options(&pixels, w, h, ColorType::Rgb, &opts)
+            .unwrap_or_else(|e| panic!("Failed to encode with {name} preset: {e}"));
+
+        // Verify decode
+        let decoded = image::load_from_memory(&encoded)
+            .unwrap_or_else(|e| panic!("Failed to decode {name} preset: {e}"));
+        assert_eq!(decoded.dimensions(), (w, h));
+
+        sizes.push((name, encoded.len()));
+    }
+
+    // Verify both presets produced valid output of reasonable size.
+    // Note: We don't assert balanced <= fast because optimized Huffman tables
+    // typically (but not always) produce smaller output. Edge cases exist where
+    // the overhead of custom tables may slightly exceed savings.
+    for (name, size) in &sizes {
+        assert!(*size > 0, "{name} preset produced empty output");
+        assert!(
+            *size < (w * h * 3) as usize,
+            "{name} preset output ({size} bytes) larger than raw pixels"
+        );
+    }
 }

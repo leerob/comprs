@@ -11,7 +11,9 @@ use image::GenericImageView;
 use proptest::prelude::*;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 mod support;
+use support::kodak::read_kodak_decoded_subset;
 use support::pngsuite::read_pngsuite;
+use support::synthetic;
 
 /// Test that PNG output has correct header.
 #[test]
@@ -598,4 +600,80 @@ fn test_png_compression_regression_rocket_rgba() {
         "RGBA Compression regression: output is {:.1}% larger than original (expected < 20%)",
         (rgba_ratio - 1.0) * 100.0
     );
+}
+
+/// Test encoding with synthetic test patterns.
+/// These cover edge cases like solid colors, gradients, and high-frequency patterns.
+#[test]
+fn test_png_synthetic_patterns() {
+    let test_suite = synthetic::generate_minimal_test_suite();
+
+    for (name, w, h, pixels) in test_suite {
+        let encoded = png::encode(&pixels, w, h, ColorType::Rgb)
+            .unwrap_or_else(|e| panic!("Failed to encode {name}: {e}"));
+
+        // Verify valid PNG
+        assert_eq!(
+            &encoded[0..8],
+            &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A],
+            "Invalid PNG signature for {name}"
+        );
+
+        // Verify decode roundtrip
+        let decoded = image::load_from_memory(&encoded)
+            .unwrap_or_else(|e| panic!("Failed to decode {name}: {e}"));
+        assert_eq!(decoded.width(), w, "Width mismatch for {name}");
+        assert_eq!(decoded.height(), h, "Height mismatch for {name}");
+    }
+}
+
+/// Test edge case dimensions with synthetic images.
+#[test]
+fn test_png_edge_case_dimensions() {
+    for &(w, h, name) in synthetic::EDGE_CASE_DIMENSIONS {
+        // Skip very large dimensions for speed
+        if w > 1024 || h > 1024 {
+            continue;
+        }
+
+        let pixels = synthetic::gradient_rgb(w, h);
+        let encoded = png::encode(&pixels, w, h, ColorType::Rgb)
+            .unwrap_or_else(|e| panic!("Failed to encode {name} ({w}x{h}): {e}"));
+
+        let decoded = image::load_from_memory(&encoded)
+            .unwrap_or_else(|e| panic!("Failed to decode {name} ({w}x{h}): {e}"));
+        assert_eq!(decoded.width(), w, "Width mismatch for {name}");
+        assert_eq!(decoded.height(), h, "Height mismatch for {name}");
+    }
+}
+
+/// Test encoding Kodak suite images (photographic content).
+/// This tests real-world compression performance on diverse photos.
+#[test]
+fn test_png_kodak_subset() {
+    let Ok(images) = read_kodak_decoded_subset(4) else {
+        eprintln!("Skipping Kodak test: fixtures unavailable (offline?)");
+        return;
+    };
+
+    for (name, w, h, pixels) in images {
+        // Encode with balanced settings
+        let options = png::PngOptions::balanced();
+        let encoded = png::encode_with_options(&pixels, w, h, ColorType::Rgb, &options)
+            .unwrap_or_else(|e| panic!("Failed to encode Kodak {name}: {e}"));
+
+        // Verify decode roundtrip
+        let decoded = image::load_from_memory(&encoded)
+            .unwrap_or_else(|e| panic!("Failed to decode Kodak {name}: {e}"));
+        assert_eq!(decoded.width(), w, "Width mismatch for Kodak {name}");
+        assert_eq!(decoded.height(), h, "Height mismatch for Kodak {name}");
+
+        // Verify lossless roundtrip
+        let decoded_rgb = decoded.to_rgb8();
+        assert_eq!(
+            decoded_rgb.as_raw(),
+            &pixels,
+            "Pixel data mismatch for Kodak {name}"
+        );
+    }
 }

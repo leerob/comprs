@@ -158,22 +158,6 @@ fn bench_filters(c: &mut Criterion) {
         });
     });
 
-    group.bench_function("adaptive_fast_512_rgb", |b| {
-        let options = PngOptions {
-            filter_strategy: FilterStrategy::AdaptiveFast,
-            ..Default::default()
-        };
-        b.iter(|| {
-            black_box(apply_filters(
-                black_box(&pixels),
-                width,
-                height,
-                3,
-                black_box(&options),
-            ));
-        });
-    });
-
     group.finish();
 }
 

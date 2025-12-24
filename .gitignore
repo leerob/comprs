@@ -55,6 +55,11 @@ $RECYCLE.BIN/
 # Test artifacts
 *.orig
 
+# Downloaded test fixtures (fetched on-demand)
+tests/fixtures/kodak/
+tests/fixtures/pngsuite/
+tests/fixtures/jpeg_corpus/
+
 # JavaScript / Svelte app artifacts
 node_modules/
 *.log

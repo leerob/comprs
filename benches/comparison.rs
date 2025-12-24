@@ -1217,6 +1217,97 @@ fn format_duration(duration: Duration) -> String {
 }
 
 // ============================================================================
+// Kodak Suite Benchmark (Real Photographic Images)
+// ============================================================================
+
+/// Load Kodak images for benchmarking.
+/// Returns a subset to keep benchmark times reasonable.
+fn load_kodak_for_benchmark() -> Option<Vec<(String, u32, u32, Vec<u8>)>> {
+    let fixtures_dir = std::path::Path::new("tests/fixtures/kodak");
+    if !fixtures_dir.exists() {
+        return None;
+    }
+
+    let mut images = Vec::new();
+    // Load first 4 images for reasonable benchmark time
+    for i in 1..=4 {
+        let path = fixtures_dir.join(format!("kodim{i:02}.png"));
+        if !path.exists() {
+            continue;
+        }
+
+        let data = fs::read(&path).ok()?;
+        let img = image::load_from_memory(&data).ok()?;
+        let rgb = img.to_rgb8();
+        let (w, h) = (rgb.width(), rgb.height());
+        let name = format!("kodim{i:02}");
+        images.push((name, w, h, rgb.into_raw()));
+    }
+
+    if images.is_empty() {
+        None
+    } else {
+        Some(images)
+    }
+}
+
+fn bench_kodak_suite(c: &mut Criterion) {
+    let Some(images) = load_kodak_for_benchmark() else {
+        eprintln!("Kodak fixtures not available, skipping bench_kodak_suite");
+        return;
+    };
+
+    let mut group = c.benchmark_group("Kodak Real Images");
+
+    for (name, w, h, pixels) in &images {
+        let pixel_bytes = (*w as u64) * (*h as u64) * 3;
+        group.throughput(Throughput::Bytes(pixel_bytes));
+
+        let mut buf = Vec::new();
+
+        // PNG Balanced
+        group.bench_with_input(
+            BenchmarkId::new("png_balanced", name),
+            pixels,
+            |b, pixels| {
+                b.iter(|| {
+                    png::encode_into(
+                        &mut buf,
+                        black_box(pixels),
+                        *w,
+                        *h,
+                        ColorType::Rgb,
+                        &png::PngOptions::balanced(),
+                    )
+                    .unwrap()
+                });
+            },
+        );
+
+        // JPEG Balanced
+        group.bench_with_input(
+            BenchmarkId::new("jpeg_balanced", name),
+            pixels,
+            |b, pixels| {
+                b.iter(|| {
+                    jpeg::encode_with_options_into(
+                        &mut buf,
+                        black_box(pixels),
+                        *w,
+                        *h,
+                        ColorType::Rgb,
+                        &jpeg::JpegOptions::balanced(85),
+                    )
+                    .unwrap()
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+// ============================================================================
 // Custom Criterion Configuration
 // ============================================================================
 
@@ -1229,7 +1320,7 @@ fn custom_criterion() -> Criterion {
 criterion_group! {
     name = benches;
     config = custom_criterion();
-    targets = bench_png_all_presets, bench_png_lossy_comparison, bench_jpeg_all_presets, bench_deflate_comparison
+    targets = bench_png_all_presets, bench_png_lossy_comparison, bench_jpeg_all_presets, bench_deflate_comparison, bench_kodak_suite
 }
 
 // Custom main that prints summary after benchmarks
