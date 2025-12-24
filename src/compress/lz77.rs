@@ -100,6 +100,50 @@ impl PackedToken {
     }
 }
 
+/// Sink abstraction to emit tokens (literal or match) for both Token and PackedToken outputs.
+trait TokenSink {
+    fn clear(&mut self);
+    fn reserve(&mut self, additional: usize);
+    fn push_literal(&mut self, byte: u8);
+    fn push_match(&mut self, length: u16, distance: u16);
+}
+
+impl TokenSink for Vec<Token> {
+    fn clear(&mut self) {
+        Vec::clear(self)
+    }
+
+    fn reserve(&mut self, additional: usize) {
+        Vec::reserve(self, additional)
+    }
+
+    fn push_literal(&mut self, byte: u8) {
+        self.push(Token::Literal(byte));
+    }
+
+    fn push_match(&mut self, length: u16, distance: u16) {
+        self.push(Token::Match { length, distance });
+    }
+}
+
+impl TokenSink for Vec<PackedToken> {
+    fn clear(&mut self) {
+        Vec::clear(self)
+    }
+
+    fn reserve(&mut self, additional: usize) {
+        Vec::reserve(self, additional)
+    }
+
+    fn push_literal(&mut self, byte: u8) {
+        self.push(PackedToken::literal(byte));
+    }
+
+    fn push_match(&mut self, length: u16, distance: u16) {
+        self.push(PackedToken::match_(length, distance));
+    }
+}
+
 /// Hash function for 4-byte sequences with better distribution.
 #[inline(always)]
 fn hash4(data: &[u8], pos: usize) -> usize {
@@ -159,19 +203,23 @@ impl Lz77Compressor {
     /// Compress data and return LZ77 tokens.
     pub fn compress(&mut self, data: &[u8]) -> Vec<Token> {
         let mut tokens = Vec::with_capacity(data.len());
-        self.compress_into(data, &mut tokens);
+        self.compress_into_sink(data, &mut tokens);
         tokens
     }
 
     /// Compress data into a provided token buffer, reusing allocations.
     pub fn compress_into(&mut self, data: &[u8], tokens: &mut Vec<Token>) {
+        self.compress_into_sink(data, tokens);
+    }
+
+    fn compress_into_sink<T: TokenSink>(&mut self, data: &[u8], sink: &mut T) {
         if data.is_empty() {
-            tokens.clear();
+            sink.clear();
             return;
         }
 
-        tokens.clear();
-        tokens.reserve(data.len());
+        sink.clear();
+        sink.reserve(data.len());
         let mut pos = 0;
         let mut literal_streak = 0usize;
         let mut incompressible_mode = false;
@@ -195,10 +243,7 @@ impl Lz77Compressor {
                         incompressible_mode = false;
                         literal_streak = 0;
 
-                        tokens.push(Token::Match {
-                            length: length as u16,
-                            distance: distance as u16,
-                        });
+                        sink.push_match(length as u16, distance as u16);
 
                         for i in 0..length {
                             self.update_hash(data, pos + i);
@@ -209,7 +254,7 @@ impl Lz77Compressor {
                 }
 
                 // Stay in literal-only fast path
-                tokens.push(Token::Literal(data[pos]));
+                sink.push_literal(data[pos]);
                 incompressible_updates += 1;
                 if incompressible_updates >= INCOMPRESSIBLE_UPDATE_INTERVAL {
                     self.update_hash(data, pos);
@@ -257,7 +302,7 @@ impl Lz77Compressor {
                         // Length difference of 3+ bytes typically saves 24+ bits of match data.
                         if next_length >= length + 3 {
                             // Better match at next position, emit literal and store pending match
-                            tokens.push(Token::Literal(data[pos]));
+                            sink.push_literal(data[pos]);
                             pending_match = Some((next_length, next_distance));
                             pos += 1;
                             continue;
@@ -265,10 +310,7 @@ impl Lz77Compressor {
                     }
                 }
 
-                tokens.push(Token::Match {
-                    length: length as u16,
-                    distance: distance as u16,
-                });
+                sink.push_match(length as u16, distance as u16);
 
                 // Update hash for all positions in the match
                 for i in 0..length {
@@ -282,7 +324,7 @@ impl Lz77Compressor {
                     probe_since_last = 0;
                     incompressible_updates = 0;
                 }
-                tokens.push(Token::Literal(data[pos]));
+                sink.push_literal(data[pos]);
                 self.update_hash(data, pos);
                 pos += 1;
             }
@@ -293,125 +335,14 @@ impl Lz77Compressor {
     /// This does not change the parsing—only the representation of tokens.
     pub fn compress_packed(&mut self, data: &[u8]) -> Vec<PackedToken> {
         let mut tokens = Vec::with_capacity(data.len());
-        self.compress_packed_into(data, &mut tokens);
+        self.compress_into_sink(data, &mut tokens);
         tokens
     }
 
     /// Compress data into a provided packed token buffer, reusing allocations.
     /// Semantics match `compress`, but outputs `PackedToken` instead of `Token`.
     pub fn compress_packed_into(&mut self, data: &[u8], tokens: &mut Vec<PackedToken>) {
-        if data.is_empty() {
-            tokens.clear();
-            return;
-        }
-
-        tokens.clear();
-        tokens.reserve(data.len());
-        let mut pos = 0;
-        let mut literal_streak = 0usize;
-        let mut incompressible_mode = false;
-        let mut probe_since_last = 0usize;
-        let mut incompressible_updates = 0usize;
-        // Track pending match from lazy evaluation to prevent cascading deferrals
-        let mut pending_match: Option<(usize, usize)> = None;
-
-        // Reset hash tables
-        self.head.fill(-1);
-        self.prev.fill(-1);
-
-        while pos < data.len() {
-            if incompressible_mode {
-                if probe_since_last >= INCOMPRESSIBLE_PROBE_INTERVAL {
-                    probe_since_last = 0;
-                    if let Some((length, distance)) =
-                        self.find_best_match(data, pos, INCOMPRESSIBLE_CHAIN_LIMIT)
-                    {
-                        incompressible_mode = false;
-                        literal_streak = 0;
-
-                        tokens.push(PackedToken::match_(length as u16, distance as u16));
-                        for i in 0..length {
-                            self.update_hash(data, pos + i);
-                        }
-                        pos += length;
-                        continue;
-                    }
-                }
-
-                tokens.push(PackedToken::literal(data[pos]));
-                incompressible_updates += 1;
-                if incompressible_updates >= INCOMPRESSIBLE_UPDATE_INTERVAL {
-                    self.update_hash(data, pos);
-                    incompressible_updates = 0;
-                }
-                pos += 1;
-                literal_streak = literal_streak.saturating_add(1);
-                probe_since_last = probe_since_last.saturating_add(1);
-                continue;
-            }
-
-            let chain_limit = if literal_streak >= INCOMPRESSIBLE_LITERAL_THRESHOLD {
-                incompressible_mode = true;
-                probe_since_last = 0;
-                INCOMPRESSIBLE_CHAIN_LIMIT
-            } else {
-                self.max_chain_length
-            };
-
-            // If we have a pending match from lazy evaluation, use it directly
-            // (prevents cascading deferrals)
-            let best_match = if let Some(pending) = pending_match.take() {
-                Some(pending)
-            } else {
-                self.find_best_match(data, pos, chain_limit)
-            };
-
-            if let Some((length, distance)) = best_match {
-                literal_streak = 0;
-                incompressible_mode = false;
-                probe_since_last = 0;
-
-                // Check for lazy match if enabled, but skip for "good enough" matches.
-                // Only defer if the next match is significantly better (>= 3 bytes longer)
-                // to justify the cost of emitting a literal.
-                if self.lazy_matching && length < GOOD_MATCH_LENGTH && pos + 1 < data.len() {
-                    // Update hash for current position before looking ahead
-                    self.update_hash(data, pos);
-
-                    if let Some((next_length, next_distance)) =
-                        self.find_best_match(data, pos + 1, chain_limit)
-                    {
-                        // Require significant improvement to justify deferral.
-                        // A literal costs ~8-9 bits, so the next match should save more than that.
-                        // Length difference of 3+ bytes typically saves 24+ bits of match data.
-                        if next_length >= length + 3 {
-                            // Better match at next position, emit literal and store pending match
-                            tokens.push(PackedToken::literal(data[pos]));
-                            pending_match = Some((next_length, next_distance));
-                            pos += 1;
-                            continue;
-                        }
-                    }
-                }
-
-                tokens.push(PackedToken::match_(length as u16, distance as u16));
-
-                for i in 0..length {
-                    self.update_hash(data, pos + i);
-                }
-                pos += length;
-            } else {
-                literal_streak = literal_streak.saturating_add(1);
-                if literal_streak >= INCOMPRESSIBLE_LITERAL_THRESHOLD {
-                    incompressible_mode = true;
-                    probe_since_last = 0;
-                    incompressible_updates = 0;
-                }
-                tokens.push(PackedToken::literal(data[pos]));
-                self.update_hash(data, pos);
-                pos += 1;
-            }
-        }
+        self.compress_into_sink(data, tokens);
     }
 
     /// Find the best match at the given position.
