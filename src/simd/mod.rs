@@ -34,6 +34,13 @@ pub fn adler32(data: &[u8]) -> u32 {
         }
     }
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        // Safety: NEON is always available on aarch64
+        return unsafe { aarch64::adler32_neon(data) };
+    }
+
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     fallback::adler32(data)
 }
 
@@ -65,6 +72,13 @@ pub fn match_length(data: &[u8], pos1: usize, pos2: usize, max_len: usize) -> us
         }
     }
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        // Safety: NEON is always available on aarch64
+        return unsafe { aarch64::match_length_neon(data, pos1, pos2, max_len) };
+    }
+
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     fallback::match_length(data, pos1, pos2, max_len)
 }
 
@@ -83,6 +97,13 @@ pub fn score_filter(filtered: &[u8]) -> u64 {
         }
     }
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        // Safety: NEON is always available on aarch64
+        return unsafe { aarch64::score_filter_neon(filtered) };
+    }
+
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     fallback::score_filter(filtered)
 }
 
@@ -103,6 +124,14 @@ pub fn filter_sub(row: &[u8], bpp: usize, output: &mut Vec<u8>) {
         }
     }
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        // Safety: NEON is always available on aarch64
+        unsafe { aarch64::filter_sub_neon(row, bpp, output) };
+        return;
+    }
+
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     fallback::filter_sub(row, bpp, output)
 }
 
@@ -123,6 +152,14 @@ pub fn filter_up(row: &[u8], prev_row: &[u8], output: &mut Vec<u8>) {
         }
     }
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        // Safety: NEON is always available on aarch64
+        unsafe { aarch64::filter_up_neon(row, prev_row, output) };
+        return;
+    }
+
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     fallback::filter_up(row, prev_row, output)
 }
 
@@ -138,13 +175,29 @@ pub fn filter_average(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<
         }
     }
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        // Safety: NEON is always available on aarch64
+        unsafe { aarch64::filter_average_neon(row, prev_row, bpp, output) };
+        return;
+    }
+
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     fallback::filter_average(row, prev_row, bpp, output)
 }
 
 /// Apply Paeth filter using the best available implementation.
 #[inline]
 pub fn filter_paeth(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<u8>) {
-    // Paeth predictor is branchy; keep scalar for correctness and portability.
-    // SIMD version exists but remains experimental until fully validated.
+    #[cfg(target_arch = "aarch64")]
+    {
+        // Safety: NEON is always available on aarch64
+        unsafe { aarch64::filter_paeth_neon(row, prev_row, bpp, output) };
+        return;
+    }
+
+    // Paeth predictor is branchy; keep scalar for correctness and portability on x86_64.
+    // The x86 SIMD version exists but remains experimental until fully validated.
+    #[cfg(not(target_arch = "aarch64"))]
     fallback::filter_paeth(row, prev_row, bpp, output)
 }
