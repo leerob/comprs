@@ -2,6 +2,7 @@
 
 /// Supported color types for image encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ColorType {
     /// Grayscale, 1 byte per pixel.
     Gray,
