@@ -59,6 +59,7 @@ Each document includes:
 - **Conceptual explanations** with real-world analogies
 - **Visual examples** and diagrams (in ASCII art for portability)
 - **Worked examples** with actual numbers
+- **Common pitfalls** to help you avoid mistakes
 - **Code references** to the relevant implementation in this library
 - **RFC references** for the definitive specifications
 

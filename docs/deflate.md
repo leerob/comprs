@@ -1,6 +1,28 @@
 # The DEFLATE Algorithm
 
-DEFLATE is the compression algorithm behind PNG, gzip, ZIP, and HTTP compression. Specified in RFC 1951 (1996), it elegantly combines LZ77 dictionary compression with Huffman entropy coding for excellent compression ratios.
+Every time you download a webpage, unzip a file, or view a PNG image, DEFLATE is working behind the scenes. This 1996 algorithm compresses the Linux kernel source from **1.4 GB to 140 MB** — a 10x reduction! How does it achieve this?
+
+The secret is a brilliant two-stage approach: first find repeated patterns, then encode them optimally.
+
+## The Key Insight
+
+Consider this sentence:
+
+```
+"to be or not to be"
+```
+
+Notice anything? "to be" appears twice! Instead of storing 18 characters, we could say:
+
+```
+"to be or not [copy 6 chars from 13 back]"
+```
+
+That's 14 characters plus a small reference — already shorter. But we can go further: the reference "(6, 13)" uses common values that we can encode with fewer bits than spelling out "to be".
+
+This is DEFLATE in a nutshell:
+1. **LZ77**: Find the repeated "to be" and replace it with a back-reference
+2. **Huffman**: Encode those references (and remaining literals) with optimal bit codes
 
 ## The Big Picture
 
@@ -321,6 +343,117 @@ The combination of LZ77 + Huffman is synergistic:
 2. **Huffman optimizes the final encoding**: The variable-length codes ensure common patterns (short distances, common literals) use fewer bits.
 
 3. **Block structure allows adaptation**: Different parts of a file can use different strategies.
+
+## Complete Worked Example: From Bytes to Bits
+
+Let's trace the complete journey for a small input: `"ABRACADABRA"` (11 bytes = 88 bits).
+
+### Stage 1: LZ77 Compression
+
+LZ77 scans for repeated sequences with minimum length 3:
+
+```
+Position 0: A  → No match (window empty)        → Literal 'A'
+Position 1: B  → No match                       → Literal 'B'
+Position 2: R  → No match                       → Literal 'R'
+Position 3: A  → 'A' at dist=3, but length=1<3  → Literal 'A'
+Position 4: C  → No match                       → Literal 'C'
+Position 5: A  → No match ≥3                    → Literal 'A'
+Position 6: D  → No match                       → Literal 'D'
+Position 7: A  → "ABRA" matches position 0!     → Match(length=4, distance=7)
+         ↑
+         └── At position 7, we see "ABRA" which matches the "ABRA" at position 0
+
+LZ77 Output: ['A', 'B', 'R', 'A', 'C', 'A', 'D', Match(4,7)]
+             7 literals + 1 match reference
+```
+
+### Stage 2: DEFLATE Encoding
+
+Now we encode each token using fixed Huffman codes:
+
+**Literals (symbols 0-255)**: In the fixed table, ASCII letters (65-90) use 8-bit codes.
+
+**Match length 4**: Maps to symbol 258 (7-bit code `0000010`) + 0 extra bits
+
+**Match distance 7**: Maps to distance code 5 (5-bit code `00101`) + 1 extra bit (value 0)
+
+```
+Token          | Symbol/Code        | Bits Written
+---------------|--------------------|--------------
+'A' (65)       | Literal 65         | 8 bits: 01100001
+'B' (66)       | Literal 66         | 8 bits: 01100010
+'R' (82)       | Literal 82         | 8 bits: 01010010
+'A' (65)       | Literal 65         | 8 bits: 01100001
+'C' (67)       | Literal 67         | 8 bits: 01100011
+'A' (65)       | Literal 65         | 8 bits: 01100001
+'D' (68)       | Literal 68         | 8 bits: 01100100
+Match(4,7)     | Length 258         | 7 bits: 0000010
+               | Distance 5 + 0     | 6 bits: 00101 0
+End-of-block   | Symbol 256         | 7 bits: 0000000
+---------------|--------------------|--------------
+Block header   | BFINAL=1, BTYPE=01 | 3 bits
+```
+
+### Stage 3: Final Tally
+
+```
+Original:   11 bytes = 88 bits
+
+Compressed:
+  Block header:      3 bits
+  7 literals × 8:   56 bits
+  Length code:       7 bits
+  Distance code:     6 bits
+  End-of-block:      7 bits
+  ─────────────────────────
+  Total:            79 bits = 10 bytes (rounded up)
+
+Compression ratio: 88 → 79 bits = 10% savings
+```
+
+For this tiny example, the savings are modest. But the magic happens with **longer repeated patterns** and **more repetition**:
+
+```
+Input:  "ABRACADABRA ABRACADABRA ABRACADABRA" (35 bytes)
+
+LZ77:   "ABRACADABRA [copy 12 back, length 24]"
+        = 11 literals + 1 match covering 24 bytes!
+
+Now one match reference (13 bits) replaces 24 bytes (192 bits).
+Savings: 179 bits on just one match!
+```
+
+This is why DEFLATE excels on real-world data with many repeated patterns.
+
+## Common Pitfalls
+
+### 1. Expecting Compression on Already-Compressed Data
+
+DEFLATE cannot compress data that's already compressed (JPEG, MP3, ZIP files). Attempting to do so often makes the output *larger* due to block headers and Huffman table overhead.
+
+```
+Original ZIP:    1,000,000 bytes
+After DEFLATE:   1,000,847 bytes  ← larger!
+```
+
+### 2. Using Fixed Huffman for Large Data
+
+Fixed Huffman codes are convenient (no table transmission), but for large data blocks (>1KB), dynamic Huffman almost always compresses better because it adapts to the actual symbol frequencies.
+
+### 3. Choosing Wrong Compression Level
+
+| Scenario | Recommended Level | Why |
+|----------|-------------------|-----|
+| Real-time compression | 1-3 | Speed matters more |
+| General files | 6 | Good balance |
+| Archival/distribution | 9 | Size matters more |
+
+Level 9 can take 10x longer than level 1, but only compress 5-10% better.
+
+### 4. Ignoring Block Boundaries
+
+DEFLATE resets its dictionary at block boundaries. Splitting data into small blocks (to enable parallel decompression) can significantly hurt compression if repeated patterns span block boundaries.
 
 ## Comparison with Other Formats
 

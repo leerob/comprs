@@ -1,5 +1,9 @@
 # JPEG Encoding
 
+A raw 12-megapixel photo from your phone is about **36 MB** of pixel data. Saved as JPEG at quality 85, it's around **3-4 MB** — a 10x reduction with barely perceptible quality loss. How does JPEG achieve this?
+
+The answer lies in a clever insight: **humans don't see all image details equally**. We're highly sensitive to brightness changes but less sensitive to color variations. We notice smooth gradients but miss fine textures. JPEG exploits these perceptual blind spots to discard information we won't miss.
+
 JPEG (Joint Photographic Experts Group) is the most widely used image format for photographs. Unlike PNG, JPEG uses **lossy compression** — it permanently discards some image data to achieve dramatically smaller file sizes.
 
 ## When to Use JPEG
@@ -93,6 +97,12 @@ Image divided into 8×8 blocks:
 │ 9 │10 │11 │12 │
 └───┴───┴───┴───┘
 ```
+
+**Why 8×8?** This size is a sweet spot:
+- Small enough that pixels within a block are correlated (similar colors)
+- Large enough that the DCT produces useful frequency separation
+- Matches CPU cache lines for efficient processing
+- 64 coefficients fit nicely in hardware implementations
 
 If the image dimensions aren't multiples of 8, we pad by replicating edge pixels.
 
@@ -198,7 +208,10 @@ Read order:
 └───┴───┴───┴───┴───┴───┴───┴───┘
 ```
 
-This places zeros together at the end, enabling efficient run-length encoding.
+**Why zigzag?** After quantization, most non-zero values cluster in the top-left (low frequencies), while the bottom-right (high frequencies) is mostly zeros. Zigzag ordering:
+- Reads non-zero values first
+- Groups zeros together at the end
+- Enables efficient run-length encoding ("15 zeros, then -2, then EOB")
 
 ```rust
 // From src/jpeg/quantize.rs
@@ -212,7 +225,7 @@ pub const ZIGZAG: [usize; 64] = [
 
 ## Stage 6: DC Coefficient Encoding (DPCM)
 
-DC coefficients change slowly between adjacent blocks. We encode the **difference** from the previous block (Differential Pulse Code Modulation):
+DC coefficients (the average brightness of each block) change slowly between adjacent blocks. We encode the **difference** from the previous block (Differential Pulse Code Modulation):
 
 ```
 Block DCs:   512,  515,  513,  516,  514
@@ -220,6 +233,8 @@ Differences:  512,    3,   -2,    3,   -2
 
 Differences are small numbers → fewer bits needed!
 ```
+
+**Why DPCM?** Adjacent 8×8 blocks in a photograph usually have similar average brightness. A blue sky might have DC values like 180, 181, 180, 182... The differences (0, 1, -1, 2) require far fewer bits than the absolute values.
 
 ```rust
 // From src/jpeg/huffman.rs
@@ -253,6 +268,8 @@ Encoded as:
   (3, -1)  ← zero run of 3, then -1
   EOB      ← end of block (all remaining are 0)
 ```
+
+**Why run-length encoding?** After quantization, a typical block might be 60% zeros. Instead of encoding each zero individually, we say "skip 3 zeros, then -1". The EOB (End of Block) symbol is especially powerful — it says "everything else is zero" in just a few bits.
 
 For long runs of zeros (16+), a special ZRL (zero run length) code is used:
 
@@ -376,15 +393,108 @@ What happens:
    - Encode AC with run-length + Huffman
 6. Write EOI marker
 
-## JPEG Artifacts
+## JPEG Artifacts: Cause and Effect
 
-Understanding JPEG's artifacts helps explain the algorithm:
+Understanding JPEG's characteristic artifacts reveals how the algorithm works:
 
-**Blocking**: Visible 8×8 grid at low quality — blocks are processed independently
+### Blocking (Grid Pattern)
 
-**Mosquito noise**: Halos around sharp edges — high frequencies are quantized away
+```
+Original smooth gradient:        After aggressive JPEG:
+████████████████████████        ████████│███████░│░░░░░░░░
+████████████████████████  →     ████████│███████░│░░░░░░░░
+████████████████████████        ████████│███████░│░░░░░░░░
+                                        ↑        ↑
+                                      Block boundaries visible
+```
 
-**Color bleeding**: Chroma blur in detailed areas — Cb/Cr may be subsampled
+**Cause**: Each 8×8 block is quantized independently. At low quality, adjacent blocks may quantize to noticeably different average values.
+
+**Why it happens**: The DC coefficient (block average) gets rounded differently in neighboring blocks, creating visible discontinuities at boundaries.
+
+### Mosquito Noise (Edge Halos)
+
+```
+Original sharp edge:            After JPEG:
+████████░░░░░░░░               ████████▒░░░░░░░
+████████░░░░░░░░  →            ████████▒░░░░░░░
+████████░░░░░░░░               ████████▒░░░░░░░
+                                       ↑
+                                    Halo artifact
+```
+
+**Cause**: Sharp edges contain high-frequency DCT components. When these are quantized away, the edge "rings" — the Gibbs phenomenon from signal processing.
+
+**Why it happens**: The DCT represents sharp transitions as a sum of many frequencies. Removing high frequencies leaves behind oscillations near the edge.
+
+### Color Bleeding
+
+```
+Original (red|blue):            After JPEG with 4:2:0:
+████████░░░░░░░░               ████████▓▒░░░░░░
+████████░░░░░░░░  →            ████████▓▒░░░░░░
+                                       ↑↑
+                                    Color smears across edge
+```
+
+**Cause**: Chroma subsampling (4:2:0) averages color over 2×2 pixel blocks. Combined with DCT quantization in the color channels, color detail is lost.
+
+**Why it happens**: The Cb and Cr channels are encoded at half resolution, then upscaled on decode. Fine color detail cannot survive this process.
+
+### Quality vs. Artifact Severity
+
+| Quality | Blocking | Mosquito | Color Bleed | File Size |
+|---------|----------|----------|-------------|-----------|
+| 95-100  | None     | None     | Minimal     | Large     |
+| 80-90   | Minimal  | Minimal  | Slight      | Medium    |
+| 50-70   | Visible  | Moderate | Noticeable  | Small     |
+| 10-40   | Severe   | Severe   | Severe      | Tiny      |
+
+## Common Pitfalls
+
+### 1. Using JPEG for Screenshots or Text
+
+JPEG's DCT-based compression creates artifacts around sharp edges. Text becomes blurry with visible halos:
+
+```
+Original text:  The quick brown fox
+After JPEG Q50: T̲h̲e̲ q̲u̲i̲c̲k̲ b̲r̲o̲w̲n̲ f̲o̲x̲  ← fuzzy edges, ringing
+```
+
+**Rule**: Use PNG for screenshots, text, diagrams, and UI elements.
+
+### 2. Re-Compressing JPEG Files
+
+Each JPEG save introduces more quantization error. Editing and re-saving repeatedly degrades quality:
+
+```
+Original    → Save Q85 → Edit → Save Q85 → Edit → Save Q85
+Quality:       Good        OK        Meh        Bad
+```
+
+**Rule**: Keep original files; export to JPEG only as a final step.
+
+### 3. Quality 100 ≠ Lossless
+
+Even at quality 100, JPEG still quantizes (with small divisors). For truly lossless storage, use PNG or keep the raw source.
+
+### 4. Wrong Quality for the Use Case
+
+| Use Case | Recommended Quality | Why |
+|----------|---------------------|-----|
+| Archival | 92-95 | Preserve detail, still save space |
+| Web display | 80-85 | Good balance of quality/size |
+| Thumbnails | 60-75 | Small size matters more |
+| Preview/draft | 40-60 | Speed and size over quality |
+
+### 5. Ignoring Chroma Subsampling
+
+Default 4:4:4 subsampling preserves color detail but increases file size. For photos (where color detail is less critical), 4:2:0 can reduce size by 25-35% with minimal visible difference.
+
+```
+4:4:4: Full color resolution (larger file)
+4:2:0: Half color resolution (smaller file, usually fine for photos)
+```
 
 ## Summary
 
