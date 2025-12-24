@@ -250,6 +250,7 @@ fn distance_code(distance: u16) -> (u16, u8, u16) {
 ///
 /// # Returns
 /// Compressed data in raw DEFLATE format (no zlib/gzip wrapper).
+#[must_use]
 pub fn deflate(data: &[u8], level: u8) -> Vec<u8> {
     if data.is_empty() {
         // Empty input: just output empty final block
@@ -276,6 +277,7 @@ pub fn deflate(data: &[u8], level: u8) -> Vec<u8> {
 ///
 /// This is an experimental fast path that avoids `Token` allocations by
 /// emitting packed tokens directly into the Huffman encoder.
+#[must_use]
 pub fn deflate_packed(data: &[u8], level: u8) -> Vec<u8> {
     if data.is_empty() {
         // Empty input: just output empty final block
@@ -316,6 +318,7 @@ const DEFAULT_OPTIMAL_ITERATIONS: usize = 5;
 ///
 /// This produces significantly better compression than greedy parsing,
 /// at the cost of much slower encoding.
+#[must_use]
 pub fn deflate_optimal(data: &[u8], iterations: usize) -> Vec<u8> {
     if data.is_empty() {
         let mut writer = BitWriter64::with_capacity(16);
@@ -386,6 +389,7 @@ pub fn deflate_optimal(data: &[u8], iterations: usize) -> Vec<u8> {
 }
 
 /// Compress data using optimal DEFLATE with default iteration count.
+#[must_use]
 pub fn deflate_optimal_default(data: &[u8]) -> Vec<u8> {
     deflate_optimal(data, DEFAULT_OPTIMAL_ITERATIONS)
 }
@@ -396,6 +400,7 @@ const BLOCK_SPLIT_SIZE_LIMIT: usize = 512 * 1024; // 512KB
 
 /// Compress data using optimal DEFLATE and wrap in zlib container.
 /// Uses adaptive block splitting for improved compression on smaller inputs.
+#[must_use]
 pub fn deflate_optimal_zlib(data: &[u8], iterations: usize) -> Vec<u8> {
     // Skip block splitting for very large inputs to avoid O(n²) cost
     if data.len() > BLOCK_SPLIT_SIZE_LIMIT {
@@ -777,6 +782,7 @@ fn write_dynamic_huffman_block(writer: &mut BitWriter64, tokens: &[Token], is_fi
 /// This extends `deflate_optimal` by splitting the token stream into
 /// multiple blocks when doing so reduces total encoded size. Each block
 /// gets its own Huffman tables optimized for its content.
+#[must_use]
 pub fn deflate_optimal_split(data: &[u8], iterations: usize, max_blocks: usize) -> Vec<u8> {
     if data.is_empty() {
         let mut writer = BitWriter64::with_capacity(16);
@@ -861,6 +867,7 @@ pub fn deflate_optimal_split(data: &[u8], iterations: usize, max_blocks: usize) 
 }
 
 /// Compress data using optimal DEFLATE with block splitting and wrap in zlib container.
+#[must_use]
 pub fn deflate_optimal_split_zlib(data: &[u8], iterations: usize, max_blocks: usize) -> Vec<u8> {
     let deflated = deflate_optimal_split(data, iterations, max_blocks);
     let use_stored = should_use_stored(data.len(), deflated.len());
@@ -881,6 +888,7 @@ pub fn deflate_optimal_split_zlib(data: &[u8], iterations: usize, max_blocks: us
 
 /// Compress data using DEFLATE algorithm with packed tokens, returning stats.
 #[cfg(feature = "timing")]
+#[must_use]
 pub fn deflate_packed_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats) {
     if data.is_empty() {
         let mut writer = BitWriter64::with_capacity(16);
@@ -1189,6 +1197,7 @@ impl Deflater {
 ///
 /// This leaves the main `deflate` fast path unchanged; callers opt-in to the
 /// additional instrumentation by using this entrypoint.
+#[must_use]
 pub fn deflate_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats) {
     if data.is_empty() {
         let mut writer = BitWriter64::with_capacity(16);
@@ -1264,6 +1273,7 @@ pub fn deflate_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats) {
 /// Compress data and wrap it in a zlib container (RFC 1950).
 ///
 /// Produces: zlib header (CMF/FLG), deflate stream, Adler-32 checksum.
+#[must_use]
 pub fn deflate_zlib(data: &[u8], level: u8) -> Vec<u8> {
     if data.len() >= HIGH_ENTROPY_BAIL_BYTES && is_high_entropy_data(data) {
         return deflate_zlib_stored(data, level);
@@ -1272,6 +1282,7 @@ pub fn deflate_zlib(data: &[u8], level: u8) -> Vec<u8> {
 }
 
 /// Compress data with packed tokens and wrap it in a zlib container.
+#[must_use]
 pub fn deflate_zlib_packed(data: &[u8], level: u8) -> Vec<u8> {
     if data.len() >= HIGH_ENTROPY_BAIL_BYTES && is_high_entropy_data(data) {
         return deflate_zlib_stored(data, level);
@@ -1290,6 +1301,7 @@ fn deflate_zlib_stored(data: &[u8], level: u8) -> Vec<u8> {
 }
 
 /// Compress data using DEFLATE in a zlib container, returning encoded bytes plus stats.
+#[must_use]
 pub fn deflate_zlib_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats) {
     // Empty input mirrors `deflate_zlib`
     if data.is_empty() {
@@ -1338,6 +1350,7 @@ pub fn deflate_zlib_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats
 
 /// Compress data with packed tokens into a zlib container, returning stats.
 #[cfg(feature = "timing")]
+#[must_use]
 pub fn deflate_zlib_packed_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats) {
     if data.is_empty() {
         let mut output = Vec::with_capacity(8);
@@ -1954,6 +1967,7 @@ fn zlib_header(level: u8) -> [u8; 2] {
 /// Compress data using DEFLATE with stored blocks (no compression).
 /// Useful for already-compressed data or when speed is critical.
 #[allow(dead_code)]
+#[must_use]
 pub fn deflate_stored(data: &[u8]) -> Vec<u8> {
     let mut output = Vec::with_capacity(data.len() + data.len() / 65535 * 5 + 10);
     let chunks = data.chunks(65535);

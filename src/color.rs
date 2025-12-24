@@ -78,6 +78,20 @@ pub fn rgba_to_ycbcr(r: u8, g: u8, b: u8, _a: u8) -> (u8, u8, u8) {
     rgb_to_ycbcr(r, g, b)
 }
 
+impl TryFrom<u8> for ColorType {
+    type Error = u8;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(ColorType::Gray),
+            1 => Ok(ColorType::GrayAlpha),
+            2 => Ok(ColorType::Rgb),
+            3 => Ok(ColorType::Rgba),
+            other => Err(other),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

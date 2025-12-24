@@ -45,15 +45,11 @@ use crate::png::{self, PngOptions};
 
 /// Convert a u8 color type code to ColorType enum.
 fn color_type_from_u8(value: u8) -> Result<ColorType, JsError> {
-    match value {
-        0 => Ok(ColorType::Gray),
-        1 => Ok(ColorType::GrayAlpha),
-        2 => Ok(ColorType::Rgb),
-        3 => Ok(ColorType::Rgba),
-        _ => Err(JsError::new(&format!(
-            "Invalid color type: {value}. Expected 0 (Gray), 1 (GrayAlpha), 2 (Rgb), or 3 (Rgba)",
-        ))),
-    }
+    ColorType::try_from(value).map_err(|v| {
+        JsError::new(&format!(
+            "Invalid color type: {v}. Expected 0 (Gray), 1 (GrayAlpha), 2 (Rgb), or 3 (Rgba)",
+        ))
+    })
 }
 
 /// Encode raw pixel data as PNG.
