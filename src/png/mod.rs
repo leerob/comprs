@@ -177,6 +177,102 @@ impl PngOptions {
     }
 }
 
+/// Builder for [`PngOptions`] to reduce boolean argument noise.
+#[derive(Debug, Clone)]
+pub struct PngOptionsBuilder {
+    options: PngOptions,
+}
+
+impl Default for PngOptionsBuilder {
+    fn default() -> Self {
+        Self {
+            options: PngOptions::default(),
+        }
+    }
+}
+
+impl PngOptions {
+    /// Create a builder for [`PngOptions`].
+    pub fn builder() -> PngOptionsBuilder {
+        PngOptionsBuilder::default()
+    }
+}
+
+impl PngOptionsBuilder {
+    /// Set compression level (1-9).
+    pub fn compression_level(mut self, level: u8) -> Self {
+        self.options.compression_level = level;
+        self
+    }
+
+    /// Set filter strategy.
+    pub fn filter_strategy(mut self, strategy: FilterStrategy) -> Self {
+        self.options.filter_strategy = strategy;
+        self
+    }
+
+    pub fn optimize_alpha(mut self, value: bool) -> Self {
+        self.options.optimize_alpha = value;
+        self
+    }
+
+    pub fn reduce_color_type(mut self, value: bool) -> Self {
+        self.options.reduce_color_type = value;
+        self
+    }
+
+    pub fn strip_metadata(mut self, value: bool) -> Self {
+        self.options.strip_metadata = value;
+        self
+    }
+
+    pub fn reduce_palette(mut self, value: bool) -> Self {
+        self.options.reduce_palette = value;
+        self
+    }
+
+    pub fn verbose_filter_log(mut self, value: bool) -> Self {
+        self.options.verbose_filter_log = value;
+        self
+    }
+
+    pub fn optimal_compression(mut self, value: bool) -> Self {
+        self.options.optimal_compression = value;
+        self
+    }
+
+    pub fn quantization(mut self, quantization: QuantizationOptions) -> Self {
+        self.options.quantization = quantization;
+        self
+    }
+
+    pub fn quantization_mode(mut self, mode: QuantizationMode) -> Self {
+        self.options.quantization.mode = mode;
+        self
+    }
+
+    pub fn quantization_max_colors(mut self, max_colors: u16) -> Self {
+        self.options.quantization.max_colors = max_colors;
+        self
+    }
+
+    pub fn quantization_dithering(mut self, dithering: bool) -> Self {
+        self.options.quantization.dithering = dithering;
+        self
+    }
+
+    /// Apply preset (0=fast, 1=balanced, 2=max).
+    pub fn preset(mut self, preset: u8) -> Self {
+        self.options = PngOptions::from_preset(preset);
+        self
+    }
+
+    /// Build the configured [`PngOptions`].
+    pub fn build(self) -> PngOptions {
+        self.options
+    }
+}
+
 /// PNG filter selection strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FilterStrategy {

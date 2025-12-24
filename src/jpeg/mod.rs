@@ -154,6 +154,67 @@ impl JpegOptions {
             _ => Self::balanced(quality),
         }
     }
+
+    /// Create a builder for [`JpegOptions`].
+    pub fn builder() -> JpegOptionsBuilder {
+        JpegOptionsBuilder::default()
+    }
+}
+
+/// Builder for [`JpegOptions`] to reduce boolean argument noise.
+#[derive(Debug, Clone)]
+pub struct JpegOptionsBuilder {
+    options: JpegOptions,
+}
+
+impl Default for JpegOptionsBuilder {
+    fn default() -> Self {
+        Self {
+            options: JpegOptions::default(),
+        }
+    }
+}
+
+impl JpegOptionsBuilder {
+    pub fn quality(mut self, quality: u8) -> Self {
+        self.options.quality = quality;
+        self
+    }
+
+    pub fn subsampling(mut self, subsampling: Subsampling) -> Self {
+        self.options.subsampling = subsampling;
+        self
+    }
+
+    pub fn restart_interval(mut self, interval: Option<u16>) -> Self {
+        self.options.restart_interval = interval;
+        self
+    }
+
+    pub fn optimize_huffman(mut self, value: bool) -> Self {
+        self.options.optimize_huffman = value;
+        self
+    }
+
+    pub fn progressive(mut self, value: bool) -> Self {
+        self.options.progressive = value;
+        self
+    }
+
+    pub fn trellis_quant(mut self, value: bool) -> Self {
+        self.options.trellis_quant = value;
+        self
+    }
+
+    /// Apply preset (0=fast, 1=balanced, 2=max) while retaining the builder.
+    pub fn preset(mut self, preset: u8) -> Self {
+        self.options = JpegOptions::from_preset(self.options.quality, preset);
+        self
+    }
+
+    pub fn build(self) -> JpegOptions {
+        self.options
+    }
 }
 
 /// Encode raw pixel data as JPEG with options.
