@@ -2342,6 +2342,41 @@ mod tests {
     }
 
     #[test]
+    fn test_encode_indexed_empty_palette_rejected() {
+        let data = vec![0u8; 4];
+        let palette: Vec<[u8; 3]> = Vec::new();
+        let err = encode_indexed(&data, 2, 2, &palette, None).unwrap_err();
+        assert!(
+            matches!(err, Error::CompressionError(_)),
+            "expected CompressionError for empty palette"
+        );
+    }
+
+    #[test]
+    fn test_encode_indexed_trns_equal_palette_len_allowed() {
+        // Transparency length equal to palette length should be accepted.
+        let data = vec![0u8, 1u8];
+        let palette = vec![[0u8, 0, 0], [255u8, 255, 255]];
+        let trns = vec![0u8, 128u8];
+        let png = encode_indexed(&data, 2, 1, &palette, Some(&trns)).unwrap();
+        // tRNS chunk length should match palette length here (2 bytes)
+        fn find_chunk(data: &[u8], name: &[u8; 4]) -> Option<(usize, usize)> {
+            let mut offset = 8;
+            while offset + 8 <= data.len() {
+                let len = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
+                let chunk_type = &data[offset + 4..offset + 8];
+                if chunk_type == name {
+                    return Some((offset, len));
+                }
+                offset += 12 + len;
+            }
+            None
+        }
+        let (_off, len) = find_chunk(&png, b"tRNS").expect("tRNS should exist");
+        assert_eq!(len, trns.len());
+    }
+
+    #[test]
     fn test_quantization_force_produces_indexed() {
         // Force quantization on an RGB image and verify output color type is palette (3)
         let data = vec![
