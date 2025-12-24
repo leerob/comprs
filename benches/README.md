@@ -150,6 +150,25 @@ cargo bench --bench comparison -- --baseline my-machine
 
 ## Performance Tips
 
+### macOS Build Optimization
+
+On macOS, the XProtect antivirus scans every new executable on first run. This significantly slows down:
+- **Build scripts**: Each is scanned before execution
+- **`cargo run`**: Every rebuild triggers a scan
+- **`cargo test`**: Each test binary is scanned (can cause 2-3x slowdown!)
+
+**Workaround**: Add your terminal app as a "developer tool" in System Settings:
+
+1. Open **System Settings** → **Privacy & Security** → **Developer Tools**
+2. Add **Terminal** (or iTerm, Alacritty, etc.) to the list
+3. **Restart your terminal** for the change to take effect
+
+This disables XProtect scanning for executables launched from your terminal. Note that this is a security trade-off—only do this if you're comfortable with the implications.
+
+**References**:
+- [Faster Rust builds on Mac](https://nnethercote.github.io/2025/09/04/faster-rust-builds-on-mac.html) by Nicholas Nethercote
+- [cargo-nextest docs](https://nexte.st/docs/configuration/macos/)
+
 ### For Benchmarking
 
 1. **Use release mode**: `cargo bench` automatically uses release optimizations
