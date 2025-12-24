@@ -54,4 +54,4 @@ RUSTC=~/.cargo/bin/rustc cargo build --target wasm32-unknown-unknown --release -
 
 ## Binary Size
 
-The WASM binary is **214 KB** with full PNG and JPEG support. See [benchmarks](../benches/BENCHMARKS.md#4-wasm-binary-size-comparison) for comparisons with other libraries.
+The WASM binary is **236 KB** with full PNG and JPEG support. See [benchmarks](../benches/BENCHMARKS.md#4-wasm-binary-size-comparison) for comparisons with other libraries.

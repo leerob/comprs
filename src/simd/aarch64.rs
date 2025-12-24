@@ -516,4 +516,62 @@ mod tests {
 
         assert_eq!(scalar, neon, "NEON score_filter should match scalar");
     }
+
+    #[test]
+    fn test_filter_average_neon_matches_scalar() {
+        let row: Vec<u8> = (0..100).map(|i| (i * 7 % 256) as u8).collect();
+        let prev: Vec<u8> = (0..100).map(|i| (i * 11 % 256) as u8).collect();
+        let bpp = 3;
+
+        let mut scalar_out = Vec::new();
+        fallback::filter_average(&row, &prev, bpp, &mut scalar_out);
+
+        let mut neon_out = Vec::new();
+        unsafe { filter_average_neon(&row, &prev, bpp, &mut neon_out) };
+
+        assert_eq!(
+            scalar_out, neon_out,
+            "NEON filter_average should match scalar"
+        );
+    }
+
+    #[test]
+    fn test_filter_paeth_neon_matches_scalar() {
+        let row: Vec<u8> = (0..100).map(|i| (i * 7 % 256) as u8).collect();
+        let prev: Vec<u8> = (0..100).map(|i| (i * 11 % 256) as u8).collect();
+        let bpp = 3;
+
+        let mut scalar_out = Vec::new();
+        fallback::filter_paeth(&row, &prev, bpp, &mut scalar_out);
+
+        let mut neon_out = Vec::new();
+        unsafe { filter_paeth_neon(&row, &prev, bpp, &mut neon_out) };
+
+        assert_eq!(
+            scalar_out, neon_out,
+            "NEON filter_paeth should match scalar"
+        );
+    }
+
+    #[test]
+    fn test_filter_paeth_neon_tie_breaking() {
+        // Test case where pa == pb == pc (all equal values trigger tie-breaking)
+        // With a = b = c = 128, we have p = 128 + 128 - 128 = 128
+        // pa = |128 - 128| = 0, pb = 0, pc = 0
+        // Since pa <= pb && pa <= pc, we should choose a (128)
+        let row = vec![128u8; 32];
+        let prev = vec![128u8; 32];
+        let bpp = 3;
+
+        let mut scalar_out = Vec::new();
+        fallback::filter_paeth(&row, &prev, bpp, &mut scalar_out);
+
+        let mut neon_out = Vec::new();
+        unsafe { filter_paeth_neon(&row, &prev, bpp, &mut neon_out) };
+
+        assert_eq!(
+            scalar_out, neon_out,
+            "NEON filter_paeth should handle tie-breaking correctly"
+        );
+    }
 }

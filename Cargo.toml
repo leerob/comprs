@@ -80,3 +80,10 @@ opt-level = "z"         # Optimize for size
 codegen-units = 1       # Single codegen unit for better optimization
 panic = "abort"         # Remove unwinding code
 strip = true            # Strip symbols from binary
+
+[profile.bench]
+# Benchmarks need panic = "unwind" for Criterion to work properly
+# (it uses panic catching for outlier detection and internal error handling)
+panic = "unwind"
+lto = false             # Faster compilation for benchmarks
+opt-level = 3           # Optimize for speed, not size
