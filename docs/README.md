@@ -35,6 +35,7 @@ This documentation is designed to be accessible to developers who may not be fam
 |----------|-------------|
 | [Performance Optimization](./performance-optimization.md) | Techniques for high-performance compression code |
 | [Compression Evolution](./compression-evolution.md) | History and philosophy of compression improvements |
+| [Introduction to Rust](./introduction-to-rust.md) | Learn Rust through compression code examples |
 | [Benchmarks](../benches/BENCHMARKS.md) | Comprehensive comparison with oxipng, mozjpeg, and other tools |
 
 ## 🎯 Learning Path
@@ -51,6 +52,7 @@ If you're new to image compression, we recommend reading the documents in this o
 8. **[JPEG Encoding](./jpeg-encoding.md)** - Complete lossy pipeline
 9. **[Performance Optimization](./performance-optimization.md)** - Making it all fast
 10. **[Compression Evolution](./compression-evolution.md)** - History and advanced techniques
+11. **[Introduction to Rust](./introduction-to-rust.md)** - Understand the implementation language
 
 ## 🔧 Implementation Details
 
