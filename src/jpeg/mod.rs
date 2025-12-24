@@ -1273,7 +1273,7 @@ fn encode_scan(
         if let Some(interval) = restart_interval {
             // Only write restart marker if there are more MCUs to follow.
             // Skip the marker after the final MCU to avoid redundant bytes.
-            if interval > 0 && mcu_count % interval as u32 == 0 && mcu_count < total_mcus {
+            if interval > 0 && mcu_count.is_multiple_of(interval as u32) && mcu_count < total_mcus {
                 writer.flush();
                 writer.write_bytes(&[0xFF, 0xD0 + (*rst_idx & 0x07)]);
                 *rst_idx = (*rst_idx + 1) & 0x07;
