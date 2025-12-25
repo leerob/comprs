@@ -73,6 +73,6 @@ playwright-report/
 test-results/
 
 # Fuzzing artifacts
-fuzz/corpus/
-fuzz/artifacts/
-fuzz/target/
+tests/fuzz/corpus/
+tests/fuzz/artifacts/
+tests/fuzz/target/

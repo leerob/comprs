@@ -15,28 +15,28 @@ cargo install cargo-fuzz
 ### PNG Encoding
 
 ```bash
-cd fuzz
+cd tests/fuzz
 cargo +nightly fuzz run png_encode
 ```
 
 ### JPEG Encoding
 
 ```bash
-cd fuzz
+cd tests/fuzz
 cargo +nightly fuzz run jpeg_encode
 ```
 
 ### DEFLATE Compression
 
 ```bash
-cd fuzz
+cd tests/fuzz
 cargo +nightly fuzz run deflate
 ```
 
 ### LZ77 Compression
 
 ```bash
-cd fuzz
+cd tests/fuzz
 cargo +nightly fuzz run lz77
 ```
 
@@ -64,15 +64,15 @@ cargo +nightly fuzz run png_encode -- -rss_limit_mb=2048
 
 Crash inputs and interesting test cases are saved in:
 
-- `fuzz/corpus/<target>/` - Interesting inputs discovered during fuzzing
-- `fuzz/artifacts/<target>/` - Crash-inducing inputs
+- `tests/fuzz/corpus/<target>/` - Interesting inputs discovered during fuzzing
+- `tests/fuzz/artifacts/<target>/` - Crash-inducing inputs
 
 ## Reproducing Crashes
 
 To reproduce a crash:
 
 ```bash
-cargo +nightly fuzz run png_encode fuzz/artifacts/png_encode/crash-<hash>
+cargo +nightly fuzz run png_encode tests/fuzz/artifacts/png_encode/crash-<hash>
 ```
 
 ## Coverage
