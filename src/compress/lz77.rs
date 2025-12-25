@@ -180,6 +180,40 @@ fn hash3(data: &[u8], pos: usize) -> usize {
     ((val.wrapping_mul(0x1E35_A7BD)) >> 17) as usize & (HASH3_SIZE - 1)
 }
 
+/// Heuristic: choose a minimum match length based on literal diversity and search depth.
+fn calculate_min_match_len(data: &[u8], max_search_depth: usize) -> usize {
+    let mut used = [false; 256];
+    let mut num_used = 0usize;
+    let scan = data.len().min(4096);
+    for &b in &data[..scan] {
+        if !used[b as usize] {
+            used[b as usize] = true;
+            num_used += 1;
+        }
+    }
+    choose_min_match_len(num_used, max_search_depth)
+}
+
+fn choose_min_match_len(num_used_literals: usize, max_search_depth: usize) -> usize {
+    if max_search_depth <= 4 {
+        return MIN_MATCH_LENGTH;
+    }
+
+    let mut min_len = MIN_MATCH_LENGTH;
+
+    if num_used_literals > 32 {
+        min_len = 4;
+    }
+    if num_used_literals > 64 && max_search_depth >= 10 {
+        min_len = 5;
+    }
+    if num_used_literals > 96 && max_search_depth >= 20 {
+        min_len = 6;
+    }
+
+    min_len.min(MAX_MATCH_LENGTH)
+}
+
 /// LZ77 compressor with hash chain for fast matching.
 pub struct Lz77Compressor {
     /// Hash table: maps hash -> most recent position
@@ -224,6 +258,9 @@ impl Lz77Compressor {
             return;
         }
 
+        // Heuristic minimum match length based on literal diversity and search depth.
+        let min_match_len = calculate_min_match_len(data, self.config.max_search_depth);
+
         sink.clear();
         sink.reserve(data.len());
         let mut pos = 0;
@@ -249,6 +286,7 @@ impl Lz77Compressor {
                         pos,
                         INCOMPRESSIBLE_CHAIN_LIMIT.min(self.config.max_search_depth),
                         self.config.nice_length,
+                        min_match_len,
                     ) {
                         incompressible_mode = false;
                         literal_streak = 0;
@@ -294,6 +332,7 @@ impl Lz77Compressor {
                     pos,
                     chain_limit.min(self.config.max_search_depth),
                     self.config.nice_length,
+                    min_match_len,
                 )
             };
 
@@ -324,6 +363,7 @@ impl Lz77Compressor {
                         pos + 1,
                         next_chain.min(self.config.max_search_depth),
                         self.config.nice_length,
+                        min_match_len,
                     ) {
                         // Require significant improvement to justify deferral.
                         // A literal costs ~8-9 bits, so the next match should save more than that.
@@ -377,13 +417,14 @@ impl Lz77Compressor {
         pos: usize,
         chain_limit: usize,
         nice_length: usize,
+        min_match_length: usize,
     ) -> Option<(usize, usize)> {
         if pos + MIN_MATCH_LENGTH > data.len() {
             return None;
         }
 
         // Check length-3 singleton hash first (cheap path)
-        let mut best_length = MIN_MATCH_LENGTH - 1;
+        let mut best_length = min_match_length.saturating_sub(1);
         let mut best_distance = 0;
 
         let hash3 = hash3(data, pos);
@@ -398,10 +439,13 @@ impl Lz77Compressor {
                     let len = self
                         .match_length(data, match_pos, pos)
                         .min(MAX_MATCH_LENGTH);
-                    best_length = len;
-                    best_distance = distance;
-                    if best_length >= nice_length {
-                        return Some((best_length, best_distance));
+                    // Gate short matches: reject length 3 with very long distance.
+                    if len >= min_match_length && !(len == 3 && distance > 8192) {
+                        best_length = len;
+                        best_distance = distance;
+                        if best_length >= nice_length {
+                            return Some((best_length, best_distance));
+                        }
                     }
                 }
             }
@@ -452,7 +496,10 @@ impl Lz77Compressor {
             // Compare strings
             let length = self.match_length(data, match_pos, pos);
 
-            if length > best_length {
+            if length >= min_match_length
+                && !(length == 3 && distance > 8192)
+                && length > best_length
+            {
                 best_length = length;
                 best_distance = distance;
 
