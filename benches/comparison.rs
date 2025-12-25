@@ -229,40 +229,94 @@ fn load_images_by_category(category: ImageCategory) -> Vec<LoadedImage> {
 // ============================================================================
 
 fn find_oxipng() -> Option<PathBuf> {
+    // Check common installation paths
     let paths = [
         "vendor/oxipng/target/release/oxipng",
         "/usr/local/bin/oxipng",
         "/opt/homebrew/bin/oxipng",
+        "/usr/bin/oxipng",
     ];
-    paths
-        .iter()
-        .find(|p| Path::new(p).exists())
-        .map(PathBuf::from)
+    if let Some(path) = paths.iter().find(|p| Path::new(p).exists()) {
+        return Some(PathBuf::from(path));
+    }
+
+    // Check ~/.cargo/bin (where cargo install puts binaries)
+    if let Ok(home) = std::env::var("HOME") {
+        let cargo_bin = PathBuf::from(home).join(".cargo/bin/oxipng");
+        if cargo_bin.exists() {
+            return Some(cargo_bin);
+        }
+    }
+
+    // Try PATH lookup via which
+    if let Ok(output) = std::process::Command::new("which").arg("oxipng").output() {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Some(PathBuf::from(path));
+            }
+        }
+    }
+
+    None
 }
 
 fn find_cjpeg() -> Option<PathBuf> {
+    // Check common installation paths
     let paths = [
         "vendor/mozjpeg/build/cjpeg",
         "vendor/mozjpeg/cjpeg",
         "/usr/local/bin/cjpeg",
         "/opt/homebrew/bin/cjpeg",
+        "/usr/bin/cjpeg",
     ];
-    paths
-        .iter()
-        .find(|p| Path::new(p).exists())
-        .map(PathBuf::from)
+    if let Some(path) = paths.iter().find(|p| Path::new(p).exists()) {
+        return Some(PathBuf::from(path));
+    }
+
+    // Try PATH lookup via which
+    if let Ok(output) = std::process::Command::new("which").arg("cjpeg").output() {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Some(PathBuf::from(path));
+            }
+        }
+    }
+
+    None
 }
 
 fn find_pngquant() -> Option<PathBuf> {
+    // Check common installation paths
     let paths = [
         "/usr/local/bin/pngquant",
         "/opt/homebrew/bin/pngquant",
         "/usr/bin/pngquant",
     ];
-    paths
-        .iter()
-        .find(|p| Path::new(p).exists())
-        .map(PathBuf::from)
+    if let Some(path) = paths.iter().find(|p| Path::new(p).exists()) {
+        return Some(PathBuf::from(path));
+    }
+
+    // Check ~/.cargo/bin (where cargo install puts binaries)
+    if let Ok(home) = std::env::var("HOME") {
+        let cargo_bin = PathBuf::from(home).join(".cargo/bin/pngquant");
+        if cargo_bin.exists() {
+            return Some(cargo_bin);
+        }
+    }
+
+    // Try PATH lookup via which
+    if let Ok(output) = std::process::Command::new("which").arg("pngquant").output() {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Some(PathBuf::from(path));
+            }
+        }
+    }
+
+    None
 }
 
 // ============================================================================
@@ -1370,7 +1424,7 @@ fn print_summary_report() {
     let comprs_wasm_size = get_wasm_size();
     let comprs_size_str = match comprs_wasm_size {
         Some(size) => format_size(size),
-        None => "~92 KB".to_string(),
+        None => "146 KB".to_string(),
     };
 
     println!(

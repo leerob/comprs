@@ -30,32 +30,85 @@ comprs photo.png -o photo.jpg --subsampling s420
 # PNG with specific filter strategy
 comprs input.jpg -o output.png --filter paeth
 
-# Adaptive fast (reduced trials) or sampled (every Nth row) strategies
+# Adaptive fast (reduced trials) filter strategy
 comprs input.jpg -o output.png --filter adaptive-fast
-comprs input.jpg -o output.png --filter adaptive-sampled --adaptive-sample-interval 8
 
 # Convert to grayscale
 comprs color.png -o gray.jpg --grayscale
 
 # Verbose output with timing and size info
 comprs input.png -o output.jpg -v
+
+# Preview operation without writing (dry run)
+comprs input.png -o output.jpg -n
+
+# Quiet mode (suppress output)
+comprs input.png -o output.jpg --quiet
+
+# JSON output for scripting
+comprs input.png -o output.jpg --json
+
+# Read from stdin, write to file
+cat photo.png | comprs - -o output.jpg
+
+# Read from file, write to stdout
+comprs input.png -o - -f jpeg > output.jpg
+
+# Pipe through compression
+curl https://example.com/image.png | comprs - -o - -f jpeg | upload-service
 ```
 
 ## Options
 
-| Option                       | Description                                                                                                                                              | Default                    |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
-| `-o, --output`               | Output file path                                                                                                                                         | `<input>.compressed.<ext>` |
-| `-f, --format`               | Output format (`png`, `jpeg`, `jpg`)                                                                                                                     | Detected from extension    |
-| `-q, --quality`              | JPEG quality (1-100)                                                                                                                                     | 85                         |
-| `--jpeg-optimize-huffman`    | Optimize JPEG Huffman tables per image (smaller files, slower)                                                                                           | false                      |
-| `--jpeg-restart-interval`    | JPEG restart interval (MCUs, >0 enables DRI)                                                                                                             | 0 (disabled)               |
-| `-c, --compression`          | PNG compression level (1-9)                                                                                                                              | 2                          |
-| `--subsampling`              | JPEG chroma subsampling (`s444`, `s420`)                                                                                                                 | s444                       |
-| `--filter`                   | PNG filter (`none`, `sub`, `up`, `average`, `paeth`, `minsum`, `adaptive`, `adaptivefast`)                                                             | adaptivefast               |
-| `--png-preset`               | PNG preset (`fast`, `balanced`, `max`)                                                                                                                   | unset (optional)           |
-| `--png-optimize-alpha`       | Zero color channels for fully transparent pixels (PNG)                                                                                                   | false                      |
-| `--png-reduce-color`         | Losslessly reduce color type when possible (PNG)                                                                                                         | false                      |
-| `--png-strip-metadata`       | Strip ancillary text/time metadata chunks (PNG)                                                                                                          | false                      |
-| `--grayscale`                | Convert to grayscale                                                                                                                                     | false                      |
-| `-v, --verbose`              | Show detailed output                                                                                                                                     | false                      |
+| Option                       | Description                                                      | Default                    |
+| ---------------------------- | ---------------------------------------------------------------- | -------------------------- |
+| `-o, --output`               | Output file path (use `-` for stdout)                            | `<input>.compressed.<ext>` |
+| `-f, --format`               | Output format (`png`, `jpeg`, `jpg`)                             | Detected from extension    |
+| `-q, --quality`              | JPEG quality (1-100)                                             | 85                         |
+| `--jpeg-optimize-huffman`    | Optimize JPEG Huffman tables per image (smaller files, slower)   | false                      |
+| `--jpeg-restart-interval`    | JPEG restart interval (MCUs, >0 enables DRI)                     | 0 (disabled)               |
+| `-c, --compression`          | PNG compression level (1-9)                                      | 2                          |
+| `--subsampling`              | JPEG chroma subsampling (`s444`, `s420`)                         | s444                       |
+| `--filter`                   | PNG filter (`none`, `sub`, `up`, `average`, `paeth`, `minsum`, `adaptive`, `adaptive-fast`) | adaptive-fast |
+| `--png-preset`               | PNG preset (`fast`, `balanced`, `max`)                           | unset (optional)           |
+| `--png-optimize-alpha`       | Zero color channels for fully transparent pixels (PNG)           | false                      |
+| `--png-reduce-color`         | Losslessly reduce color type when possible (PNG)                 | false                      |
+| `--png-strip-metadata`       | Strip ancillary text/time metadata chunks (PNG)                  | false                      |
+| `--grayscale`                | Convert to grayscale                                             | false                      |
+| `-v, --verbose`              | Show detailed output                                             | false                      |
+| `--quiet`                    | Suppress all output except errors                                | false                      |
+| `--json`                     | Output results as JSON (for scripting)                           | false                      |
+| `-n, --dry-run`              | Preview operation without writing files                          | false                      |
+
+## Stdin/Stdout Support
+
+Use `-` as the input path to read from stdin, or `-` as the output path to write to stdout:
+
+```bash
+# Read from stdin (output path required)
+cat image.png | comprs - -o output.jpg
+
+# Write to stdout
+comprs input.png -o - -f jpeg > output.jpg
+
+# Both stdin and stdout
+cat image.png | comprs - -o - -f jpeg > output.jpg
+```
+
+When writing to stdout, use `-f`/`--format` to specify the output format since it can't be detected from the filename.
+
+## JSON Output
+
+Use `--json` for machine-readable output, useful for scripting:
+
+```bash
+$ comprs input.png -o output.jpg --json
+{"input":"input.png","output":"output.jpg","input_size":102400,"output_size":51200,"ratio":50.0}
+```
+
+With `--dry-run`:
+
+```bash
+$ comprs input.png -o output.jpg --json -n
+{"dry_run":true,"input":"input.png","output":"output.jpg","input_size":102400,"output_size":51200,"ratio":50.0}
+```
