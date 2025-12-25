@@ -402,28 +402,12 @@ fn load_image_from_bytes(data: Vec<u8>) -> Result<DecodedImage, Box<dyn std::err
 }
 
 fn decode_png_from_bytes(data: Vec<u8>) -> Result<DecodedImage, Box<dyn std::error::Error>> {
-    let decoder = png::Decoder::new(Cursor::new(data));
-    let mut reader = decoder.read_info()?;
-
-    let mut pixels = vec![0u8; reader.output_buffer_size()];
-    let info = reader.next_frame(&mut pixels)?;
-    pixels.truncate(info.buffer_size());
-
-    let color_type = match info.color_type {
-        png::ColorType::Grayscale => ColorType::Gray,
-        png::ColorType::GrayscaleAlpha => ColorType::GrayAlpha,
-        png::ColorType::Rgb => ColorType::Rgb,
-        png::ColorType::Rgba => ColorType::Rgba,
-        png::ColorType::Indexed => {
-            return Err("Indexed PNG not supported. Convert to RGB first.".into())
-        }
-    };
-
+    let decoded = decode(&data)?;
     Ok(DecodedImage {
-        width: info.width,
-        height: info.height,
-        pixels,
-        color_type,
+        width: decoded.width,
+        height: decoded.height,
+        pixels: decoded.data,
+        color_type: decoded.color_type,
         input_format: "PNG",
     })
 }

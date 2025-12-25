@@ -145,7 +145,7 @@ pub fn decode(png_data: &[u8]) -> Result<DecodedPng> {
         6 => 4 * ihdr.bit_depth as usize,
         _ => unreachable!(),
     };
-    let filtered_row_bytes = ((ihdr.width as usize * bits_per_pixel + 7) / 8) + 1;
+    let filtered_row_bytes = (ihdr.width as usize * bits_per_pixel).div_ceil(8) + 1;
     let expected_bytes = filtered_row_bytes
         .checked_mul(ihdr.height as usize)
         .ok_or_else(|| Error::InvalidDecode("image size overflow".into()))?;
@@ -317,9 +317,9 @@ fn validate_color(ihdr: &Ihdr, palette: Option<&Vec<[u8; 3]>>) -> Result<()> {
 fn bytes_per_pixel_for_filter(ihdr: &Ihdr) -> usize {
     match ihdr.color_type {
         0 | 3 => 1, // packed samples filter on bytes
-        2 => (3 * ihdr.bit_depth as usize + 7) / 8,
-        4 => (2 * ihdr.bit_depth as usize + 7) / 8,
-        6 => (4 * ihdr.bit_depth as usize + 7) / 8,
+        2 => (3 * ihdr.bit_depth as usize).div_ceil(8),
+        4 => (2 * ihdr.bit_depth as usize).div_ceil(8),
+        6 => (4 * ihdr.bit_depth as usize).div_ceil(8),
         _ => 1,
     }
 }
@@ -414,7 +414,7 @@ fn expand_gray(data: &[u8], width: usize, height: usize, bit_depth: u8) -> Resul
         return Ok(data.to_vec());
     }
     let bits = bit_depth as usize;
-    let row_len = ((width * bits) + 7) / 8;
+    let row_len = (width * bits).div_ceil(8);
     let mut out = Vec::with_capacity(width * height);
     for row_idx in 0..height {
         let row_start = row_idx * row_len;
@@ -460,7 +460,7 @@ fn expand_palette(
     trns: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
     let bits = bit_depth as usize;
-    let row_len = ((width * bits) + 7) / 8;
+    let row_len = (width * bits).div_ceil(8);
     let mut indices = Vec::with_capacity(width * height);
     for row_idx in 0..height {
         let row_start = row_idx * row_len;

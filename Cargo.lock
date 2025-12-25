@@ -271,7 +271,6 @@ dependencies = [
  "jpeg-encoder",
  "libdeflater",
  "lodepng",
- "png",
  "proptest",
  "rand 0.8.5",
  "rayon",

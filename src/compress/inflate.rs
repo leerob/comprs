@@ -310,17 +310,17 @@ impl FixedTables {
                         ));
                     }
                     let last = *lengths.last().unwrap();
-                    lengths.extend(std::iter::repeat(last).take(repeat));
+                    lengths.extend(std::iter::repeat_n(last, repeat));
                     i += repeat;
                 }
                 17 => {
                     let repeat = 3 + br.read_bits(3)? as usize;
-                    lengths.extend(std::iter::repeat(0u8).take(repeat));
+                    lengths.extend(std::iter::repeat_n(0u8, repeat));
                     i += repeat;
                 }
                 18 => {
                     let repeat = 11 + br.read_bits(7)? as usize;
-                    lengths.extend(std::iter::repeat(0u8).take(repeat));
+                    lengths.extend(std::iter::repeat_n(0u8, repeat));
                     i += repeat;
                 }
                 _ => return Err(Error::InvalidDecode("invalid code length symbol".into())),
