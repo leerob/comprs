@@ -485,7 +485,7 @@ fn test_png_rejects_zero_dimensions() {
     }
 }
 
-/// Property test: any valid image dimensions should produce decodable output.
+// Property test: any valid image dimensions should produce decodable output.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(16))]
     #[test]
@@ -514,7 +514,7 @@ proptest! {
     }
 }
 
-/// Property test: encoding with all builder options should produce valid output.
+// Property test: encoding with all builder options should produce valid output.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(8))]
     #[test]

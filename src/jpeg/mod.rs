@@ -864,6 +864,7 @@ fn quantize_dct(dct: &[f32; 64], table: &[f32; 64], use_trellis: bool) -> [i16; 
 
 /// Process a single 8x8 block and return quantized YCbCr coefficients.
 #[inline]
+#[allow(clippy::too_many_arguments)]
 fn process_block_444(
     data: &[u8],
     width: usize,

@@ -109,7 +109,7 @@ fn generate_text_pattern_image(width: u32, height: u32) -> Vec<u8> {
         for x in 0..width {
             // Create horizontal "text lines" with noise
             let line_y = y % 16;
-            let is_text_line = line_y >= 4 && line_y <= 12;
+            let is_text_line = (4..=12).contains(&line_y);
             seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
             let noise = ((seed >> 20) % 3) as u8;
 
@@ -451,6 +451,7 @@ fn encode_with_imagequant(pixels: &[u8], width: u32, height: u32) -> Option<(usi
 // PNG Encoding Comparison (all presets)
 // ============================================================================
 
+#[allow(clippy::single_element_loop)]
 fn bench_png_all_presets(c: &mut Criterion) {
     let mut group = c.benchmark_group("PNG All Presets");
 
@@ -543,6 +544,7 @@ fn bench_png_all_presets(c: &mut Criterion) {
 // PNG Lossy Comparison (quantization)
 // ============================================================================
 
+#[allow(clippy::single_element_loop)]
 fn bench_png_lossy_comparison(c: &mut Criterion) {
     let mut group = c.benchmark_group("PNG Lossy Comparison");
 
@@ -640,6 +642,7 @@ fn bench_png_lossy_comparison(c: &mut Criterion) {
 // JPEG Encoding Comparison (all presets)
 // ============================================================================
 
+#[allow(clippy::single_element_loop)]
 fn bench_jpeg_all_presets(c: &mut Criterion) {
     let mut group = c.benchmark_group("JPEG All Presets");
 

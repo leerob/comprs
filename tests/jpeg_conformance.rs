@@ -303,7 +303,7 @@ fn test_jpeg_quality_edge_values() {
     assert!(result.is_ok(), "Quality 100 should be valid");
 }
 
-/// Property test: any valid JPEG parameters should produce decodable output.
+// Property test: any valid JPEG parameters should produce decodable output.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(16))]
     #[test]
@@ -331,7 +331,7 @@ proptest! {
     }
 }
 
-/// Property test: encoding with all builder options should produce valid output.
+// Property test: encoding with all builder options should produce valid output.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(8))]
     #[test]
