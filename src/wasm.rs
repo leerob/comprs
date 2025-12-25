@@ -37,10 +37,10 @@
 //! const jpegBytes = encodeJpeg(rgb, width, height, 2, 85, 1, true);
 //! ```
 
-// Use a tiny allocator to shrink the wasm binary.
+// Use talc allocator for WASM - smaller binary and proper memory management.
 #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
 #[global_allocator]
-static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
+static ALLOC: talc::TalckWasm = unsafe { talc::TalckWasm::new_global() };
 
 use wasm_bindgen::prelude::*;
 
