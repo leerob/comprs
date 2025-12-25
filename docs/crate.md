@@ -8,12 +8,34 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-comprs = "0.1"
+comprs = { version = "0.1", default-features = true }
 ```
 
 ## Toolchain
 
 The project builds and tests on **stable Rust 1.82+**.
+
+## PNG Decoding (opt-in feature)
+
+PNG decoding is feature-gated to keep binaries small and is **not** included in WASM builds.
+
+```toml
+[dependencies]
+comprs = { version = "0.1", features = ["decode"] }
+```
+
+```rust
+use comprs::png;
+
+let bytes = std::fs::read("image.png")?;
+let decoded = png::decode(&bytes)?;
+println!("{}x{} {:?}", decoded.width, decoded.height, decoded.color_type);
+```
+
+Notes:
+- Supports non-interlaced PNGs, bit depths 1/2/4/8, color types 0/2/3/4/6.
+- Interlaced and 16-bit PNGs are rejected.
+- Palette + tRNS are expanded to RGB/RGBA; <8-bit grayscale is expanded to 8-bit.
 
 ## PNG Encoding
 

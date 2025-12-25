@@ -12,6 +12,8 @@ cargo install --path . --features cli
 cargo build --release --features cli
 ```
 
+> Note: the CLI enables the `decode` feature internally so it can load PNG inputs without external dependencies. WASM builds remain encode-only.
+
 ## Usage
 
 ```bash
