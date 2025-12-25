@@ -28,10 +28,8 @@ This document provides a comprehensive comparison of codebase sizes between `com
 
 | Library | Total LOC | Core Code | Test Code | Test % | Dependencies | Formats |
 |---------|-----------|-----------|-----------|--------|--------------|---------|
-| **comprs** | 16,340 | 8,674 | 5,766 | **76%*** | 0 (zero deps) | PNG, JPEG |
-| jpeg-encoder | 3,642 | 2,846 | 796 | - | 0 | JPEG only |
-
-\* Actual code coverage via cargo-tarpaulin; other libraries show test code ratio
+| **comprs** | 16,340 | 8,674 | 5,766 | **35.3%** | 0 (zero deps) | PNG, JPEG |
+| jpeg-encoder | 3,642 | 2,846 | 796 | 21.9% | 0 | JPEG only |
 | miniz_oxide | 7,805 | 4,501 | 3,304 | 42.3% | 0 | DEFLATE only |
 | zopfli | 3,449 | 3,337 | 112 | 3.2% | 0 | DEFLATE only |
 | image-png | 10,246 | 6,726 | 3,520 | 34.3% | miniz_oxide | PNG only |
@@ -58,7 +56,7 @@ This document provides a comprehensive comparison of codebase sizes between `com
 
 ### Key Findings
 
-1. **comprs has 76% code coverage and the highest test ratio (35%) among zero-dependency multi-format libraries**
+1. **comprs has the highest test ratio (35.3%) among zero-dependency multi-format libraries, with 76% actual code coverage**
 2. **comprs is ~13× smaller than mozjpeg** while providing comparable JPEG encoding
 3. **The compression gap comes from SIMD**: mozjpeg has 50K+ lines of hand-tuned assembly; comprs has 1.3K lines of Rust SIMD
 4. **sharp appears small (10K) but depends on libvips (194K LOC)**
@@ -454,7 +452,7 @@ mod aarch64 {
 
 The AI-assisted approach traded decades of low-level optimization for:
 - Modern safety guarantees
-- High code coverage (76%)
+- High test coverage (35% test ratio, 76% line coverage)
 - WASM compatibility
 - Maintainable codebase
 
@@ -608,7 +606,8 @@ compiled to WebAssembly via Emscripten.
 
 | Dimension | comprs | Best Alternative | Verdict |
 |-----------|--------|------------------|---------|
-| Code coverage | 76%, 264 tests | - | **Excellent** |
+| Test code ratio | 35.3% (5,766 LOC) | miniz_oxide (42.3%) | **Excellent** |
+| Actual code coverage | 76% (3,544/4,647 lines) | - | **Excellent** |
 | Zero dependencies | Yes | jpeg-encoder (JPEG only) | **Unique for PNG+JPEG** |
 | Codebase size | 8,674 LOC | jpeg-encoder (2,846) | Compact for scope |
 | Compression quality | 4-5% vs mozjpeg | mozjpeg | Good tradeoff |
@@ -636,7 +635,7 @@ The tradeoff is:
 | Maximum compression | ❌ Use mozjpeg/oxipng |
 | Node.js server | ❌ Use sharp (faster native) |
 | Minimal codebase to audit | ✅ comprs (8.7K LOC) |
-| High test coverage required | ✅ comprs (76% coverage) |
+| High test coverage required | ✅ comprs (35% test ratio, 76% line coverage) |
 
 ### Final Verdict
 
