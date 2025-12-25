@@ -1424,7 +1424,7 @@ fn print_summary_report() {
     let comprs_wasm_size = get_wasm_size();
     let comprs_size_str = match comprs_wasm_size {
         Some(size) => format_size(size),
-        None => "~92 KB".to_string(),
+        None => "146 KB".to_string(),
     };
 
     println!(
