@@ -303,6 +303,7 @@ pub fn encode_with_options_into(
             height,
             color_type,
             options.subsampling,
+            options.restart_interval,
             &quant_tables,
         )
         .unwrap_or_default()
@@ -605,6 +606,7 @@ fn build_optimized_huffman_tables(
     height: u32,
     color_type: ColorType,
     subsampling: Subsampling,
+    restart_interval: Option<u16>,
     quant_tables: &QuantizationTables,
 ) -> Option<HuffmanTables> {
     let width = width as usize;
@@ -619,7 +621,10 @@ fn build_optimized_huffman_tables(
         (ColorType::Gray, _) => {
             let padded_width = (width + 7) & !7;
             let padded_height = (height + 7) & !7;
+            let total_mcus = ((padded_width / 8) * (padded_height / 8)) as u32;
             let mut prev_dc_y = 0i16;
+            let mut mcu_count: u32 = 0;
+
             for block_y in (0..padded_height).step_by(8) {
                 for block_x in (0..padded_width).step_by(8) {
                     let (y_block, _, _) =
@@ -627,6 +632,17 @@ fn build_optimized_huffman_tables(
                     let y_dct = dct_2d(&y_block);
                     let y_quant = quantize_block(&y_dct, &quant_tables.luminance_table);
                     prev_dc_y = count_block(&y_quant, prev_dc_y, true, &mut dc_lum, &mut ac_lum);
+
+                    mcu_count += 1;
+                    // Reset DC prediction at restart boundaries (same logic as encode_scan)
+                    if let Some(interval) = restart_interval {
+                        if interval > 0
+                            && mcu_count.rem_euclid(interval as u32) == 0
+                            && mcu_count < total_mcus
+                        {
+                            prev_dc_y = 0;
+                        }
+                    }
                 }
             }
             HuffmanTables::optimized_from_counts(&dc_lum, None, &ac_lum, None)
@@ -634,9 +650,11 @@ fn build_optimized_huffman_tables(
         (_, Subsampling::S444) => {
             let padded_width = (width + 7) & !7;
             let padded_height = (height + 7) & !7;
+            let total_mcus = ((padded_width / 8) * (padded_height / 8)) as u32;
             let mut prev_dc_y = 0i16;
             let mut prev_dc_cb = 0i16;
             let mut prev_dc_cr = 0i16;
+            let mut mcu_count: u32 = 0;
 
             for block_y in (0..padded_height).step_by(8) {
                 for block_x in (0..padded_width).step_by(8) {
@@ -655,6 +673,19 @@ fn build_optimized_huffman_tables(
                         quantize_block(&dct_2d(&cr_block), &quant_tables.chrominance_table);
                     prev_dc_cr =
                         count_block(&cr_quant, prev_dc_cr, false, &mut dc_chrom, &mut ac_chrom);
+
+                    mcu_count += 1;
+                    // Reset DC prediction at restart boundaries (same logic as encode_scan)
+                    if let Some(interval) = restart_interval {
+                        if interval > 0
+                            && mcu_count.rem_euclid(interval as u32) == 0
+                            && mcu_count < total_mcus
+                        {
+                            prev_dc_y = 0;
+                            prev_dc_cb = 0;
+                            prev_dc_cr = 0;
+                        }
+                    }
                 }
             }
 
@@ -663,9 +694,11 @@ fn build_optimized_huffman_tables(
         (_, Subsampling::S420) => {
             let padded_width_420 = (width + 15) & !15;
             let padded_height_420 = (height + 15) & !15;
+            let total_mcus = ((padded_width_420 / 16) * (padded_height_420 / 16)) as u32;
             let mut prev_dc_y = 0i16;
             let mut prev_dc_cb = 0i16;
             let mut prev_dc_cr = 0i16;
+            let mut mcu_count: u32 = 0;
 
             for mcu_y in (0..padded_height_420).step_by(16) {
                 for mcu_x in (0..padded_width_420).step_by(16) {
@@ -688,6 +721,19 @@ fn build_optimized_huffman_tables(
                         quantize_block(&dct_2d(&cr_block), &quant_tables.chrominance_table);
                     prev_dc_cr =
                         count_block(&cr_quant, prev_dc_cr, false, &mut dc_chrom, &mut ac_chrom);
+
+                    mcu_count += 1;
+                    // Reset DC prediction at restart boundaries (same logic as encode_scan)
+                    if let Some(interval) = restart_interval {
+                        if interval > 0
+                            && mcu_count.rem_euclid(interval as u32) == 0
+                            && mcu_count < total_mcus
+                        {
+                            prev_dc_y = 0;
+                            prev_dc_cb = 0;
+                            prev_dc_cr = 0;
+                        }
+                    }
                 }
             }
 
