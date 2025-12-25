@@ -277,10 +277,7 @@ impl FixedTables {
         let dist_lengths = [5u8; 30];
         let dist = Huffman::from_lengths(&dist_lengths).expect("fixed dist table");
 
-        Tables {
-            litlen,
-            dist,
-        }
+        Tables { litlen, dist }
     }
 
     fn dynamic(br: &mut BitReader<'_>) -> Result<Tables> {
