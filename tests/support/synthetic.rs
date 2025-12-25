@@ -5,6 +5,8 @@
 //! suitable for regression testing.
 
 #![allow(dead_code)]
+#![allow(unknown_lints)]
+#![allow(clippy::manual_is_multiple_of)]
 
 /// Generate a solid color image.
 pub fn solid_color(width: u32, height: u32, r: u8, g: u8, b: u8) -> Vec<u8> {
