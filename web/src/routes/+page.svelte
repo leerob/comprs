@@ -44,6 +44,8 @@
     pngLossless: false, // Default OFF = lossy enabled for smaller PNGs
   });
 
+  let isCompressing = $derived(jobs.some((j) => j.status === "compressing"));
+
   let detectedFormat = $derived.by(() => {
     if (jobs.length === 0) return "png" as const;
     const formats = new Set(
@@ -78,6 +80,9 @@
   );
   let selectedJob = $derived(jobs.find((j) => j.id === selectedJobId) ?? null);
   let hasMultipleJobs = $derived(jobs.length > 1);
+
+  type ZoomLevel = 1 | 2 | 4;
+  let zoomLevel: ZoomLevel = $state(1);
 
   function formatBytes(bytes: number) {
     if (!bytes) return "0 B";
@@ -219,6 +224,9 @@
       error: undefined,
     };
 
+    // Yield to browser so UI can update before blocking WASM call
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
     try {
       // Use the job's original format for compression
       const jobFormat = job.type === "image/jpeg" ? "jpeg" : "png";
@@ -230,7 +238,7 @@
         format: jobFormat,
         hasAlpha: job.hasAlpha,
         // PNG uses slider preset, JPEG uses balanced (1)
-        preset: jobFormat === "png" ? pngPresetValue : 1 as PresetLevel,
+        preset: jobFormat === "png" ? pngPresetValue : (1 as PresetLevel),
         // Pass lossy option for PNG (inverted from lossless checkbox)
         lossy: jobFormat === "png" ? !globalOptions.pngLossless : undefined,
       });
@@ -352,6 +360,7 @@
   function selectJob(id: string) {
     selectedJobId = id;
     viewMode = "single";
+    zoomLevel = 1;
   }
 
   function goBackToList() {
@@ -612,21 +621,31 @@
     </button>
 
     <div
-      class="relative flex h-full w-full items-center justify-center p-4 sm:p-8"
+      class="relative flex h-full w-full items-center justify-center p-4 sm:p-8 {zoomLevel >
+      1
+        ? 'overflow-auto'
+        : 'overflow-hidden'}"
     >
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
-        class="relative max-h-full max-w-full touch-none"
+        class="relative touch-none {zoomLevel > 1
+          ? ''
+          : 'max-h-full max-w-full'}"
         class:cursor-ew-resize={job.result}
         bind:this={imageContainerRef}
         onmousedown={handleMouseDown}
         ontouchstart={handleTouchStart}
+        style={zoomLevel > 1
+          ? `transform: scale(${zoomLevel}); transform-origin: center center;`
+          : ""}
         data-testid="image-comparison-container"
       >
         <img
           src={job.originalUrl}
           alt="Original"
-          class="max-h-[calc(100vh-200px)] max-w-[calc(100vw-2rem)] object-contain select-none sm:max-h-[calc(100vh-180px)] sm:max-w-full"
+          class="object-contain select-none {zoomLevel > 1
+            ? ''
+            : 'max-h-[calc(100vh-200px)] max-w-[calc(100vw-2rem)] sm:max-h-[calc(100vh-180px)] sm:max-w-full'}"
           draggable="false"
           data-testid="original-image"
         />
@@ -640,7 +659,9 @@
             <img
               src={job.result.url}
               alt="Compressed"
-              class="max-h-[calc(100vh-200px)] max-w-[calc(100vw-2rem)] object-contain select-none sm:max-h-[calc(100vh-180px)] sm:max-w-full"
+              class="object-contain select-none {zoomLevel > 1
+                ? ''
+                : 'max-h-[calc(100vh-200px)] max-w-[calc(100vw-2rem)] sm:max-h-[calc(100vh-180px)] sm:max-w-full'}"
               draggable="false"
               data-testid="compressed-image"
             />
@@ -689,6 +710,24 @@
     >
       <p class="truncate" data-testid="image-name">{job.name}</p>
       <p data-testid="image-dimensions">{job.width} × {job.height}</p>
+    </div>
+
+    <div
+      class="absolute right-2 bottom-2 flex items-center gap-1 text-xs sm:right-4 sm:bottom-4"
+      data-testid="zoom-controls"
+    >
+      <span class="text-neutral-500 mr-1">Zoom</span>
+      {#each [1, 2, 4] as level}
+        <button
+          class="px-2 py-1 rounded transition-colors {zoomLevel === level
+            ? 'bg-neutral-700 text-neutral-200'
+            : 'text-neutral-500 hover:text-neutral-300 hover:bg-neutral-800'}"
+          onclick={() => (zoomLevel = level as ZoomLevel)}
+          data-testid="zoom-{level}x"
+        >
+          {level}x
+        </button>
+      {/each}
     </div>
   </div>
 {/snippet}
@@ -854,7 +893,10 @@
           />
           <span class="text-neutral-500 whitespace-nowrap">Faster</span>
         </label>
-        <label class="flex items-center gap-2 text-xs cursor-pointer" title="Enable lossless compression (larger files, preserves all colors)">
+        <label
+          class="flex items-center gap-2 text-xs cursor-pointer"
+          title="Enable lossless compression (larger files, preserves all colors)"
+        >
           <input
             type="checkbox"
             class="accent-neutral-400"
@@ -909,6 +951,8 @@
         <span class="text-xs text-neutral-500" data-testid="wasm-loading"
           >Loading WASM...</span
         >
+      {:else if isCompressing}
+        <span class="text-xs text-neutral-400">Compressing...</span>
       {:else if completedJobs.length > 0}
         <button
           class="btn-primary whitespace-nowrap"

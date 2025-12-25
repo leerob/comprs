@@ -164,7 +164,6 @@ pub fn filter_sub(row: &[u8], bpp: usize, output: &mut Vec<u8>) {
             },
             X86SimdLevel::Scalar => fallback::filter_sub(row, bpp, output),
         }
-        return;
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -188,7 +187,6 @@ pub fn filter_up(row: &[u8], prev_row: &[u8], output: &mut Vec<u8>) {
             },
             X86SimdLevel::Scalar => fallback::filter_up(row, prev_row, output),
         }
-        return;
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -211,7 +209,6 @@ pub fn filter_average(row: &[u8], prev_row: &[u8], bpp: usize, output: &mut Vec<
             },
             _ => fallback::filter_average(row, prev_row, bpp, output),
         }
-        return;
     }
 
     #[cfg(target_arch = "aarch64")]

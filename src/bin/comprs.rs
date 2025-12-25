@@ -4,7 +4,7 @@
 //! Supports PNG, JPEG, and PPM/PGM input formats.
 
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Read};
+use std::io::{self, BufRead, BufReader, Cursor, Read, Write};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -20,6 +20,16 @@ use comprs::ColorType;
 #[derive(Parser, Debug)]
 #[command(name = "comprs")]
 #[command(author, version, about, long_about = None)]
+#[command(after_help = "\
+EXAMPLES:
+    comprs photo.png -o photo.jpg              Convert PNG to JPEG
+    comprs photo.png -o photo.jpg -q 90        JPEG with higher quality
+    comprs input.jpg -o output.png -c 9        Maximum PNG compression
+    comprs image.png --png-preset max          Use PNG optimization preset
+    comprs photo.png -o gray.jpg --grayscale   Convert to grayscale
+    comprs photo.png -v                        Verbose output with timing
+
+More info: https://github.com/leerob/comprs/blob/main/docs/cli.md")]
 struct Args {
     /// Input image file (PNG, JPEG, PPM, or PGM)
     #[arg(value_name = "INPUT")]
@@ -56,7 +66,7 @@ struct Args {
     subsampling: SubsamplingArg,
 
     /// PNG filter strategy
-    #[arg(long, value_enum, default_value = "adaptivefast")]
+    #[arg(long, value_enum, default_value = "adaptive-fast")]
     filter: FilterArg,
 
     /// PNG preset (overrides compression/filter when set)
@@ -82,6 +92,18 @@ struct Args {
     /// Show verbose output
     #[arg(short, long)]
     verbose: bool,
+
+    /// Suppress all output except errors
+    #[arg(long)]
+    quiet: bool,
+
+    /// Output results as JSON (for scripting)
+    #[arg(long)]
+    json: bool,
+
+    /// Preview the operation without writing any files
+    #[arg(long, short = 'n')]
+    dry_run: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -321,6 +343,42 @@ fn read_token<R: BufRead>(reader: &mut R, token: &mut String) -> std::io::Result
     Ok(())
 }
 
+/// Read all bytes from stdin
+fn read_stdin() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let mut buffer = Vec::new();
+    io::stdin().read_to_end(&mut buffer)?;
+    Ok(buffer)
+}
+
+/// Detect format from raw bytes
+fn detect_format_from_bytes(data: &[u8]) -> Result<&'static str, Box<dyn std::error::Error>> {
+    if data.len() < 8 {
+        return Err("Input too small to detect format".into());
+    }
+
+    // PNG: 89 50 4E 47 0D 0A 1A 0A
+    if data.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
+        return Ok("png");
+    }
+
+    // JPEG: FF D8 FF
+    if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return Ok("jpeg");
+    }
+
+    // PPM: P6
+    if data.starts_with(b"P6") {
+        return Ok("ppm");
+    }
+
+    // PGM: P5
+    if data.starts_with(b"P5") {
+        return Ok("pgm");
+    }
+
+    Err("Unknown image format. Supported: PNG, JPEG, PPM (P6), PGM (P5)".into())
+}
+
 fn load_image(path: &PathBuf) -> Result<DecodedImage, Box<dyn std::error::Error>> {
     let format = detect_format(path)?;
 
@@ -330,6 +388,126 @@ fn load_image(path: &PathBuf) -> Result<DecodedImage, Box<dyn std::error::Error>
         "ppm" | "pgm" => decode_pnm(path),
         _ => Err(format!("Unsupported format: {format}").into()),
     }
+}
+
+fn load_image_from_bytes(data: Vec<u8>) -> Result<DecodedImage, Box<dyn std::error::Error>> {
+    let format = detect_format_from_bytes(&data)?;
+
+    match format {
+        "png" => decode_png_from_bytes(data),
+        "jpeg" => decode_jpeg_from_bytes(data),
+        "ppm" | "pgm" => decode_pnm_from_bytes(data, format),
+        _ => Err(format!("Unsupported format: {format}").into()),
+    }
+}
+
+fn decode_png_from_bytes(data: Vec<u8>) -> Result<DecodedImage, Box<dyn std::error::Error>> {
+    let decoder = png::Decoder::new(Cursor::new(data));
+    let mut reader = decoder.read_info()?;
+
+    let mut pixels = vec![0u8; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut pixels)?;
+    pixels.truncate(info.buffer_size());
+
+    let color_type = match info.color_type {
+        png::ColorType::Grayscale => ColorType::Gray,
+        png::ColorType::GrayscaleAlpha => ColorType::GrayAlpha,
+        png::ColorType::Rgb => ColorType::Rgb,
+        png::ColorType::Rgba => ColorType::Rgba,
+        png::ColorType::Indexed => {
+            return Err("Indexed PNG not supported. Convert to RGB first.".into())
+        }
+    };
+
+    Ok(DecodedImage {
+        width: info.width,
+        height: info.height,
+        pixels,
+        color_type,
+        input_format: "PNG",
+    })
+}
+
+fn decode_jpeg_from_bytes(data: Vec<u8>) -> Result<DecodedImage, Box<dyn std::error::Error>> {
+    let mut decoder = jpeg_decoder::Decoder::new(Cursor::new(data));
+    let pixels = decoder.decode()?;
+    let info = decoder.info().ok_or("Failed to get JPEG info")?;
+
+    let color_type = match info.pixel_format {
+        jpeg_decoder::PixelFormat::L8 => ColorType::Gray,
+        jpeg_decoder::PixelFormat::L16 => return Err("16-bit grayscale JPEG not supported.".into()),
+        jpeg_decoder::PixelFormat::RGB24 => ColorType::Rgb,
+        jpeg_decoder::PixelFormat::CMYK32 => {
+            return Err("CMYK JPEG not supported. Convert to RGB first.".into())
+        }
+    };
+
+    Ok(DecodedImage {
+        width: info.width as u32,
+        height: info.height as u32,
+        pixels,
+        color_type,
+        input_format: "JPEG",
+    })
+}
+
+fn decode_pnm_from_bytes(
+    data: Vec<u8>,
+    format_hint: &str,
+) -> Result<DecodedImage, Box<dyn std::error::Error>> {
+    let mut reader = BufReader::new(Cursor::new(data));
+
+    // Read magic number
+    let mut magic = String::new();
+    read_token(&mut reader, &mut magic)?;
+
+    let (color_type, input_format) = match magic.as_str() {
+        "P5" => (ColorType::Gray, "PGM"),
+        "P6" => (ColorType::Rgb, "PPM"),
+        _ => {
+            return Err(
+                format!("Unsupported format '{magic}'. Expected P5 (PGM) or P6 (PPM)").into(),
+            )
+        }
+    };
+
+    // Validate format hint matches
+    if (format_hint == "ppm" && magic != "P6") || (format_hint == "pgm" && magic != "P5") {
+        return Err(format!("Format mismatch: expected {format_hint}, got {magic}").into());
+    }
+
+    // Read dimensions
+    let mut token = String::new();
+
+    read_token(&mut reader, &mut token)?;
+    let width: u32 = token.parse()?;
+
+    token.clear();
+    read_token(&mut reader, &mut token)?;
+    let height: u32 = token.parse()?;
+
+    token.clear();
+    read_token(&mut reader, &mut token)?;
+    let max_val: u32 = token.parse()?;
+
+    if max_val != 255 {
+        return Err(format!("Unsupported max value {max_val}. Only 8-bit (255) supported").into());
+    }
+
+    // Read pixel data
+    let bytes_per_pixel = color_type.bytes_per_pixel();
+    let expected_size = width as usize * height as usize * bytes_per_pixel;
+
+    let mut pixels = vec![0u8; expected_size];
+    reader.read_exact(&mut pixels)?;
+
+    Ok(DecodedImage {
+        width,
+        height,
+        pixels,
+        color_type,
+        input_format,
+    })
 }
 
 fn to_grayscale(pixels: &[u8], color_type: ColorType) -> Vec<u8> {
@@ -370,18 +548,59 @@ fn gray_alpha_to_gray(pixels: &[u8]) -> Vec<u8> {
 }
 
 fn main() {
+    // Show concise help if no arguments provided
+    if std::env::args().len() == 1 {
+        print_concise_help();
+        std::process::exit(0);
+    }
+
     if let Err(e) = run() {
         eprintln!("Error: {e}");
         std::process::exit(1);
     }
 }
 
+fn print_concise_help() {
+    eprintln!("comprs - A minimal-dependency, high-performance image compression tool");
+    eprintln!();
+    eprintln!("USAGE:");
+    eprintln!("    comprs <INPUT> [OPTIONS]");
+    eprintln!();
+    eprintln!("EXAMPLES:");
+    eprintln!("    comprs photo.png -o photo.jpg         Convert PNG to JPEG");
+    eprintln!("    comprs photo.png -o photo.jpg -q 90   JPEG with higher quality");
+    eprintln!("    comprs input.jpg -o output.png -c 9   Maximum PNG compression");
+    eprintln!();
+    eprintln!("For more options, run: comprs --help");
+}
+
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
+    let is_stdin = args.input.as_os_str() == "-";
+    let is_stdout = args
+        .output
+        .as_ref()
+        .map(|p| p.as_os_str() == "-")
+        .unwrap_or(false);
+
     // Load input image
     let start = Instant::now();
-    let img = load_image(&args.input)?;
+    let img = if is_stdin {
+        let data = read_stdin().map_err(|e| format!("Can't read from stdin: {e}"))?;
+        load_image_from_bytes(data)?
+    } else {
+        load_image(&args.input).map_err(|e| {
+            if args.input.exists() {
+                format!("Can't read '{}': {e}", args.input.display())
+            } else {
+                format!(
+                    "File not found: '{}'. Check that the path is correct.",
+                    args.input.display()
+                )
+            }
+        })?
+    };
     let load_time = start.elapsed();
 
     let width = img.width;
@@ -399,17 +618,28 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Determine output format
-    let output_path = args.output.clone().unwrap_or_else(|| {
-        let mut path = args.input.clone();
-        let ext = match determine_format(&args) {
-            OutputFormat::Png => "png",
-            OutputFormat::Jpeg | OutputFormat::Jpg => "jpg",
-        };
-        path.set_extension(format!("compressed.{ext}"));
-        path
-    });
+    // When reading from stdin, output must be specified
+    let output_path = if is_stdin {
+        args.output.clone().ok_or(
+            "When reading from stdin (-), you must specify an output file with -o/--output",
+        )?
+    } else {
+        args.output.clone().unwrap_or_else(|| {
+            let mut path = args.input.clone();
+            let ext = match determine_format(&args) {
+                OutputFormat::Png => "png",
+                OutputFormat::Jpeg | OutputFormat::Jpg => "jpg",
+            };
+            path.set_extension(format!("compressed.{ext}"));
+            path
+        })
+    };
 
     let format = args.format.unwrap_or_else(|| {
+        // When writing to stdout, require explicit format
+        if is_stdout {
+            return OutputFormat::Jpeg; // Default to JPEG for stdout
+        }
         output_path
             .extension()
             .and_then(|e| e.to_str())
@@ -532,11 +762,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     let encode_time = encode_start.elapsed();
 
-    // Write output
-    fs::write(&output_path, &output_data)?;
-
     // Report results
-    let input_size = fs::metadata(&args.input)?.len();
+    let input_size = if is_stdin {
+        // For stdin, use the raw pixel data size as a rough estimate
+        // (actual compressed input size is unknown)
+        (width * height * color_type.bytes_per_pixel() as u32) as u64
+    } else {
+        fs::metadata(&args.input)?.len()
+    };
     let output_size = output_data.len() as u64;
     let ratio = if input_size > 0 {
         (output_size as f64 / input_size as f64) * 100.0
@@ -544,8 +777,68 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         0.0
     };
 
-    if args.verbose {
-        eprintln!("Output: {output_path:?}");
+    let input_display = if is_stdin {
+        "<stdin>".to_string()
+    } else {
+        args.input.display().to_string()
+    };
+    let output_display = if is_stdout {
+        "<stdout>".to_string()
+    } else {
+        output_path.display().to_string()
+    };
+
+    // Write output (unless dry-run)
+    if args.dry_run {
+        if !args.quiet {
+            if args.json {
+                println!(
+                    r#"{{"dry_run":true,"input":"{input_display}","output":"{output_display}","input_size":{input_size},"output_size":{output_size},"ratio":{ratio:.1}}}"#
+                );
+            } else {
+                eprintln!("Dry run: would write to {output_display}");
+                println!(
+                    "{} -> {} ({:.1}%)",
+                    format_size(input_size),
+                    format_size(output_size),
+                    ratio
+                );
+            }
+        }
+        return Ok(());
+    }
+
+    // Write output
+    if is_stdout {
+        io::stdout()
+            .write_all(&output_data)
+            .map_err(|e| format!("Can't write to stdout: {e}"))?;
+    } else {
+        fs::write(&output_path, &output_data).map_err(|e| {
+            format!(
+                "Can't write to '{}': {}. Check that the directory exists and is writable.",
+                output_path.display(),
+                e
+            )
+        })?;
+    }
+
+    // Output results (to stderr if writing to stdout, to avoid mixing with output data)
+    let print_results = |msg: &str| {
+        if is_stdout {
+            eprintln!("{msg}");
+        } else {
+            println!("{msg}");
+        }
+    };
+
+    if args.json {
+        let json_output = format!(
+            r#"{{"input":"{input_display}","output":"{output_display}","input_size":{input_size},"output_size":{output_size},"ratio":{ratio:.1}}}"#
+        );
+        print_results(&json_output);
+    } else if args.verbose {
+        eprintln!("Output: {output_display}");
         eprintln!("  Format: {format:?}");
         eprintln!("  Color type: {color_type:?}");
         match format {
@@ -569,13 +862,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             format_size(output_size),
             ratio
         );
-    } else {
-        println!(
+    } else if !args.quiet {
+        print_results(&format!(
             "{} -> {} ({:.1}%)",
             format_size(input_size),
             format_size(output_size),
             ratio
-        );
+        ));
     }
 
     Ok(())
