@@ -215,7 +215,7 @@ The algorithms in this library represent 70+ years of computer science research,
 
 ## Next Steps
 
-Continue to [Huffman Coding](./huffman-coding.md) to understand the foundational entropy coding technique used in both PNG and JPEG.
+Continue to [Introduction to Rust](./introduction-to-rust.md) to learn the language features that make this library possible, or jump directly to [Huffman Coding](./huffman-coding.md) if you're already familiar with Rust.
 
 ---
 

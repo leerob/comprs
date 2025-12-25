@@ -2,7 +2,7 @@
 
 Every time you download a webpage, unzip a file, or view a PNG image, DEFLATE is working behind the scenes. This 1996 algorithm compresses the Linux kernel source from **1.4 GB to 140 MB** — a 10x reduction! How does it achieve this?
 
-The secret is a brilliant two-stage approach: first find repeated patterns, then encode them optimally.
+The core is a two-stage approach: first find repeated patterns, then encode them optimally.
 
 ## The Key Insight
 
@@ -87,17 +87,18 @@ fn encode_fixed_huffman(tokens: &[Token]) -> Vec<u8> {
 - Tables are transmitted before the data
 - Best compression for larger blocks
 
-Our implementation uses fixed Huffman codes for simplicity:
+Our implementation supports both fixed and dynamic Huffman tables, choosing the smaller result, and also exposes an optional optimal path (Zopfli-style) that re-parses the stream to squeeze out extra bytes:
 
 ```rust
 // From src/compress/deflate.rs
 pub fn deflate(data: &[u8], level: u8) -> Vec<u8> {
-    // Use LZ77 to find matches
     let mut lz77 = Lz77Compressor::new(level);
     let tokens = lz77.compress(data);
+    encode_best_huffman(&tokens, estimated_size)
+}
 
-    // For simplicity, we use fixed Huffman codes
-    encode_fixed_huffman(&tokens)
+pub fn deflate_optimal(data: &[u8], iterations: usize) -> Vec<u8> {
+    // Dynamic tables + optimal parse, slower but smaller
 }
 ```
 
@@ -142,10 +143,10 @@ const LENGTH_EXTRA: [u8; 29] = [
 
 **Example**: Encoding length 18
 
-1. Find the code: 18 is in range 17-18 (code 268)
+1. Find the code: 18 is in range 17-18 (symbol 268)
 2. Extra bits needed: 1 bit
 3. Extra value: 18 - 17 = 1
-4. Output: code 268 + extra bit 1
+4. Output: symbol 268 + extra bit 1
 
 ## Encoding Distances
 
@@ -211,7 +212,7 @@ Step by step:
 6. **A** (literal 65): Same as above
 7. **D** (literal 68): Look up code for symbol 68 → Huffman code
 8. **Match(4,7)**:
-   - Length 4 → code 258 (8 bits in fixed table) + 0 extra bits
+   - Length 4 → symbol 258 (7 bits in the fixed table) + 0 extra bits
    - Distance 7 → code 5 (5 bits) + 1 extra bit (value 0)
 9. **End of block**: Symbol 256 (7 bits in fixed table)
 

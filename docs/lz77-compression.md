@@ -168,71 +168,41 @@ fn hash3(data: &[u8], pos: usize) -> usize {
 }
 ```
 
-The hash function uses a **multiplicative hash** with a prime multiplier (2654435769 ≈ 2³² / φ, where φ is the golden ratio). This distributes hash values evenly.
+The hash function uses a **multiplicative hash** (0x1E35A7BD, a Knuth-style constant) to distribute 4-byte sequences evenly across the table.
 
 ## Compression Levels
 
-Different compression levels trade speed for compression ratio by adjusting how hard we search for matches:
+Different compression levels trade speed for compression ratio by adjusting chain depth; lazy matching is disabled in our parser because it slightly worsened PNG-style data:
 
-| Level | Chain Length | Lazy Matching | Speed | Compression |
-| ----- | ------------ | ------------- | ----- | ----------- |
-| 1     | 4            | No            | Fast  | Fair        |
-| 5     | 64           | Yes           | Med   | Good        |
-| 9     | 1024         | Yes           | Slow  | Best        |
+| Level | Chain Length | Lazy Matching |
+| ----- | ------------ | ------------- |
+| 1     | 4            | No            |
+| 2     | 8            | No            |
+| 3     | 16           | No            |
+| 4     | 32           | No            |
+| 5     | 64           | No            |
+| 6     | 128          | No            |
+| 7     | 256          | No            |
+| 8     | 1024         | No            |
+| 9     | 4096         | No            |
 
 ```rust
 // From src/compress/lz77.rs
-pub fn new(level: u8) -> Self {
-    let level = level.clamp(1, 9);
-
-    let (max_chain_length, lazy_matching) = match level {
-        1 => (4, false),
-        2 => (8, false),
-        3 => (16, false),
-        4 => (32, true),
-        5 => (64, true),
-        6 => (128, true),
-        7 => (256, true),
-        8 => (512, true),
-        9 => (1024, true),
-        _ => (128, true),
-    };
-    // ...
-}
+let (max_chain_length, lazy_matching) = match level {
+    1 => (4, false),
+    2 => (8, false),
+    3 => (16, false),
+    4 => (32, false),
+    5 => (64, false),
+    6 => (128, false),
+    7 => (256, false),
+    8 => (1024, false),
+    9 => (4096, false),
+    _ => (128, false),
+};
 ```
 
-## Lazy Matching
-
-A clever optimization: sometimes the match at position N isn't as good as the match at position N+1.
-
-**Example**:
-
-```
-Position 10: Can match 4 bytes
-Position 11: Can match 8 bytes
-```
-
-Without lazy matching, we'd take the 4-byte match and miss the 8-byte one.
-
-With lazy matching:
-
-1. Find match at position 10 (length 4)
-2. Peek at position 11's best match (length 8)
-3. Since 8 > 4+1, emit literal at position 10, then take the 8-byte match at 11
-
-```rust
-// From src/compress/lz77.rs - simplified
-if self.lazy_matching && pos + 1 < data.len() {
-    if let Some((next_length, _)) = self.find_best_match(data, pos + 1) {
-        if next_length > length + 1 {
-            // Better match at next position, emit literal
-            tokens.push(Token::Literal(data[pos]));
-            pos += 1;
-            continue;
-        }
-    }
-}
-```
+> Note: Lazy matching can improve some compressors, but our profiling on PNG-like data favored deeper chains without deferrals.
 
 ## Why Minimum Length 3?
 

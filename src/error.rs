@@ -39,6 +39,8 @@ pub enum Error {
     UnsupportedColorType,
     /// Internal compression error.
     CompressionError(String),
+    /// Invalid restart interval parameter (must be 1-65535).
+    InvalidRestartInterval(u16),
 }
 
 impl fmt::Display for Error {
@@ -67,6 +69,12 @@ impl fmt::Display for Error {
             }
             Error::CompressionError(msg) => {
                 write!(f, "Compression error: {msg}")
+            }
+            Error::InvalidRestartInterval(interval) => {
+                write!(
+                    f,
+                    "Invalid restart interval {interval}: must be 1-65535 (or None to disable)"
+                )
             }
         }
     }

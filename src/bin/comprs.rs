@@ -469,30 +469,34 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut output_data = Vec::new();
     match format {
         OutputFormat::Png => {
-            let mut options = match args.png_preset {
-                Some(PngPresetArg::Fast) => PngOptions::fast(),
-                Some(PngPresetArg::Balanced) => PngOptions::balanced(),
-                Some(PngPresetArg::Max) => PngOptions::max(),
-                None => PngOptions {
-                    compression_level: args.compression,
-                    filter_strategy: args.filter.to_strategy(),
-                    optimize_alpha: args.png_optimize_alpha,
-                    reduce_color_type: args.png_reduce_color,
-                    strip_metadata: args.png_strip_metadata,
-                    reduce_palette: args.png_reduce_color,
-                    verbose_filter_log: args.verbose,
-                    optimal_compression: false,
-                    quantization: comprs::png::QuantizationOptions::default(),
-                },
-            };
-            // Allow explicit overrides if preset is provided but user also set flags.
-            options.compression_level = args.compression;
-            options.filter_strategy = args.filter.to_strategy();
-            options.optimize_alpha = args.png_optimize_alpha;
-            options.reduce_color_type = args.png_reduce_color;
-            options.strip_metadata = args.png_strip_metadata;
-            options.reduce_palette = args.png_reduce_color;
-            options.verbose_filter_log = args.verbose;
+            let mut builder = PngOptions::builder()
+                .compression_level(args.compression)
+                .filter_strategy(args.filter.to_strategy())
+                .optimize_alpha(args.png_optimize_alpha)
+                .reduce_color_type(args.png_reduce_color)
+                .strip_metadata(args.png_strip_metadata)
+                .reduce_palette(args.png_reduce_color)
+                .verbose_filter_log(args.verbose);
+
+            if let Some(preset) = args.png_preset {
+                let preset_id = match preset {
+                    PngPresetArg::Fast => 0,
+                    PngPresetArg::Balanced => 1,
+                    PngPresetArg::Max => 2,
+                };
+                builder = builder.preset(preset_id);
+                // Explicit flags still override preset
+                builder = builder
+                    .compression_level(args.compression)
+                    .filter_strategy(args.filter.to_strategy())
+                    .optimize_alpha(args.png_optimize_alpha)
+                    .reduce_color_type(args.png_reduce_color)
+                    .strip_metadata(args.png_strip_metadata)
+                    .reduce_palette(args.png_reduce_color)
+                    .verbose_filter_log(args.verbose);
+            }
+
+            let options = builder.build();
 
             if args.verbose {
                 eprintln!(
@@ -517,18 +521,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             )?
         }
         OutputFormat::Jpeg | OutputFormat::Jpg => {
-            let options = JpegOptions {
-                quality: args.quality,
-                subsampling: args.subsampling.into(),
-                restart_interval: if args.jpeg_restart_interval == 0 {
+            let options = JpegOptions::builder()
+                .quality(args.quality)
+                .subsampling(args.subsampling.into())
+                .restart_interval(if args.jpeg_restart_interval == 0 {
                     None
                 } else {
                     Some(args.jpeg_restart_interval)
-                },
-                optimize_huffman: args.jpeg_optimize_huffman,
-                progressive: false,
-                trellis_quant: false,
-            };
+                })
+                .optimize_huffman(args.jpeg_optimize_huffman)
+                .progressive(false)
+                .trellis_quant(false)
+                .build();
             if args.verbose {
                 eprintln!(
                     "JPEG options: quality={}, subsampling={:?}, restart_interval={:?}, optimize_huffman={}",

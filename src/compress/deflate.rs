@@ -7,9 +7,7 @@ use crate::compress::lz77::{
     CostModel, Lz77Compressor, PackedToken, Token, MAX_MATCH_LENGTH, MIN_MATCH_LENGTH,
 };
 use crate::compress::{adler32::adler32, huffman};
-use std::cell::RefCell;
-use std::sync::LazyLock;
-use std::thread_local;
+use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 use std::time::Instant;
 
@@ -38,6 +36,7 @@ const DISTANCE_EXTRA: [u8; 30] = [
 
 /// Timing and accounting information for a single DEFLATE encode.
 #[derive(Debug, Clone)]
+#[must_use]
 pub struct DeflateStats {
     /// Time spent in LZ77 match finding/tokenization.
     pub lz77_time: Duration,
@@ -112,26 +111,27 @@ const HIGH_ENTROPY_BAIL_BYTES: usize = 4 * 1024;
 /// When input has only literals (no matches) and meets this size, prefer stored blocks immediately.
 const STORED_LITERAL_ONLY_BYTES: usize = 8 * 1024;
 
-thread_local! {
-    /// Thread-local pool of reusable deflaters keyed by compression level.
-    static DEFLATE_REUSE: RefCell<Vec<Option<Deflater>>> = const { RefCell::new(Vec::new()) };
-}
+/// Global pool of reusable deflaters keyed by compression level.
+/// Mutex-protected to allow reuse across threads while avoiding RefCell/thread-local costs.
+static DEFLATE_REUSE: LazyLock<Vec<Mutex<Deflater>>> = LazyLock::new(|| {
+    (0..=9)
+        .map(|level| Mutex::new(Deflater::new(level.max(1) as u8)))
+        .collect()
+});
 
 #[inline]
 fn with_reusable_deflater<T>(level: u8, f: impl FnOnce(&mut Deflater) -> T) -> T {
     let level = level.clamp(1, 9);
-    DEFLATE_REUSE.with(|pool| {
-        let mut pool = pool.borrow_mut();
-        let idx = level as usize;
-        if pool.len() <= idx {
-            pool.resize_with(idx + 1, || None);
-        }
-        if pool[idx].as_ref().map(|d| d.level()) != Some(level) {
-            pool[idx] = Some(Deflater::new(level));
-        }
-        let deflater = pool[idx].as_mut().expect("deflater slot initialized");
-        f(deflater)
-    })
+    let idx = level as usize;
+    let pool = DEFLATE_REUSE
+        .get(idx)
+        .unwrap_or_else(|| panic!("deflater pool missing for level {level}"));
+    let mut guard = pool.lock().expect("deflater mutex poisoned");
+    // If pool was initialized with different level (future-proof), refresh it.
+    if guard.level() != level {
+        *guard = Deflater::new(level);
+    }
+    f(&mut guard)
 }
 
 #[inline]
@@ -250,19 +250,10 @@ fn distance_code(distance: u16) -> (u16, u8, u16) {
 ///
 /// # Returns
 /// Compressed data in raw DEFLATE format (no zlib/gzip wrapper).
+#[must_use]
 pub fn deflate(data: &[u8], level: u8) -> Vec<u8> {
     if data.is_empty() {
-        // Empty input: just output empty final block
-        let mut writer = BitWriter64::with_capacity(16);
-        writer.write_bits(1, 1); // BFINAL = 1
-        writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
-
-        // Write end-of-block symbol (256)
-        let lit_codes = huffman::fixed_literal_codes();
-        let code = lit_codes[256];
-        writer.write_bits(reverse_bits(code.code, code.length), code.length);
-
-        return writer.finish();
+        return empty_deflate_fixed_block();
     }
 
     if data.len() <= SMALL_INPUT_BYTES {
@@ -276,18 +267,10 @@ pub fn deflate(data: &[u8], level: u8) -> Vec<u8> {
 ///
 /// This is an experimental fast path that avoids `Token` allocations by
 /// emitting packed tokens directly into the Huffman encoder.
+#[must_use]
 pub fn deflate_packed(data: &[u8], level: u8) -> Vec<u8> {
     if data.is_empty() {
-        // Empty input: just output empty final block
-        let mut writer = BitWriter64::with_capacity(16);
-        writer.write_bits(1, 1); // BFINAL = 1
-        writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
-
-        // Write end-of-block symbol (256)
-        let (code, len) = fixed_literal_codes_rev()[256];
-        writer.write_bits(code, len);
-
-        return writer.finish();
+        return empty_deflate_fixed_block();
     }
 
     if data.len() <= SMALL_INPUT_BYTES {
@@ -316,15 +299,10 @@ const DEFAULT_OPTIMAL_ITERATIONS: usize = 5;
 ///
 /// This produces significantly better compression than greedy parsing,
 /// at the cost of much slower encoding.
+#[must_use]
 pub fn deflate_optimal(data: &[u8], iterations: usize) -> Vec<u8> {
     if data.is_empty() {
-        let mut writer = BitWriter64::with_capacity(16);
-        writer.write_bits(1, 1); // BFINAL = 1
-        writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
-        let lit_codes = huffman::fixed_literal_codes();
-        let code = lit_codes[256];
-        writer.write_bits(reverse_bits(code.code, code.length), code.length);
-        return writer.finish();
+        return empty_deflate_fixed_block();
     }
 
     let mut lz77 = Lz77Compressor::new(9); // Use max chain length for optimal parsing
@@ -386,6 +364,7 @@ pub fn deflate_optimal(data: &[u8], iterations: usize) -> Vec<u8> {
 }
 
 /// Compress data using optimal DEFLATE with default iteration count.
+#[must_use]
 pub fn deflate_optimal_default(data: &[u8]) -> Vec<u8> {
     deflate_optimal(data, DEFAULT_OPTIMAL_ITERATIONS)
 }
@@ -396,7 +375,12 @@ const BLOCK_SPLIT_SIZE_LIMIT: usize = 512 * 1024; // 512KB
 
 /// Compress data using optimal DEFLATE and wrap in zlib container.
 /// Uses adaptive block splitting for improved compression on smaller inputs.
+#[must_use]
 pub fn deflate_optimal_zlib(data: &[u8], iterations: usize) -> Vec<u8> {
+    if data.is_empty() {
+        return empty_zlib(9);
+    }
+
     // Skip block splitting for very large inputs to avoid O(n²) cost
     if data.len() > BLOCK_SPLIT_SIZE_LIMIT {
         // Use optimal DEFLATE without block splitting
@@ -777,15 +761,10 @@ fn write_dynamic_huffman_block(writer: &mut BitWriter64, tokens: &[Token], is_fi
 /// This extends `deflate_optimal` by splitting the token stream into
 /// multiple blocks when doing so reduces total encoded size. Each block
 /// gets its own Huffman tables optimized for its content.
+#[must_use]
 pub fn deflate_optimal_split(data: &[u8], iterations: usize, max_blocks: usize) -> Vec<u8> {
     if data.is_empty() {
-        let mut writer = BitWriter64::with_capacity(16);
-        writer.write_bits(1, 1); // BFINAL = 1
-        writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
-        let lit_codes = huffman::fixed_literal_codes();
-        let code = lit_codes[256];
-        writer.write_bits(reverse_bits(code.code, code.length), code.length);
-        return writer.finish();
+        return empty_deflate_fixed_block();
     }
 
     let mut lz77 = Lz77Compressor::new(9);
@@ -861,7 +840,12 @@ pub fn deflate_optimal_split(data: &[u8], iterations: usize, max_blocks: usize) 
 }
 
 /// Compress data using optimal DEFLATE with block splitting and wrap in zlib container.
+#[must_use]
 pub fn deflate_optimal_split_zlib(data: &[u8], iterations: usize, max_blocks: usize) -> Vec<u8> {
+    if data.is_empty() {
+        return empty_zlib(9);
+    }
+
     let deflated = deflate_optimal_split(data, iterations, max_blocks);
     let use_stored = should_use_stored(data.len(), deflated.len());
 
@@ -883,16 +867,8 @@ pub fn deflate_optimal_split_zlib(data: &[u8], iterations: usize, max_blocks: us
 #[cfg(feature = "timing")]
 pub fn deflate_packed_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats) {
     if data.is_empty() {
-        let mut writer = BitWriter64::with_capacity(16);
-        writer.write_bits(1, 1); // BFINAL = 1
-        writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
-
-        let lit_codes = fixed_literal_codes_rev();
-        let (code, len) = lit_codes[256];
-        writer.write_bits(code, len);
-
         return (
-            writer.finish(),
+            empty_deflate_fixed_block(),
             DeflateStats {
                 used_dynamic: false,
                 ..Default::default()
@@ -996,16 +972,7 @@ impl Deflater {
     /// Compress raw data into a DEFLATE stream.
     pub fn compress(&mut self, data: &[u8]) -> Vec<u8> {
         if data.is_empty() {
-            let mut writer = BitWriter64::with_capacity(16);
-            writer.write_bits(1, 1); // BFINAL = 1
-            writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
-
-            // Write end-of-block symbol (256)
-            let lit_codes = huffman::fixed_literal_codes();
-            let code = lit_codes[256];
-            writer.write_bits(reverse_bits(code.code, code.length), code.length);
-
-            return writer.finish();
+            return empty_deflate_fixed_block();
         }
 
         self.tokens.clear();
@@ -1020,16 +987,7 @@ impl Deflater {
     /// Compress using only fixed Huffman codes (for very small inputs).
     pub fn compress_fixed_only(&mut self, data: &[u8]) -> Vec<u8> {
         if data.is_empty() {
-            let mut writer = BitWriter64::with_capacity(16);
-            writer.write_bits(1, 1); // BFINAL = 1
-            writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
-
-            // Write end-of-block symbol (256)
-            let lit_codes = huffman::fixed_literal_codes();
-            let code = lit_codes[256];
-            writer.write_bits(reverse_bits(code.code, code.length), code.length);
-
-            return writer.finish();
+            return empty_deflate_fixed_block();
         }
 
         self.tokens.clear();
@@ -1043,19 +1001,7 @@ impl Deflater {
     /// Compress data and wrap in a zlib container.
     pub fn compress_zlib(&mut self, data: &[u8]) -> Vec<u8> {
         if data.is_empty() {
-            let mut output = Vec::with_capacity(8);
-            output.extend_from_slice(&zlib_header(self.level));
-
-            let mut writer = BitWriter64::with_capacity(16);
-            writer.write_bits(1, 1); // BFINAL = 1
-            writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
-
-            let lit_codes = huffman::fixed_literal_codes();
-            let code = lit_codes[256];
-            writer.write_bits(reverse_bits(code.code, code.length), code.length);
-            output.extend_from_slice(&writer.finish());
-            output.extend_from_slice(&adler32(data).to_be_bytes());
-            return output;
+            return empty_zlib(self.level);
         }
 
         self.tokens.clear();
@@ -1084,14 +1030,7 @@ impl Deflater {
     /// Compress data using packed tokens into a raw DEFLATE stream.
     pub fn compress_packed(&mut self, data: &[u8]) -> Vec<u8> {
         if data.is_empty() {
-            let mut writer = BitWriter64::with_capacity(16);
-            writer.write_bits(1, 1); // BFINAL = 1
-            writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
-
-            let lit_codes = fixed_literal_codes_rev();
-            let (code, len) = lit_codes[256];
-            writer.write_bits(code, len);
-            return writer.finish();
+            return empty_deflate_fixed_block();
         }
 
         self.packed_tokens.clear();
@@ -1113,13 +1052,7 @@ impl Deflater {
     /// Compress using only fixed Huffman codes (packed) for very small inputs.
     pub fn compress_fixed_only_packed(&mut self, data: &[u8]) -> Vec<u8> {
         if data.is_empty() {
-            let mut writer = BitWriter64::with_capacity(16);
-            writer.write_bits(1, 1); // BFINAL = 1
-            writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
-
-            let (code, len) = fixed_literal_codes_rev()[256];
-            writer.write_bits(code, len);
-            return writer.finish();
+            return empty_deflate_fixed_block();
         }
 
         self.packed_tokens.clear();
@@ -1134,19 +1067,7 @@ impl Deflater {
     /// Compress data using packed tokens and wrap in a zlib container.
     pub fn compress_packed_zlib(&mut self, data: &[u8]) -> Vec<u8> {
         if data.is_empty() {
-            let mut output = Vec::with_capacity(8);
-            output.extend_from_slice(&zlib_header(self.level));
-
-            let mut writer = BitWriter64::with_capacity(16);
-            writer.write_bits(1, 1); // BFINAL = 1
-            writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
-
-            let lit_codes = fixed_literal_codes_rev();
-            let (code, len) = lit_codes[256];
-            writer.write_bits(code, len);
-            output.extend_from_slice(&writer.finish());
-            output.extend_from_slice(&adler32(data).to_be_bytes());
-            return output;
+            return empty_zlib(self.level);
         }
 
         self.packed_tokens.clear();
@@ -1191,17 +1112,8 @@ impl Deflater {
 /// additional instrumentation by using this entrypoint.
 pub fn deflate_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats) {
     if data.is_empty() {
-        let mut writer = BitWriter64::with_capacity(16);
-        writer.write_bits(1, 1); // BFINAL = 1
-        writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
-
-        // Write end-of-block symbol (256)
-        let lit_codes = huffman::fixed_literal_codes();
-        let code = lit_codes[256];
-        writer.write_bits(reverse_bits(code.code, code.length), code.length);
-
         return (
-            writer.finish(),
+            empty_deflate_fixed_block(),
             DeflateStats {
                 used_dynamic: false,
                 ..Default::default()
@@ -1264,6 +1176,7 @@ pub fn deflate_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats) {
 /// Compress data and wrap it in a zlib container (RFC 1950).
 ///
 /// Produces: zlib header (CMF/FLG), deflate stream, Adler-32 checksum.
+#[must_use]
 pub fn deflate_zlib(data: &[u8], level: u8) -> Vec<u8> {
     if data.len() >= HIGH_ENTROPY_BAIL_BYTES && is_high_entropy_data(data) {
         return deflate_zlib_stored(data, level);
@@ -1272,6 +1185,7 @@ pub fn deflate_zlib(data: &[u8], level: u8) -> Vec<u8> {
 }
 
 /// Compress data with packed tokens and wrap it in a zlib container.
+#[must_use]
 pub fn deflate_zlib_packed(data: &[u8], level: u8) -> Vec<u8> {
     if data.len() >= HIGH_ENTROPY_BAIL_BYTES && is_high_entropy_data(data) {
         return deflate_zlib_stored(data, level);
@@ -1293,14 +1207,13 @@ fn deflate_zlib_stored(data: &[u8], level: u8) -> Vec<u8> {
 pub fn deflate_zlib_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats) {
     // Empty input mirrors `deflate_zlib`
     if data.is_empty() {
-        let mut output = Vec::with_capacity(8);
-        output.extend_from_slice(&zlib_header(level));
-
-        let (deflated, mut stats) = deflate_with_stats(data, level);
-        output.extend_from_slice(&deflated);
-        output.extend_from_slice(&adler32(data).to_be_bytes());
-        stats.used_stored_block = false;
-        return (output, stats);
+        return (
+            empty_zlib(level),
+            DeflateStats {
+                used_stored_block: false,
+                ..Default::default()
+            },
+        );
     }
 
     // High-entropy fast path: skip LZ77/Huffman and emit stored blocks directly.
@@ -1340,14 +1253,13 @@ pub fn deflate_zlib_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats
 #[cfg(feature = "timing")]
 pub fn deflate_zlib_packed_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats) {
     if data.is_empty() {
-        let mut output = Vec::with_capacity(8);
-        output.extend_from_slice(&zlib_header(level));
-
-        let (deflated, mut stats) = deflate_packed_with_stats(data, level);
-        output.extend_from_slice(&deflated);
-        output.extend_from_slice(&adler32(data).to_be_bytes());
-        stats.used_stored_block = false;
-        return (output, stats);
+        return (
+            empty_zlib(level),
+            DeflateStats {
+                used_stored_block: false,
+                ..Default::default()
+            },
+        );
     }
 
     if data.len() >= HIGH_ENTROPY_BAIL_BYTES && is_high_entropy_data(data) {
@@ -1902,6 +1814,26 @@ fn prepare_reversed_codes(codes: &[huffman::HuffmanCode]) -> Vec<(u32, u8)> {
         .collect()
 }
 
+#[inline]
+fn empty_deflate_fixed_block() -> Vec<u8> {
+    let mut writer = BitWriter64::with_capacity(16);
+    writer.write_bits(1, 1); // BFINAL = 1
+    writer.write_bits(1, 2); // BTYPE = 01 (fixed Huffman)
+
+    let (code, len) = fixed_literal_codes_rev()[256];
+    writer.write_bits(code, len);
+    writer.finish()
+}
+
+#[inline]
+fn empty_zlib(level: u8) -> Vec<u8> {
+    let mut output = Vec::with_capacity(8);
+    output.extend_from_slice(&zlib_header(level));
+    output.extend_from_slice(&empty_deflate_fixed_block());
+    output.extend_from_slice(&adler32(&[]).to_be_bytes());
+    output
+}
+
 /// Cached reversed fixed literal codes.
 static FIXED_LIT_REV: LazyLock<[(u32, u8); 288]> = LazyLock::new(|| {
     let codes = huffman::fixed_literal_codes();
@@ -1954,6 +1886,7 @@ fn zlib_header(level: u8) -> [u8; 2] {
 /// Compress data using DEFLATE with stored blocks (no compression).
 /// Useful for already-compressed data or when speed is critical.
 #[allow(dead_code)]
+#[must_use]
 pub fn deflate_stored(data: &[u8]) -> Vec<u8> {
     let mut output = Vec::with_capacity(data.len() + data.len() / 65535 * 5 + 10);
     let chunks = data.chunks(65535);

@@ -177,6 +177,115 @@ impl PngOptions {
     }
 }
 
+/// Builder for [`PngOptions`] to reduce boolean argument noise.
+#[derive(Debug, Clone, Default)]
+pub struct PngOptionsBuilder {
+    options: PngOptions,
+}
+
+impl PngOptions {
+    /// Create a builder for [`PngOptions`].
+    pub fn builder() -> PngOptionsBuilder {
+        PngOptionsBuilder::default()
+    }
+}
+
+impl PngOptionsBuilder {
+    /// Set compression level (1-9).
+    pub fn compression_level(mut self, level: u8) -> Self {
+        self.options.compression_level = level;
+        self
+    }
+
+    /// Set filter strategy.
+    pub fn filter_strategy(mut self, strategy: FilterStrategy) -> Self {
+        self.options.filter_strategy = strategy;
+        self
+    }
+
+    /// Toggle alpha optimization for fully transparent pixels.
+    pub fn optimize_alpha(mut self, value: bool) -> Self {
+        self.options.optimize_alpha = value;
+        self
+    }
+
+    /// Toggle lossless color type reduction when safe.
+    pub fn reduce_color_type(mut self, value: bool) -> Self {
+        self.options.reduce_color_type = value;
+        self
+    }
+
+    /// Toggle stripping ancillary metadata chunks.
+    pub fn strip_metadata(mut self, value: bool) -> Self {
+        self.options.strip_metadata = value;
+        self
+    }
+
+    /// Toggle palette reduction when color count allows.
+    pub fn reduce_palette(mut self, value: bool) -> Self {
+        self.options.reduce_palette = value;
+        self
+    }
+
+    /// Enable verbose filter logging (debug/CLI).
+    pub fn verbose_filter_log(mut self, value: bool) -> Self {
+        self.options.verbose_filter_log = value;
+        self
+    }
+
+    /// Toggle optimal (Zopfli-style) compression.
+    pub fn optimal_compression(mut self, value: bool) -> Self {
+        self.options.optimal_compression = value;
+        self
+    }
+
+    /// Set full quantization options.
+    pub fn quantization(mut self, quantization: QuantizationOptions) -> Self {
+        self.options.quantization = quantization;
+        self
+    }
+
+    /// Set quantization mode.
+    pub fn quantization_mode(mut self, mode: QuantizationMode) -> Self {
+        self.options.quantization.mode = mode;
+        self
+    }
+
+    /// Convenience to toggle lossy (Auto quantization) vs. lossless (Off).
+    pub fn lossy(mut self, lossy: bool) -> Self {
+        self.options.quantization.mode = if lossy {
+            QuantizationMode::Auto
+        } else {
+            QuantizationMode::Off
+        };
+        self
+    }
+
+    /// Set maximum palette size for quantization.
+    pub fn quantization_max_colors(mut self, max_colors: u16) -> Self {
+        self.options.quantization.max_colors = max_colors;
+        self
+    }
+
+    /// Toggle dithering for quantization.
+    pub fn quantization_dithering(mut self, dithering: bool) -> Self {
+        self.options.quantization.dithering = dithering;
+        self
+    }
+
+    /// Apply preset (0=fast, 1=balanced, 2=max).
+    pub fn preset(mut self, preset: u8) -> Self {
+        self.options = PngOptions::from_preset(preset);
+        self
+    }
+
+    /// Build the configured [`PngOptions`].
+    #[must_use]
+    pub fn build(self) -> PngOptions {
+        self.options
+    }
+}
+
 /// PNG filter selection strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FilterStrategy {
@@ -505,11 +614,11 @@ fn write_iend(output: &mut Vec<u8>) {
 }
 
 /// If enabled, zero color channels for fully transparent pixels to improve compression.
-fn maybe_optimize_alpha<'a>(
-    data: &'a [u8],
+fn maybe_optimize_alpha(
+    data: &[u8],
     color_type: ColorType,
     optimize_alpha: bool,
-) -> std::borrow::Cow<'a, [u8]> {
+) -> std::borrow::Cow<'_, [u8]> {
     if !optimize_alpha {
         return std::borrow::Cow::Borrowed(data);
     }
@@ -1924,6 +2033,37 @@ mod tests {
         assert_eq!(PngOptions::from_preset(0).compression_level, 2);
         assert_eq!(PngOptions::from_preset(1).compression_level, 6);
         assert_eq!(PngOptions::from_preset(2).compression_level, 9);
+    }
+
+    #[test]
+    fn test_builder_overrides_after_preset() {
+        let opts = PngOptions::builder()
+            .preset(2) // max
+            .compression_level(3)
+            .filter_strategy(FilterStrategy::AdaptiveFast)
+            .optimize_alpha(false)
+            .reduce_color_type(false)
+            .strip_metadata(false)
+            .reduce_palette(false)
+            .quantization_mode(QuantizationMode::Off)
+            .build();
+
+        assert_eq!(opts.compression_level, 3);
+        assert_eq!(opts.filter_strategy, FilterStrategy::AdaptiveFast);
+        assert!(!opts.optimize_alpha);
+        assert!(!opts.reduce_color_type);
+        assert!(!opts.strip_metadata);
+        assert!(!opts.reduce_palette);
+        assert_eq!(opts.quantization.mode, QuantizationMode::Off);
+    }
+
+    #[test]
+    fn test_builder_lossy_toggle() {
+        let lossy = PngOptions::builder().lossy(true).build();
+        assert_eq!(lossy.quantization.mode, QuantizationMode::Auto);
+
+        let lossless = PngOptions::builder().lossy(false).build();
+        assert_eq!(lossless.quantization.mode, QuantizationMode::Off);
     }
 
     #[test]

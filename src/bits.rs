@@ -76,8 +76,12 @@ impl BitWriter {
 
     /// Write multiple bytes.
     pub fn write_bytes(&mut self, bytes: &[u8]) {
-        for &byte in bytes {
-            self.write_byte(byte);
+        if self.bit_position == 0 {
+            self.buffer.extend_from_slice(bytes);
+        } else {
+            for &byte in bytes {
+                self.write_bits(byte as u32, 8);
+            }
         }
     }
 
@@ -91,6 +95,7 @@ impl BitWriter {
     }
 
     /// Consume the writer and return the byte buffer.
+    #[must_use]
     pub fn finish(mut self) -> Vec<u8> {
         self.flush();
         self.buffer
@@ -180,6 +185,7 @@ impl BitWriter64 {
     }
 
     /// Consume the writer and return the byte buffer.
+    #[must_use]
     pub fn finish(mut self) -> Vec<u8> {
         self.flush();
         self.buffer
@@ -283,6 +289,7 @@ impl BitWriterMsb {
     }
 
     /// Consume the writer and return the byte buffer.
+    #[must_use]
     pub fn finish(mut self) -> Vec<u8> {
         self.flush();
         self.buffer

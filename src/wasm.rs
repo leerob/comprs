@@ -50,15 +50,11 @@ use crate::png::{self, PngOptions};
 
 /// Convert a u8 color type code to ColorType enum.
 fn color_type_from_u8(value: u8) -> Result<ColorType, JsError> {
-    match value {
-        0 => Ok(ColorType::Gray),
-        1 => Ok(ColorType::GrayAlpha),
-        2 => Ok(ColorType::Rgb),
-        3 => Ok(ColorType::Rgba),
-        _ => Err(JsError::new(&format!(
-            "Invalid color type: {value}. Expected 0 (Gray), 1 (GrayAlpha), 2 (Rgb), or 3 (Rgba)",
-        ))),
-    }
+    ColorType::try_from(value).map_err(|v| {
+        JsError::new(&format!(
+            "Invalid color type: {v}. Expected 0 (Gray), 1 (GrayAlpha), 2 (Rgb), or 3 (Rgba)",
+        ))
+    })
 }
 
 /// Encode raw pixel data as PNG.
@@ -86,7 +82,7 @@ pub fn encode_png(
 ) -> Result<Vec<u8>, JsError> {
     let color = color_type_from_u8(color_type)?;
     // lossy=true means we want quantization, which is lossless=false internally
-    let options = PngOptions::from_preset_with_lossless(preset, !lossy);
+    let options = PngOptions::builder().preset(preset).lossy(lossy).build();
     png::encode_with_options(data, width, height, color, &options)
         .map_err(|e| JsError::new(&e.to_string()))
 }
@@ -116,21 +112,24 @@ pub fn encode_jpeg(
     preset: u8,
     subsampling_420: bool,
 ) -> Result<Vec<u8>, JsError> {
-    let color = match color_type {
-        0 => ColorType::Gray,
-        2 => ColorType::Rgb,
+    let color = match ColorType::try_from(color_type) {
+        Ok(ColorType::Gray) => ColorType::Gray,
+        Ok(ColorType::Rgb) => ColorType::Rgb,
         _ => {
             return Err(JsError::new(&format!(
                 "Invalid color type for JPEG: {color_type}. Expected 0 (Gray) or 2 (Rgb)",
             )))
         }
     };
-    let mut options = JpegOptions::from_preset(quality, preset);
-    options.subsampling = if subsampling_420 {
-        Subsampling::S420
-    } else {
-        Subsampling::S444
-    };
+    let options = JpegOptions::builder()
+        .quality(quality)
+        .preset(preset)
+        .subsampling(if subsampling_420 {
+            Subsampling::S420
+        } else {
+            Subsampling::S444
+        })
+        .build();
     jpeg::encode_with_options(data, width, height, color, &options)
         .map_err(|e| JsError::new(&e.to_string()))
 }

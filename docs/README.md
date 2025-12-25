@@ -11,6 +11,7 @@ This documentation is designed to be accessible to developers who may not be fam
 | Document | Description |
 |----------|-------------|
 | [Introduction to Image Compression](./introduction-to-image-compression.md) | Start here! Understand why we need image compression and the fundamental approaches |
+| [Introduction to Rust](./introduction-to-rust.md) | Learn Rust through compression code examples from this library |
 
 ### Core Compression Algorithms
 
@@ -42,15 +43,16 @@ This documentation is designed to be accessible to developers who may not be fam
 If you're new to image compression, we recommend reading the documents in this order:
 
 1. **[Introduction to Image Compression](./introduction-to-image-compression.md)** - Foundational concepts
-2. **[Huffman Coding](./huffman-coding.md)** - Core entropy coding technique
-3. **[LZ77 Compression](./lz77-compression.md)** - Dictionary compression basics
-4. **[DEFLATE Algorithm](./deflate.md)** - Combining the above for PNG
-5. **[PNG Encoding](./png-encoding.md)** - Complete lossless pipeline
-6. **[Discrete Cosine Transform](./dct.md)** - Mathematical foundations for JPEG
-7. **[JPEG Quantization](./quantization.md)** - Controlled information loss
-8. **[JPEG Encoding](./jpeg-encoding.md)** - Complete lossy pipeline
-9. **[Performance Optimization](./performance-optimization.md)** - Making it all fast
-10. **[Compression Evolution](./compression-evolution.md)** - History and advanced techniques
+2. **[Introduction to Rust](./introduction-to-rust.md)** - Understand the implementation language
+3. **[Huffman Coding](./huffman-coding.md)** - Core entropy coding technique
+4. **[LZ77 Compression](./lz77-compression.md)** - Dictionary compression basics
+5. **[DEFLATE Algorithm](./deflate.md)** - Combining the above for PNG
+6. **[PNG Encoding](./png-encoding.md)** - Complete lossless pipeline
+7. **[Discrete Cosine Transform](./dct.md)** - Mathematical foundations for JPEG
+8. **[JPEG Quantization](./quantization.md)** - Controlled information loss
+9. **[JPEG Encoding](./jpeg-encoding.md)** - Complete lossy pipeline
+10. **[Performance Optimization](./performance-optimization.md)** - Making it all fast
+11. **[Compression Evolution](./compression-evolution.md)** - History and advanced techniques
 
 ## 🔧 Implementation Details
 

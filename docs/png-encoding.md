@@ -216,6 +216,7 @@ Our library provides several strategies:
 | `None` | Always use filter 0 | Fastest | Poor |
 | `Sub` | Always use filter 1 | Fast | Moderate |
 | `Up` | Always use filter 2 | Fast | Moderate |
+| `Average` | Always use filter 3 | Fast | Moderate |
 | `Paeth` | Always use filter 4 | Fast | Good |
 | `MinSum` | Try all 5, pick lowest score | Medium | Very Good |
 | `AdaptiveFast` | Try Sub/Up/Paeth with early exit | Medium | Good |
@@ -253,7 +254,7 @@ PngOptions::balanced()
 
 - **Compression level**: 6
 - **Filter strategy**: Adaptive
-- **Optimizations**: Palette reduction, color type reduction, alpha optimization
+- **Optimizations**: Palette reduction, color type reduction, alpha optimization, metadata stripping
 - **Best for**: General use, web assets
 
 ### Max (Preset 2)
@@ -264,11 +265,12 @@ PngOptions::max()
 
 - **Compression level**: 9
 - **Filter strategy**: MinSum with iterative refinement
+- **DEFLATE**: Optimal parsing + dynamic tables (Zopfli-style)
 - **Best for**: Final distribution, every byte counts
 
 ## Lossless Optimizations
 
-Beyond filtering, PNG encoders can apply lossless transformations:
+Beyond filtering, PNG encoders can apply lossless transformations. (When lossy output is acceptable, the library can also quantize to a palette via median-cut with optional Floyd–Steinberg dithering.)
 
 ### Palette Reduction
 

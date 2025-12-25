@@ -668,7 +668,7 @@ Sometimes the biggest wins come from choosing a better algorithm entirely.
 
 ### The Problem: DCT is Expensive
 
-The naive 2D DCT requires 64 multiplications per 8-point transform:
+The naive 1D 8-point DCT needs 64 multiplications; a fully naive 2D 8×8 would take 4096. Separability drops this to 2×8³ = 1024 multiplications, but that's still costly:
 
 ```
 // Naive 1D DCT
@@ -857,6 +857,10 @@ These optimization patterns are applied throughout comprs. To see them in action
 - **SIMD implementations**: `src/simd/x86_64.rs`
 - **Fast DCT algorithm**: `src/jpeg/dct.rs`
 - **Batch bit operations**: `src/bits.rs`
+
+## Next Steps
+
+Continue to [Compression Evolution](./compression-evolution.md) to explore the history and philosophy behind modern compression techniques.
 
 ---
 

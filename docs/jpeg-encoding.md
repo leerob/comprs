@@ -37,7 +37,7 @@ JPEG (Joint Photographic Experts Group) is the most widely used image format for
                                                          └─────────────┘
 ```
 
-Each stage has a specific purpose:
+Each stage has a specific purpose (baseline 4:4:4 by default in this library; options can enable optimized Huffman tables, progressive scans, 4:2:0 subsampling, and trellis quantization for smaller files; see `JpegOptions` presets fast/balanced/max in the crate docs):
 
 | Stage          | Purpose                        | Lossy?  |
 | -------------- | ------------------------------ | ------- |

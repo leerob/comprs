@@ -36,6 +36,8 @@
 #![cfg_attr(not(any(feature = "simd", feature = "wasm")), forbid(unsafe_code))]
 #![warn(missing_docs)]
 #![allow(clippy::needless_range_loop)]
+#![allow(unknown_lints)]
+#![allow(clippy::manual_is_multiple_of)]
 
 pub mod bits;
 pub mod color;

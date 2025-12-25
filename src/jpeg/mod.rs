@@ -154,6 +154,67 @@ impl JpegOptions {
             _ => Self::balanced(quality),
         }
     }
+
+    /// Create a builder for [`JpegOptions`].
+    pub fn builder() -> JpegOptionsBuilder {
+        JpegOptionsBuilder::default()
+    }
+}
+
+/// Builder for [`JpegOptions`] to reduce boolean argument noise.
+#[derive(Debug, Clone, Default)]
+pub struct JpegOptionsBuilder {
+    options: JpegOptions,
+}
+
+impl JpegOptionsBuilder {
+    /// Set quality (1-100).
+    pub fn quality(mut self, quality: u8) -> Self {
+        self.options.quality = quality;
+        self
+    }
+
+    /// Set chroma subsampling.
+    pub fn subsampling(mut self, subsampling: Subsampling) -> Self {
+        self.options.subsampling = subsampling;
+        self
+    }
+
+    /// Set restart interval in MCUs (None disables restarts).
+    pub fn restart_interval(mut self, interval: Option<u16>) -> Self {
+        self.options.restart_interval = interval;
+        self
+    }
+
+    /// Enable or disable optimized Huffman tables.
+    pub fn optimize_huffman(mut self, value: bool) -> Self {
+        self.options.optimize_huffman = value;
+        self
+    }
+
+    /// Enable or disable progressive JPEG encoding.
+    pub fn progressive(mut self, value: bool) -> Self {
+        self.options.progressive = value;
+        self
+    }
+
+    /// Enable or disable trellis quantization.
+    pub fn trellis_quant(mut self, value: bool) -> Self {
+        self.options.trellis_quant = value;
+        self
+    }
+
+    /// Apply preset (0=fast, 1=balanced, 2=max) while retaining the builder.
+    pub fn preset(mut self, preset: u8) -> Self {
+        self.options = JpegOptions::from_preset(self.options.quality, preset);
+        self
+    }
+
+    /// Finish building `JpegOptions`.
+    #[must_use]
+    pub fn build(self) -> JpegOptions {
+        self.options
+    }
 }
 
 /// Encode raw pixel data as JPEG with options.
@@ -204,7 +265,7 @@ pub fn encode_with_options_into(
         return Err(Error::InvalidQuality(options.quality));
     }
     if matches!(options.restart_interval, Some(0)) {
-        return Err(Error::InvalidQuality(0)); // reuse quality error type for invalid param
+        return Err(Error::InvalidRestartInterval(0));
     }
 
     // Validate dimensions
@@ -1273,7 +1334,7 @@ fn encode_scan(
         if let Some(interval) = restart_interval {
             // Only write restart marker if there are more MCUs to follow.
             // Skip the marker after the final MCU to avoid redundant bytes.
-            if interval > 0 && mcu_count.is_multiple_of(interval as u32) && mcu_count < total_mcus {
+            if interval > 0 && mcu_count < total_mcus && is_multiple(mcu_count, interval as u32) {
                 writer.flush();
                 writer.write_bytes(&[0xFF, 0xD0 + (*rst_idx & 0x07)]);
                 *rst_idx = (*rst_idx + 1) & 0x07;
@@ -1283,6 +1344,11 @@ fn encode_scan(
             }
         }
     };
+
+    #[inline]
+    fn is_multiple(dividend: u32, divisor: u32) -> bool {
+        dividend.checked_rem(divisor) == Some(0)
+    }
 
     // Process blocks
     match (color_type, subsampling) {
@@ -1526,6 +1592,18 @@ mod tests {
     }
 
     #[test]
+    fn test_encode_invalid_restart_interval() {
+        let pixels = vec![255, 0, 0];
+        let mut options = JpegOptions::fast(85);
+        options.restart_interval = Some(0);
+        let mut output = Vec::new();
+        assert!(matches!(
+            encode_with_options_into(&mut output, &pixels, 1, 1, ColorType::Rgb, &options),
+            Err(Error::InvalidRestartInterval(0))
+        ));
+    }
+
+    #[test]
     fn test_encode_invalid_dimensions() {
         let pixels = vec![255, 0, 0];
         assert!(matches!(
@@ -1558,5 +1636,23 @@ mod tests {
         assert_ne!(first, output);
         assert!(output.capacity() >= first_cap);
         assert_eq!(&output[0..2], &SOI.to_be_bytes());
+    }
+
+    #[test]
+    fn test_jpeg_options_builder_with_preset_override() {
+        let opts = JpegOptions::builder()
+            .preset(2) // max
+            .quality(90)
+            .subsampling(Subsampling::S444)
+            .optimize_huffman(false)
+            .progressive(false)
+            .trellis_quant(false)
+            .build();
+
+        assert_eq!(opts.quality, 90);
+        assert_eq!(opts.subsampling, Subsampling::S444);
+        assert!(!opts.optimize_huffman);
+        assert!(!opts.progressive);
+        assert!(!opts.trellis_quant);
     }
 }

@@ -7,6 +7,7 @@
 ///
 /// When the `simd` feature is enabled, uses SIMD acceleration for improved throughput.
 #[inline]
+#[must_use]
 pub fn adler32(data: &[u8]) -> u32 {
     #[cfg(feature = "simd")]
     {

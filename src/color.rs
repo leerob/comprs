@@ -2,6 +2,7 @@
 
 /// Supported color types for image encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ColorType {
     /// Grayscale, 1 byte per pixel.
     Gray,
@@ -78,6 +79,26 @@ pub fn rgba_to_ycbcr(r: u8, g: u8, b: u8, _a: u8) -> (u8, u8, u8) {
     rgb_to_ycbcr(r, g, b)
 }
 
+impl TryFrom<u8> for ColorType {
+    type Error = u8;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(ColorType::Gray),
+            1 => Ok(ColorType::GrayAlpha),
+            2 => Ok(ColorType::Rgb),
+            3 => Ok(ColorType::Rgba),
+            other => Err(other),
+        }
+    }
+}
+
+impl From<ColorType> for u8 {
+    fn from(color: ColorType) -> Self {
+        color as u8
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,5 +134,27 @@ mod tests {
         assert!(y > 50 && y < 100);
         assert!(cb < 128);
         assert!(cr > 200);
+    }
+
+    #[test]
+    fn test_color_type_try_from() {
+        assert!(matches!(ColorType::try_from(0), Ok(ColorType::Gray)));
+        assert!(matches!(ColorType::try_from(1), Ok(ColorType::GrayAlpha)));
+        assert!(matches!(ColorType::try_from(2), Ok(ColorType::Rgb)));
+        assert!(matches!(ColorType::try_from(3), Ok(ColorType::Rgba)));
+        assert!(ColorType::try_from(99).is_err());
+    }
+
+    #[test]
+    fn test_color_type_roundtrip_u8() {
+        for (val, ct) in [
+            (0u8, ColorType::Gray),
+            (1u8, ColorType::GrayAlpha),
+            (2u8, ColorType::Rgb),
+            (3u8, ColorType::Rgba),
+        ] {
+            assert_eq!(u8::from(ct), val);
+            assert_eq!(ColorType::try_from(val).unwrap(), ct);
+        }
     }
 }

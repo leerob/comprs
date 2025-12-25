@@ -5,6 +5,8 @@
 //! suitable for regression testing.
 
 #![allow(dead_code)]
+#![allow(unknown_lints)]
+#![allow(clippy::manual_is_multiple_of)]
 
 /// Generate a solid color image.
 pub fn solid_color(width: u32, height: u32, r: u8, g: u8, b: u8) -> Vec<u8> {
@@ -90,7 +92,7 @@ pub fn checkerboard(width: u32, height: u32, cell_size: u32) -> Vec<u8> {
         for x in 0..width {
             let cell_x = x / cell_size;
             let cell_y = y / cell_size;
-            let is_white = (cell_x + cell_y).is_multiple_of(2);
+            let is_white = (cell_x + cell_y) % 2 == 0;
             let v = if is_white { 255 } else { 0 };
             pixels.extend_from_slice(&[v, v, v]);
         }
@@ -112,7 +114,7 @@ pub fn checkerboard_color(
         for x in 0..width {
             let cell_x = x / cell_size;
             let cell_y = y / cell_size;
-            let color = if (cell_x + cell_y).is_multiple_of(2) {
+            let color = if (cell_x + cell_y) % 2 == 0 {
                 color1
             } else {
                 color2
@@ -134,7 +136,7 @@ pub fn stripes_horizontal(width: u32, height: u32, stripe_height: u32) -> Vec<u8
     let mut pixels = Vec::with_capacity((width * height * 3) as usize);
     let stripe_height = stripe_height.max(1);
     for y in 0..height {
-        let is_white = (y / stripe_height).is_multiple_of(2);
+        let is_white = (y / stripe_height) % 2 == 0;
         let v = if is_white { 255 } else { 0 };
         for _x in 0..width {
             pixels.extend_from_slice(&[v, v, v]);
@@ -149,7 +151,7 @@ pub fn stripes_vertical(width: u32, height: u32, stripe_width: u32) -> Vec<u8> {
     let stripe_width = stripe_width.max(1);
     for _y in 0..height {
         for x in 0..width {
-            let is_white = (x / stripe_width).is_multiple_of(2);
+            let is_white = (x / stripe_width) % 2 == 0;
             let v = if is_white { 255 } else { 0 };
             pixels.extend_from_slice(&[v, v, v]);
         }
@@ -258,7 +260,7 @@ pub fn test_pattern(width: u32, height: u32) -> Vec<u8> {
                 let cell = 8u32;
                 let cx = x / cell;
                 let cy = (y - 2 * height / 3) / cell;
-                if (cx + cy).is_multiple_of(2) {
+                if (cx + cy) % 2 == 0 {
                     [255, 255, 255]
                 } else {
                     [0, 0, 0]
