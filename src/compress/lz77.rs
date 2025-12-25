@@ -1184,10 +1184,6 @@ mod tests {
         }
     }
 
-    // =========================================================================
-    // Additional coverage tests
-    // =========================================================================
-
     #[test]
     fn test_cost_model_match_cost_various_lengths() {
         let model = CostModel::fixed();

@@ -2350,10 +2350,6 @@ mod tests {
         assert!(splits.len() <= 9); // At most max_blocks - 1 splits
     }
 
-    // =========================================================================
-    // Additional coverage tests
-    // =========================================================================
-
     #[test]
     fn test_rle_code_lengths_empty() {
         let lit_lengths: [u8; 0] = [];
