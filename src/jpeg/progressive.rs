@@ -471,7 +471,7 @@ mod tests {
         assert_eq!(len, 1);
         assert_eq!(bits, 0); // -1 -> 0 in ones' complement for 1 bit
 
-        let (bits, len) = encode_value(-127);
+        let (_bits, len) = encode_value(-127);
         assert_eq!(len, 7);
     }
 

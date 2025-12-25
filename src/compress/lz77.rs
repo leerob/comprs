@@ -1149,7 +1149,7 @@ mod tests {
         // Test a representative value from each length code range
         for length in 3..=258u16 {
             let (symbol, extra_bits) = length_to_symbol(length);
-            assert!(symbol >= 257 && symbol <= 285);
+            assert!((257..=285).contains(&symbol));
             assert!(extra_bits <= 5);
         }
     }
