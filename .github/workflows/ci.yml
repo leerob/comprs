@@ -248,22 +248,16 @@ jobs:
             /usr/local/bin/cjpeg
             /usr/local/bin/pngquant
             /usr/local/bin/oxipng
-          key: compression-tools-v3-${{ runner.os }}
+          key: compression-tools-v6-${{ runner.os }}
 
-      # Install mozjpeg (cjpeg)
+      # Install mozjpeg (cjpeg) - use pre-built binaries via npm
       - name: Install mozjpeg
         if: steps.tools-cache.outputs.cache-hit != 'true'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake nasm libpng-dev
-          git clone --depth 1 https://github.com/mozilla/mozjpeg.git /tmp/mozjpeg
-          cd /tmp/mozjpeg
-          mkdir build && cd build
-          # Disable shared libs to avoid PIC issues with SIMD assembly on x86_64
-          cmake -G"Unix Makefiles" -DCMAKE_INSTALL_PREFIX=/usr/local -DENABLE_SHARED=FALSE ..
-          make -j$(nproc)
-          sudo make install
-          echo "mozjpeg installed: $(cjpeg -version 2>&1 | head -1 || echo 'installed')"
+          npm install mozjpeg
+          sudo cp node_modules/mozjpeg/vendor/cjpeg /usr/local/bin/cjpeg
+          sudo chmod +x /usr/local/bin/cjpeg
+          cjpeg -version 2>&1 | head -1 || echo "mozjpeg installed"
 
       # Install pngquant
       - name: Install pngquant
