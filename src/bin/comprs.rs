@@ -11,7 +11,7 @@ use std::time::Instant;
 use clap::{Parser, ValueEnum};
 
 use comprs::jpeg::{JpegOptions, Subsampling};
-use comprs::png::{FilterStrategy, PngOptions};
+use comprs::png::{decode, FilterStrategy, PngOptions};
 use comprs::ColorType;
 
 /// A minimal-dependency, high-performance image compression tool.
@@ -196,29 +196,13 @@ fn detect_format(path: &PathBuf) -> Result<&'static str, Box<dyn std::error::Err
 
 /// Decode a PNG file.
 fn decode_png(path: &PathBuf) -> Result<DecodedImage, Box<dyn std::error::Error>> {
-    let file = File::open(path)?;
-    let decoder = png::Decoder::new(file);
-    let mut reader = decoder.read_info()?;
-
-    let mut pixels = vec![0u8; reader.output_buffer_size()];
-    let info = reader.next_frame(&mut pixels)?;
-    pixels.truncate(info.buffer_size());
-
-    let color_type = match info.color_type {
-        png::ColorType::Grayscale => ColorType::Gray,
-        png::ColorType::GrayscaleAlpha => ColorType::GrayAlpha,
-        png::ColorType::Rgb => ColorType::Rgb,
-        png::ColorType::Rgba => ColorType::Rgba,
-        png::ColorType::Indexed => {
-            return Err("Indexed PNG not supported. Convert to RGB first.".into())
-        }
-    };
-
+    let bytes = fs::read(path)?;
+    let decoded = decode(&bytes)?;
     Ok(DecodedImage {
-        width: info.width,
-        height: info.height,
-        pixels,
-        color_type,
+        width: decoded.width,
+        height: decoded.height,
+        pixels: decoded.data,
+        color_type: decoded.color_type,
         input_format: "PNG",
     })
 }

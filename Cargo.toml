@@ -31,13 +31,13 @@ default = ["simd", "parallel"]
 simd = []
 parallel = ["rayon"]
 timing = []
-cli = ["clap", "png", "jpeg-decoder"]
+decode = [] # PNG decoding (opt-in)
+cli = ["clap", "jpeg-decoder", "decode"]
 wasm = ["wasm-bindgen", "talc"]
 
 [dependencies]
 rayon = { version = "1.10", optional = true }
 clap = { version = "4.5", features = ["derive"], optional = true }
-png = { version = "0.17", optional = true }
 jpeg-decoder = { version = "0.3", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 talc = { version = "4", optional = true, default-features = false, features = ["lock_api"] }
@@ -73,6 +73,10 @@ harness = false
 
 [[bench]]
 name = "jpeg_mozjpeg"
+harness = false
+
+[[bench]]
+name = "decode_benchmark"
 harness = false
 
 [profile.release]

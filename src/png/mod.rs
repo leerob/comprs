@@ -4,7 +4,12 @@
 
 mod bit_depth;
 pub mod chunk;
+#[cfg(feature = "decode")]
+pub mod decode;
 pub mod filter;
+
+#[cfg(feature = "decode")]
+pub use decode::{decode, DecodedPng};
 
 use crate::color::ColorType;
 use crate::compress::deflate::{deflate_optimal_zlib, deflate_zlib_packed};

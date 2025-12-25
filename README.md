@@ -9,6 +9,7 @@ This is a work-in-progress and exploration of coding agents.
 - **Zero runtime dependencies** — All encoding algorithms implemented from scratch
 - **Entirely in Rust** — No C or C++ codecs required
 - **PNG and JPEG support** — Lossless PNG, lossy PNG (quantization), and lossy JPEG
+- **Opt-in PNG decoding** — Enable the `decode` feature for native decode (excluded from WASM)
 - **Small WASM binary** — 142 KB with competitive compression ([benchmarks](./benches/BENCHMARKS.md))
 
 ## Usage

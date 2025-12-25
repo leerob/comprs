@@ -41,6 +41,10 @@ pub enum Error {
     CompressionError(String),
     /// Invalid restart interval parameter (must be 1-65535).
     InvalidRestartInterval(u16),
+    /// Invalid input while decoding (PNG/DEFLATE/etc.).
+    InvalidDecode(String),
+    /// Unsupported feature during decoding.
+    UnsupportedDecode(String),
 }
 
 impl fmt::Display for Error {
@@ -76,6 +80,8 @@ impl fmt::Display for Error {
                     "Invalid restart interval {interval}: must be 1-65535 (or None to disable)"
                 )
             }
+            Error::InvalidDecode(msg) => write!(f, "Decode error: {msg}"),
+            Error::UnsupportedDecode(msg) => write!(f, "Unsupported decode feature: {msg}"),
         }
     }
 }
