@@ -162,4 +162,163 @@ mod tests {
         assert_eq!(reordered[1], 50); // Position 1 in zigzag is position 1 in natural
         assert_eq!(reordered[2], 30); // Position 2 in zigzag is position 8 in natural
     }
+
+    #[test]
+    fn test_quantization_tables_quality_1() {
+        let tables = QuantizationTables::with_quality(1);
+        // Quality 1 should produce high quantization values
+        assert!(tables.luminance[0] > 100); // DC quantizer should be high
+    }
+
+    #[test]
+    fn test_quantization_tables_quality_100() {
+        let tables = QuantizationTables::with_quality(100);
+        // Quality 100 should produce low quantization values (least loss)
+        assert!(tables.luminance[0] < 20); // DC quantizer should be low
+    }
+
+    #[test]
+    fn test_quantization_tables_quality_clamping() {
+        // Quality 0 should be clamped to 1
+        let tables_q0 = QuantizationTables::with_quality(0);
+        let tables_q1 = QuantizationTables::with_quality(1);
+        assert_eq!(tables_q0.luminance, tables_q1.luminance);
+
+        // Quality 101 should be clamped to 100
+        let tables_q101 = QuantizationTables::with_quality(101);
+        let tables_q100 = QuantizationTables::with_quality(100);
+        assert_eq!(tables_q101.luminance, tables_q100.luminance);
+    }
+
+    #[test]
+    fn test_quantization_tables_default() {
+        let tables = QuantizationTables::default();
+        let tables_q75 = QuantizationTables::with_quality(75);
+        // Default should be quality 75
+        assert_eq!(tables.luminance, tables_q75.luminance);
+    }
+
+    #[test]
+    fn test_quantization_tables_all_formats() {
+        let tables = QuantizationTables::with_quality(85);
+
+        // Check that all table formats are populated
+        assert_eq!(tables.luminance.len(), 64);
+        assert_eq!(tables.chrominance.len(), 64);
+        assert_eq!(tables.luminance_table.len(), 64);
+        assert_eq!(tables.chrominance_table.len(), 64);
+        assert_eq!(tables.luminance_table_int.len(), 64);
+        assert_eq!(tables.chrominance_table_int.len(), 64);
+    }
+
+    #[test]
+    fn test_quantization_values_range() {
+        for q in [1, 25, 50, 75, 100] {
+            let tables = QuantizationTables::with_quality(q);
+            for &val in &tables.luminance {
+                assert!(val >= 1, "Quality {q}: value {val} is zero");
+            }
+            for &val in &tables.chrominance {
+                assert!(val >= 1, "Quality {q}: chrom value {val} is zero");
+            }
+        }
+    }
+
+    #[test]
+    fn test_quantize_block_rounding() {
+        let mut dct = [0.0f32; 64];
+        dct[0] = 16.5; // Should round to 1 when divided by 16
+        dct[1] = 16.4; // Should round to 1 when divided by 16
+        dct[2] = 16.6; // Should round to 1 when divided by 16
+
+        let mut quant = [16.0f32; 64];
+        quant[0] = 16.0;
+
+        let result = quantize_block(&dct, &quant);
+
+        assert_eq!(result[0], 1); // 16.5 / 16 = 1.03125 -> 1
+        assert_eq!(result[1], 1); // 16.4 / 16 = 1.025 -> 1
+        assert_eq!(result[2], 1); // 16.6 / 16 = 1.0375 -> 1
+    }
+
+    #[test]
+    fn test_quantize_block_negative() {
+        let mut dct = [0.0f32; 64];
+        dct[0] = -160.0;
+
+        let quant = [16.0f32; 64];
+        let result = quantize_block(&dct, &quant);
+
+        assert_eq!(result[0], -10); // -160 / 16 = -10
+    }
+
+    #[test]
+    fn test_quantize_block_zeros() {
+        let dct = [0.0f32; 64];
+        let quant = [16.0f32; 64];
+        let result = quantize_block(&dct, &quant);
+
+        for &val in &result {
+            assert_eq!(val, 0);
+        }
+    }
+
+    #[test]
+    fn test_zigzag_complete() {
+        // Verify zigzag covers all 64 positions exactly once
+        let mut seen = [false; 64];
+        for &pos in &ZIGZAG {
+            assert!(!seen[pos], "Duplicate position {pos} in zigzag");
+            seen[pos] = true;
+        }
+        for (i, &s) in seen.iter().enumerate() {
+            assert!(s, "Position {i} missing from zigzag");
+        }
+    }
+
+    #[test]
+    fn test_zigzag_reorder_all_values() {
+        // Create block with unique values at each position
+        let mut block = [0i16; 64];
+        for i in 0..64 {
+            block[i] = i as i16;
+        }
+
+        let reordered = zigzag_reorder(&block);
+
+        // Verify all values appear (may be in different order)
+        let mut seen = [false; 64];
+        for &val in &reordered {
+            seen[val as usize] = true;
+        }
+        for (i, &s) in seen.iter().enumerate() {
+            assert!(s, "Value {i} missing after zigzag reorder");
+        }
+    }
+
+    #[test]
+    fn test_quality_50_is_identity() {
+        // Quality 50 should use scale factor 100 (no change to standard tables)
+        let tables = QuantizationTables::with_quality(50);
+
+        // DC luminance should be exactly 16 (from standard table)
+        assert_eq!(tables.luminance[0], 16);
+    }
+
+    #[test]
+    fn test_float_and_int_tables_consistent() {
+        let tables = QuantizationTables::with_quality(85);
+
+        // Float and int tables should have same values
+        for i in 0..64 {
+            assert_eq!(
+                tables.luminance_table[i] as u16, tables.luminance_table_int[i],
+                "Mismatch at position {i}"
+            );
+            assert_eq!(
+                tables.chrominance_table[i] as u16, tables.chrominance_table_int[i],
+                "Chroma mismatch at position {i}"
+            );
+        }
+    }
 }

@@ -424,4 +424,194 @@ mod tests {
         assert!(high_q[1].abs() <= 5);
         assert!(low_q[1].abs() <= 5);
     }
+
+    #[test]
+    fn test_category_edge_cases() {
+        // Edge cases for category calculation
+        assert_eq!(category(i16::MAX), 15);
+        assert_eq!(category(i16::MIN + 1), 15);
+        assert_eq!(category(16383), 14);
+        assert_eq!(category(-16384), 15);
+    }
+
+    #[test]
+    fn test_generate_candidates_negative() {
+        let candidates = generate_candidates(-3.7);
+        assert!(candidates.contains(&0));
+        assert!(candidates.contains(&-3) || candidates.contains(&-4));
+    }
+
+    #[test]
+    fn test_generate_candidates_exact_integer() {
+        let candidates = generate_candidates(5.0);
+        assert!(candidates.contains(&0));
+        assert!(candidates.contains(&5));
+    }
+
+    #[test]
+    fn test_generate_candidates_small() {
+        // Small values should include 0 and surrounding integers
+        let candidates = generate_candidates(0.5);
+        assert!(candidates.contains(&0));
+        assert!(candidates.contains(&1) || candidates.is_empty());
+    }
+
+    #[test]
+    fn test_trellis_quantize_single_ac() {
+        let mut dct = [0.0f32; 64];
+        dct[0] = 400.0; // DC
+        dct[1] = 50.0; // Single AC coefficient
+
+        let quant = [16.0f32; 64];
+
+        let result = trellis_quantize(&dct, &quant, None);
+
+        // DC should be quantized correctly
+        assert_eq!(result[0], 25); // 400 / 16 = 25
+    }
+
+    #[test]
+    fn test_trellis_quantize_preserves_dc() {
+        // Test that DC is always preserved (not subject to trellis optimization)
+        let mut dct = [0.0f32; 64];
+        dct[0] = 160.0; // 160/16 = 10
+
+        let quant = [16.0f32; 64];
+
+        let result = trellis_quantize(&dct, &quant, Some(10.0)); // High lambda
+
+        // DC should still be 10 regardless of lambda
+        assert_eq!(result[0], 10);
+    }
+
+    #[test]
+    fn test_trellis_quantize_high_frequency() {
+        // Test behavior with high-frequency coefficients
+        let mut dct = [0.0f32; 64];
+        dct[0] = 200.0; // DC
+                        // Set high-frequency coefficients (late in zigzag order)
+        dct[63] = 32.0;
+        dct[62] = 48.0;
+
+        let quant = [16.0f32; 64];
+
+        let result = trellis_quantize(&dct, &quant, None);
+
+        // Should produce valid quantized values
+        assert_eq!(result[0], 13); // 200 / 16 = 12.5 -> 13
+    }
+
+    #[test]
+    fn test_trellis_quantize_near_threshold() {
+        // Test coefficients near the quantization threshold
+        let mut dct = [0.0f32; 64];
+        dct[0] = 160.0;
+        // Coefficients that are just above/below threshold
+        dct[1] = 8.1; // Just above 0.5 * quant = 8
+        dct[2] = 7.9; // Just below 0.5 * quant = 8
+
+        let mut quant = [16.0f32; 64];
+        quant[1] = 16.0;
+        quant[2] = 16.0;
+
+        let result = trellis_quantize(&dct, &quant, None);
+
+        // Both should potentially quantize to 0 or 1 based on rate-distortion tradeoff
+        assert!(result[1].abs() <= 1);
+        assert!(result[2].abs() <= 1);
+    }
+
+    #[test]
+    fn test_estimate_ac_huffman_length_common_symbols() {
+        // Test that common symbols get reasonable length estimates
+        assert!(estimate_ac_huffman_length(0x00) <= 4.0); // EOB
+        assert!(estimate_ac_huffman_length(0x01) <= 3.0); // (0,1)
+        assert!(estimate_ac_huffman_length(0xF0) >= 8.0); // ZRL is rare
+    }
+
+    #[test]
+    fn test_trellis_quantize_negative_coefficients() {
+        let mut dct = [0.0f32; 64];
+        dct[0] = -100.0;
+        dct[1] = -50.0;
+        dct[2] = 30.0;
+
+        let quant = [10.0f32; 64];
+
+        let result = trellis_quantize(&dct, &quant, None);
+
+        // DC should handle negative values
+        assert_eq!(result[0], -10); // -100 / 10 = -10
+    }
+
+    #[test]
+    fn test_adaptive_quality_boundaries() {
+        let mut dct = [0.0f32; 64];
+        dct[0] = 500.0;
+        let quant = [16.0f32; 64];
+
+        // Test quality boundaries
+        let _q1 = trellis_quantize_adaptive(&dct, &quant, 1);
+        let _q50 = trellis_quantize_adaptive(&dct, &quant, 50);
+        let _q80 = trellis_quantize_adaptive(&dct, &quant, 80);
+        let _q100 = trellis_quantize_adaptive(&dct, &quant, 100);
+
+        // All should produce valid DC
+        assert_eq!(_q1[0], 31); // 500 / 16 = 31.25 -> 31
+        assert_eq!(_q100[0], 31);
+    }
+
+    #[test]
+    fn test_trellis_state_default() {
+        let state = TrellisState::default();
+        assert_eq!(state.cost, f32::INFINITY);
+        assert_eq!(state.zero_run, 0);
+        assert_eq!(state.parent, 0);
+        assert_eq!(state.value, 0);
+    }
+
+    #[test]
+    fn test_trellis_with_custom_lambda() {
+        let mut dct = [0.0f32; 64];
+        dct[0] = 800.0;
+        for i in 1..64 {
+            dct[i] = 10.0; // Small uniform coefficients
+        }
+
+        let quant = [16.0f32; 64];
+
+        // Very low lambda should preserve more coefficients
+        let result_low = trellis_quantize(&dct, &quant, Some(0.1));
+
+        // Very high lambda should zero more coefficients
+        let result_high = trellis_quantize(&dct, &quant, Some(10.0));
+
+        // Count non-zero AC coefficients
+        let nonzero_low: usize = result_low.iter().skip(1).filter(|&&x| x != 0).count();
+        let nonzero_high: usize = result_high.iter().skip(1).filter(|&&x| x != 0).count();
+
+        // Higher lambda should produce sparser result
+        assert!(
+            nonzero_high <= nonzero_low,
+            "High lambda ({nonzero_high}) should be sparser than low ({nonzero_low})"
+        );
+    }
+
+    #[test]
+    fn test_trellis_zigzag_ordering() {
+        // Verify that trellis processes coefficients in zigzag order
+        let mut dct = [0.0f32; 64];
+        dct[0] = 200.0; // DC (position 0)
+        dct[1] = 50.0; // Should map to zigzag position 1
+        dct[8] = 40.0; // Should map to zigzag position 2
+
+        let quant = [10.0f32; 64];
+
+        let result = trellis_quantize(&dct, &quant, Some(0.5));
+
+        // DC should be at position 0
+        assert_eq!(result[0], 20);
+        // Just verify the function completed and returned a valid array
+        assert_eq!(result.len(), 64);
+    }
 }

@@ -2567,4 +2567,297 @@ mod tests {
             "tRNS length should be 1..=2, got {trns_len}"
         );
     }
+
+    // =========================================================================
+    // Tests for internal palette functions
+    // =========================================================================
+
+    #[test]
+    fn test_color_box_from_colors_single() {
+        let colors = vec![ColorCount {
+            rgba: [100, 150, 200, 255],
+            count: 10,
+        }];
+        let b = ColorBox::from_colors(colors);
+
+        assert_eq!(b.r_min, 100);
+        assert_eq!(b.r_max, 100);
+        assert_eq!(b.g_min, 150);
+        assert_eq!(b.g_max, 150);
+    }
+
+    #[test]
+    fn test_color_box_from_colors_range() {
+        let colors = vec![
+            ColorCount {
+                rgba: [0, 50, 100, 255],
+                count: 5,
+            },
+            ColorCount {
+                rgba: [100, 100, 200, 255],
+                count: 5,
+            },
+        ];
+        let b = ColorBox::from_colors(colors);
+
+        assert_eq!(b.r_min, 0);
+        assert_eq!(b.r_max, 100);
+        assert_eq!(b.g_min, 50);
+        assert_eq!(b.g_max, 100);
+        assert_eq!(b.b_min, 100);
+        assert_eq!(b.b_max, 200);
+    }
+
+    #[test]
+    fn test_color_box_range() {
+        let colors = vec![
+            ColorCount {
+                rgba: [0, 0, 0, 0],
+                count: 1,
+            },
+            ColorCount {
+                rgba: [255, 100, 50, 255],
+                count: 1,
+            },
+        ];
+        let b = ColorBox::from_colors(colors);
+
+        let (channel, max_range) = b.range();
+        // R has range 255, which ties with A (also 255).
+        // Since the function only replaces on strictly greater, R wins (channel 0)
+        assert_eq!(channel, 0);
+        assert_eq!(max_range, 255);
+    }
+
+    #[test]
+    fn test_color_box_can_split() {
+        // Single color cannot split
+        let single = ColorBox::from_colors(vec![ColorCount {
+            rgba: [100, 100, 100, 255],
+            count: 10,
+        }]);
+        assert!(!single.can_split());
+
+        // Multiple colors can split
+        let multiple = ColorBox::from_colors(vec![
+            ColorCount {
+                rgba: [0, 0, 0, 255],
+                count: 5,
+            },
+            ColorCount {
+                rgba: [255, 255, 255, 255],
+                count: 5,
+            },
+        ]);
+        assert!(multiple.can_split());
+    }
+
+    #[test]
+    fn test_color_box_split() {
+        let colors = vec![
+            ColorCount {
+                rgba: [0, 0, 0, 255],
+                count: 5,
+            },
+            ColorCount {
+                rgba: [128, 0, 0, 255],
+                count: 5,
+            },
+            ColorCount {
+                rgba: [255, 0, 0, 255],
+                count: 5,
+            },
+        ];
+        let b = ColorBox::from_colors(colors);
+
+        let (left, right) = b.split();
+
+        // Both boxes should have at least one color
+        assert!(!left.colors.is_empty());
+        assert!(!right.colors.is_empty());
+
+        // Combined they should have all 3 colors
+        assert_eq!(left.colors.len() + right.colors.len(), 3);
+    }
+
+    #[test]
+    fn test_color_box_make_palette_entry() {
+        // Single color should return that color
+        let single = ColorBox::from_colors(vec![ColorCount {
+            rgba: [100, 150, 200, 255],
+            count: 10,
+        }]);
+        assert_eq!(single.make_palette_entry(), [100, 150, 200, 255]);
+
+        // Multiple colors should average weighted by count
+        let weighted = ColorBox::from_colors(vec![
+            ColorCount {
+                rgba: [0, 0, 0, 255],
+                count: 3,
+            },
+            ColorCount {
+                rgba: [255, 255, 255, 255],
+                count: 1,
+            },
+        ]);
+        let entry = weighted.make_palette_entry();
+        // (0*3 + 255*1) / 4 = 63.75 -> 63
+        assert_eq!(entry[0], 63);
+        assert_eq!(entry[1], 63);
+        assert_eq!(entry[2], 63);
+    }
+
+    #[test]
+    fn test_color_box_empty() {
+        let empty = ColorBox::from_colors(vec![]);
+        // Empty box should return default color
+        assert_eq!(empty.make_palette_entry(), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn test_median_cut_palette_empty() {
+        let palette = median_cut_palette(vec![], 256);
+        // Empty input should return single default color
+        assert_eq!(palette.len(), 1);
+        assert_eq!(palette[0], [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn test_median_cut_palette_single_color() {
+        let colors = vec![ColorCount {
+            rgba: [255, 0, 0, 255],
+            count: 100,
+        }];
+        let palette = median_cut_palette(colors, 256);
+        assert_eq!(palette.len(), 1);
+        assert_eq!(palette[0], [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn test_median_cut_palette_two_colors() {
+        let colors = vec![
+            ColorCount {
+                rgba: [255, 0, 0, 255],
+                count: 50,
+            },
+            ColorCount {
+                rgba: [0, 0, 255, 255],
+                count: 50,
+            },
+        ];
+        let palette = median_cut_palette(colors, 256);
+
+        // Should produce 2 colors
+        assert_eq!(palette.len(), 2);
+    }
+
+    #[test]
+    fn test_median_cut_palette_max_colors_limit() {
+        // Many colors should be reduced to max_colors
+        let colors: Vec<ColorCount> = (0..100)
+            .map(|i| ColorCount {
+                rgba: [i as u8 * 2, i as u8, (255 - i) as u8, 255],
+                count: 1,
+            })
+            .collect();
+
+        let palette = median_cut_palette(colors, 16);
+        assert!(palette.len() <= 16, "Palette should be at most 16 colors");
+    }
+
+    #[test]
+    fn test_nearest_palette_index_exact_match() {
+        let palette = vec![[255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 255, 255]];
+
+        assert_eq!(nearest_palette_index([255, 0, 0, 255], &palette), 0);
+        assert_eq!(nearest_palette_index([0, 255, 0, 255], &palette), 1);
+        assert_eq!(nearest_palette_index([0, 0, 255, 255], &palette), 2);
+    }
+
+    #[test]
+    fn test_nearest_palette_index_closest() {
+        let palette = vec![[0, 0, 0, 255], [255, 255, 255, 255]];
+
+        // Dark gray should match black
+        assert_eq!(nearest_palette_index([50, 50, 50, 255], &palette), 0);
+        // Light gray should match white
+        assert_eq!(nearest_palette_index([200, 200, 200, 255], &palette), 1);
+    }
+
+    #[test]
+    fn test_palette_lut_basic() {
+        let palette = vec![
+            [255, 0, 0, 255],   // red
+            [0, 255, 0, 255],   // green
+            [0, 0, 255, 255],   // blue
+            [255, 255, 0, 255], // yellow
+        ];
+        let lut = PaletteLut::new(palette);
+
+        // Red should map to index 0
+        assert_eq!(lut.lookup(255, 0, 0, 255), 0);
+        // Green should map to index 1
+        assert_eq!(lut.lookup(0, 255, 0, 255), 1);
+        // Blue should map to index 2
+        assert_eq!(lut.lookup(0, 0, 255, 255), 2);
+    }
+
+    #[test]
+    fn test_palette_lut_transparent() {
+        let palette = vec![
+            [255, 0, 0, 255], // opaque red
+            [0, 255, 0, 128], // semi-transparent green
+        ];
+        let lut = PaletteLut::new(palette);
+
+        // Semi-transparent color should use fallback computation
+        let idx = lut.lookup(0, 255, 0, 100);
+        // Should find the closest match (index 1 - green)
+        assert_eq!(idx, 1);
+    }
+
+    #[test]
+    fn test_all_gray_rgb_true() {
+        let data = vec![100, 100, 100, 200, 200, 200];
+        assert!(all_gray_rgb(&data));
+    }
+
+    #[test]
+    fn test_all_gray_rgb_false() {
+        let data = vec![100, 100, 100, 200, 200, 201]; // Last pixel not gray
+        assert!(!all_gray_rgb(&data));
+    }
+
+    #[test]
+    fn test_analyze_rgba_all_opaque() {
+        let data = vec![
+            100, 100, 100, 255, // gray opaque
+            200, 200, 200, 255, // gray opaque
+        ];
+        let (all_opaque, all_gray) = analyze_rgba(&data);
+        assert!(all_gray);
+        assert!(all_opaque);
+    }
+
+    #[test]
+    fn test_analyze_rgba_not_opaque() {
+        let data = vec![
+            100, 100, 100, 255, // gray opaque
+            200, 200, 200, 128, // gray semi-transparent
+        ];
+        let (all_opaque, all_gray) = analyze_rgba(&data);
+        assert!(all_gray);
+        assert!(!all_opaque);
+    }
+
+    #[test]
+    fn test_analyze_rgba_not_gray() {
+        let data = vec![
+            100, 100, 100, 255, // gray
+            200, 150, 200, 255, // not gray (G != R)
+        ];
+        let (all_opaque, all_gray) = analyze_rgba(&data);
+        assert!(!all_gray);
+        assert!(all_opaque);
+    }
 }

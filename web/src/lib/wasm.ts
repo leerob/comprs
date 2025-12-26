@@ -19,12 +19,12 @@ export type CompressResult = {
 };
 
 // Dynamically imported WASM module (client-side only)
-let wasmModule: typeof import('$lib/comprs-wasm/comprs.js') | null = null;
+let wasmModule: typeof import('$lib/pixo-wasm/pixo.js') | null = null;
 let initialized: Promise<void> | null = null;
 
 export function initWasm() {
 	if (!initialized) {
-		initialized = import('$lib/comprs-wasm/comprs.js').then(async (mod) => {
+		initialized = import('$lib/pixo-wasm/pixo.js').then(async (mod) => {
 			await mod.default();
 			wasmModule = mod;
 		});

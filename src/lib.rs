@@ -1,4 +1,4 @@
-//! # comprs
+//! # pixo
 //!
 //! A minimal-dependency, high-performance image compression library.
 //!
@@ -21,7 +21,7 @@
 //! ## Example
 //!
 //! ```rust
-//! use comprs::{png, jpeg, ColorType};
+//! use pixo::{png, jpeg, ColorType};
 //!
 //! // Encode as PNG
 //! let pixels: Vec<u8> = vec![255, 0, 0, 255]; // 1x1 red RGBA pixel

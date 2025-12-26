@@ -8,8 +8,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const workspaceRoot = join(__dirname, '..', '..');
-const outDir = join(__dirname, '..', 'src', 'lib', 'comprs-wasm');
-const wasmPath = join(workspaceRoot, 'target', 'wasm32-unknown-unknown', 'release', 'comprs.wasm');
+const outDir = join(__dirname, '..', 'src', 'lib', 'pixo-wasm');
+const wasmPath = join(workspaceRoot, 'target', 'wasm32-unknown-unknown', 'release', 'pixo.wasm');
 
 function formatError(message) {
 	console.error(`\n[wasm:build] ${message}`);
@@ -94,17 +94,17 @@ try {
 	console.log('[wasm:build] Running wasm-bindgen...');
 	execFileSync(
 		bindgen,
-		['--target', 'web', '--out-dir', outDir, '--out-name', 'comprs', wasmPath],
+		['--target', 'web', '--out-dir', outDir, '--out-name', 'pixo', wasmPath],
 		{ cwd: workspaceRoot, stdio: 'inherit' }
 	);
 
 	removeGitIgnore();
 
-	if (!existsSync(wasmPath) || !existsSync(join(outDir, 'comprs_bg.wasm'))) {
+	if (!existsSync(wasmPath) || !existsSync(join(outDir, 'pixo_bg.wasm'))) {
 		formatError('Build finished, but output files are missing.');
 	}
 
-	const wasmFile = join(outDir, 'comprs_bg.wasm');
+	const wasmFile = join(outDir, 'pixo_bg.wasm');
 	const wasmOpt = findWasmOpt();
 	if (wasmOpt) {
 		const pre = statSync(wasmFile).size;

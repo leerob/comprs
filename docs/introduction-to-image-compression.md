@@ -147,7 +147,7 @@ This means:
 
 Huffman coding achieves optimality (to the nearest bit) for symbol-by-symbol encoding.
 
-## The comprs Pipeline
+## The pixo Pipeline
 
 This library implements two complete encoding pipelines:
 

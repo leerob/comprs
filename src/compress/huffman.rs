@@ -453,4 +453,214 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_build_codes_two_symbols() {
+        let freqs = [10, 5];
+        let codes = build_codes(&freqs, 15);
+
+        assert_eq!(codes.len(), 2);
+        // Both should have length 1 (perfect binary tree)
+        assert_eq!(codes[0].length, 1);
+        assert_eq!(codes[1].length, 1);
+        // They should have different codes
+        assert_ne!(codes[0].code, codes[1].code);
+    }
+
+    #[test]
+    fn test_build_codes_equal_frequencies() {
+        let freqs = [10, 10, 10, 10];
+        let codes = build_codes(&freqs, 15);
+
+        // All should have the same length (balanced tree)
+        let lengths: Vec<u8> = codes.iter().map(|c| c.length).collect();
+        assert!(lengths.iter().all(|&l| l == 2));
+    }
+
+    #[test]
+    fn test_build_codes_large_alphabet() {
+        // Test with DEFLATE literal alphabet size
+        let mut freqs = vec![1u32; 288];
+        freqs[0] = 100;
+        freqs[32] = 50;
+        freqs[101] = 25;
+
+        let codes = build_codes(&freqs, 15);
+        assert_eq!(codes.len(), 288);
+
+        // More frequent symbols should have shorter codes
+        assert!(codes[0].length <= codes[255].length);
+    }
+
+    #[test]
+    fn test_build_codes_max_length_7() {
+        // Test with DEFLATE distance max length
+        let freqs = vec![1u32; 30];
+        let codes = build_codes(&freqs, 7);
+
+        for code in &codes {
+            if code.length > 0 {
+                assert!(code.length <= 7);
+            }
+        }
+    }
+
+    #[test]
+    fn test_generate_canonical_codes_all_zeros() {
+        let lengths = [0u8; 10];
+        let codes = generate_canonical_codes(&lengths);
+
+        assert_eq!(codes.len(), 10);
+        for code in &codes {
+            assert_eq!(code.length, 0);
+            assert_eq!(code.code, 0);
+        }
+    }
+
+    #[test]
+    fn test_generate_canonical_codes_all_same_length() {
+        let lengths = [3u8; 8];
+        let codes = generate_canonical_codes(&lengths);
+
+        // All have length 3
+        for code in &codes {
+            assert_eq!(code.length, 3);
+        }
+
+        // Codes should be sequential
+        for i in 0..8 {
+            assert_eq!(codes[i].code, i as u16);
+        }
+    }
+
+    #[test]
+    fn test_fixed_codes_cached() {
+        // First access creates the codes
+        let codes1 = fixed_literal_codes();
+        // Second access should return the same reference
+        let codes2 = fixed_literal_codes();
+        assert!(std::ptr::eq(codes1, codes2));
+    }
+
+    #[test]
+    fn test_fixed_distance_codes_cached() {
+        let codes1 = fixed_distance_codes();
+        let codes2 = fixed_distance_codes();
+        assert!(std::ptr::eq(codes1, codes2));
+    }
+
+    #[test]
+    fn test_build_codes_kraft_inequality() {
+        // Kraft inequality: sum of 2^(-length) <= 1
+        // For our representation: sum of 2^(max_length - length) <= 2^max_length
+        let freqs = [10, 5, 3, 2, 1, 1, 1, 1];
+        let codes = build_codes(&freqs, 15);
+
+        let kraft_sum: u32 = codes
+            .iter()
+            .filter(|c| c.length > 0)
+            .map(|c| 1u32 << (15 - c.length as u32))
+            .sum();
+
+        assert!(kraft_sum <= (1u32 << 15), "Kraft inequality violated");
+    }
+
+    #[test]
+    fn test_build_codes_unique_codes() {
+        let freqs = [10, 5, 3, 2, 1, 1, 1, 1];
+        let codes = build_codes(&freqs, 15);
+
+        // All non-zero codes should be unique (within same length)
+        let mut length_codes: std::collections::HashMap<u8, Vec<u16>> =
+            std::collections::HashMap::new();
+
+        for code in &codes {
+            if code.length > 0 {
+                length_codes.entry(code.length).or_default().push(code.code);
+            }
+        }
+
+        for (length, codes) in length_codes {
+            let unique: std::collections::HashSet<_> = codes.iter().collect();
+            assert_eq!(
+                unique.len(),
+                codes.len(),
+                "Duplicate codes at length {length}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_build_codes_very_skewed_frequencies() {
+        // One very common symbol, many rare ones
+        let mut freqs = vec![1u32; 100];
+        freqs[0] = 10000;
+
+        let codes = build_codes(&freqs, 15);
+
+        // The common symbol should have a short code
+        assert!(codes[0].length < 5);
+        // Rare symbols should have longer codes
+        for code in codes.iter().skip(1) {
+            if code.length > 0 {
+                assert!(code.length >= codes[0].length);
+            }
+        }
+    }
+
+    #[test]
+    fn test_fixed_literal_codes_eob() {
+        let codes = fixed_literal_codes();
+        // End of block (256) should have a valid code
+        assert!(codes[256].length > 0);
+    }
+
+    #[test]
+    fn test_fixed_literal_codes_length_symbols() {
+        let codes = fixed_literal_codes();
+        // Length symbols (257-285) should have valid codes
+        for i in 257..=285 {
+            assert!(codes[i].length > 0, "Length symbol {i} has no code");
+        }
+    }
+
+    #[test]
+    fn test_node_ordering() {
+        // Test that nodes are ordered correctly for the priority queue
+        let node1 = Node {
+            frequency: 10,
+            symbol: Some(1),
+            left: None,
+            right: None,
+        };
+        let node2 = Node {
+            frequency: 20,
+            symbol: Some(2),
+            left: None,
+            right: None,
+        };
+
+        // Lower frequency should come first
+        assert!(node1 < node2);
+    }
+
+    #[test]
+    fn test_node_ordering_same_frequency() {
+        // Nodes with same frequency should be ordered by symbol
+        let node1 = Node {
+            frequency: 10,
+            symbol: Some(1),
+            left: None,
+            right: None,
+        };
+        let node2 = Node {
+            frequency: 10,
+            symbol: Some(2),
+            left: None,
+            right: None,
+        };
+
+        // Lower symbol should come first when frequencies are equal
+        assert!(node1 < node2);
+    }
 }

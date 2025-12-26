@@ -5,9 +5,9 @@
 
 #![allow(clippy::uninlined_format_args)]
 
-use comprs::compress::crc32::crc32;
-use comprs::{png, ColorType, Error};
 use image::GenericImageView;
+use pixo::compress::crc32::crc32;
+use pixo::{png, ColorType, Error};
 use proptest::prelude::*;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 mod support;

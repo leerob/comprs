@@ -1,6 +1,6 @@
-//! comprs CLI - Image compression tool
+//! pixo CLI - Image compression tool
 //!
-//! A command-line interface for the comprs image compression library.
+//! A command-line interface for the pixo image compression library.
 //! Supports PNG, JPEG, and PPM/PGM input formats.
 
 use std::fs::{self, File};
@@ -10,26 +10,26 @@ use std::time::Instant;
 
 use clap::{Parser, ValueEnum};
 
-use comprs::jpeg::{JpegOptions, Subsampling};
-use comprs::png::{FilterStrategy, PngOptions};
-use comprs::ColorType;
+use pixo::jpeg::{JpegOptions, Subsampling};
+use pixo::png::{FilterStrategy, PngOptions};
+use pixo::ColorType;
 
 /// A minimal-dependency, high-performance image compression tool.
 ///
 /// Supports PNG, JPEG, and PPM/PGM input formats.
 #[derive(Parser, Debug)]
-#[command(name = "comprs")]
+#[command(name = "pixo")]
 #[command(author, version, about, long_about = None)]
 #[command(after_help = "\
 EXAMPLES:
-    comprs photo.png -o photo.jpg              Convert PNG to JPEG
-    comprs photo.png -o photo.jpg -q 90        JPEG with higher quality
-    comprs input.jpg -o output.png -c 9        Maximum PNG compression
-    comprs image.png --png-preset max          Use PNG optimization preset
-    comprs photo.png -o gray.jpg --grayscale   Convert to grayscale
-    comprs photo.png -v                        Verbose output with timing
+    pixo photo.png -o photo.jpg              Convert PNG to JPEG
+    pixo photo.png -o photo.jpg -q 90        JPEG with higher quality
+    pixo input.jpg -o output.png -c 9        Maximum PNG compression
+    pixo image.png --png-preset max          Use PNG optimization preset
+    pixo photo.png -o gray.jpg --grayscale   Convert to grayscale
+    pixo photo.png -v                        Verbose output with timing
 
-More info: https://github.com/leerob/comprs/blob/main/docs/cli.md")]
+More info: https://github.com/leerob/pixo/blob/main/docs/cli.md")]
 struct Args {
     /// Input image file (PNG, JPEG, PPM, or PGM)
     #[arg(value_name = "INPUT")]
@@ -577,17 +577,17 @@ fn main() {
 }
 
 fn print_concise_help() {
-    eprintln!("comprs - A minimal-dependency, high-performance image compression tool");
+    eprintln!("pixo - A minimal-dependency, high-performance image compression tool");
     eprintln!();
     eprintln!("USAGE:");
-    eprintln!("    comprs <INPUT> [OPTIONS]");
+    eprintln!("    pixo <INPUT> [OPTIONS]");
     eprintln!();
     eprintln!("EXAMPLES:");
-    eprintln!("    comprs photo.png -o photo.jpg         Convert PNG to JPEG");
-    eprintln!("    comprs photo.png -o photo.jpg -q 90   JPEG with higher quality");
-    eprintln!("    comprs input.jpg -o output.png -c 9   Maximum PNG compression");
+    eprintln!("    pixo photo.png -o photo.jpg         Convert PNG to JPEG");
+    eprintln!("    pixo photo.png -o photo.jpg -q 90   JPEG with higher quality");
+    eprintln!("    pixo input.jpg -o output.png -c 9   Maximum PNG compression");
     eprintln!();
-    eprintln!("For more options, run: comprs --help");
+    eprintln!("For more options, run: pixo --help");
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -735,7 +735,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
 
-            comprs::png::encode_into(
+            pixo::png::encode_into(
                 &mut output_data,
                 &pixels,
                 width,
@@ -766,7 +766,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     options.optimize_huffman
                 );
             }
-            comprs::jpeg::encode_with_options_into(
+            pixo::jpeg::encode_with_options_into(
                 &mut output_data,
                 &pixels,
                 width,

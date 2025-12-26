@@ -73,20 +73,10 @@ pub fn apply_filters(
         strategy = FilterStrategy::Sub;
     }
 
-    // Fast high-entropy detection: if the first row has almost no identical
-    // neighboring bytes (indicative of noisy data) and the image is reasonably
-    // large, skip adaptive filtering entirely and use None to save scoring work.
-    if area >= 16_384
-        && matches!(
-            strategy,
-            FilterStrategy::Adaptive | FilterStrategy::AdaptiveFast
-        )
-    {
-        let first_row = &data[..row_bytes];
-        if is_high_entropy_row(first_row) {
-            strategy = FilterStrategy::None;
-        }
-    }
+    // Note: High-entropy row detection was previously here to skip adaptive
+    // filtering for noisy data. However, checking only the first row is not
+    // sufficient to determine the optimal strategy for the entire image.
+    // For now, we rely on per-row adaptive decisions instead.
 
     // Parallel path (only for adaptive; other strategies are trivial)
     #[cfg(feature = "parallel")]
@@ -162,7 +152,7 @@ pub fn apply_filters(
                     row,
                     if y == 0 { &zero_row[..] } else { prev_row },
                     bytes_per_pixel,
-                    options.filter_strategy,
+                    strategy,
                     &mut output,
                     &mut adaptive_scratch,
                 );
@@ -553,6 +543,7 @@ fn score_filter(filtered: &[u8]) -> u64 {
 ///
 /// This avoids misclassifying smooth gradients (constant delta).
 /// Guarded to rows >= 1024 bytes to avoid noise.
+#[allow(dead_code)]
 fn is_high_entropy_row(row: &[u8]) -> bool {
     if row.len() < 1024 {
         return false;
@@ -680,5 +671,270 @@ mod tests {
         // Filter bytes should be one of the defined filters
         assert!(matches!(filtered[0], FILTER_SUB | FILTER_UP | FILTER_PAETH));
         assert!(matches!(filtered[7], FILTER_SUB | FILTER_UP | FILTER_PAETH));
+    }
+
+    #[test]
+    fn test_filter_average() {
+        let row = vec![100, 100, 100];
+        let prev = vec![50, 50, 50];
+        let mut output = Vec::new();
+        filter_average(&row, &prev, 1, &mut output);
+
+        // First byte: left=0, above=50, avg=25
+        assert_eq!(output[0], 100u8.wrapping_sub(25)); // 75
+                                                       // Second byte: left=100, above=50, avg=75
+        assert_eq!(output[1], 100u8.wrapping_sub(75)); // 25
+                                                       // Third byte: left=100, above=50, avg=75
+        assert_eq!(output[2], 100u8.wrapping_sub(75)); // 25
+    }
+
+    #[test]
+    fn test_filter_paeth() {
+        let row = vec![100, 100, 100];
+        let prev = vec![50, 50, 50];
+        let mut output = Vec::new();
+        filter_paeth(&row, &prev, 1, &mut output);
+
+        // First byte: left=0, above=50, upper_left=0
+        // p = 0 + 50 - 0 = 50
+        // pa = |50-0| = 50, pb = |50-50| = 0, pc = |50-0| = 50
+        // pb is smallest, return b=50
+        assert_eq!(output[0], 100u8.wrapping_sub(50)); // 50
+
+        // All output should be valid filtered values
+        assert_eq!(output.len(), 3);
+    }
+
+    #[test]
+    fn test_score_filter_all_zeros() {
+        let data = vec![0u8; 100];
+        let score = score_filter(&data);
+        assert_eq!(score, 0);
+    }
+
+    #[test]
+    fn test_score_filter_high_values() {
+        // 0x80 as i8 is -128, abs = 128
+        let data = vec![0x80u8; 10];
+        let score = score_filter(&data);
+        assert_eq!(score, 128 * 10);
+    }
+
+    #[test]
+    fn test_score_filter_mixed() {
+        // Mix of positive and negative values (as i8)
+        let data = vec![1, 0xFF, 2, 0xFE]; // 1, -1, 2, -2 as i8
+        let score = score_filter(&data);
+        // abs values: 1, 1, 2, 2 = 6
+        assert_eq!(score, 6);
+    }
+
+    #[test]
+    fn test_is_high_entropy_row_short() {
+        // Short rows should not be considered high entropy
+        let row = vec![0u8; 100];
+        assert!(!is_high_entropy_row(&row));
+    }
+
+    #[test]
+    fn test_is_high_entropy_row_uniform() {
+        // Uniform data has many equal neighbors - not high entropy
+        let row = vec![42u8; 2000];
+        assert!(!is_high_entropy_row(&row));
+    }
+
+    #[test]
+    fn test_is_high_entropy_row_gradient() {
+        // Gradient has constant delta - not high entropy
+        let row: Vec<u8> = (0..2000).map(|i| (i % 256) as u8).collect();
+        assert!(!is_high_entropy_row(&row));
+    }
+
+    #[test]
+    fn test_paeth_predictor_edge_cases() {
+        // Edge case: a closest to p
+        assert_eq!(paeth_predictor(100, 0, 0), 100);
+        // Edge case: b closest to p
+        assert_eq!(paeth_predictor(0, 100, 0), 100);
+        // Edge case: c closest to p
+        assert_eq!(paeth_predictor(100, 100, 100), 100);
+        // Edge case: boundary values
+        assert_eq!(paeth_predictor(255, 0, 0), 255);
+        assert_eq!(paeth_predictor(0, 255, 0), 255);
+    }
+
+    #[test]
+    fn test_paeth_predictor_tie_breaking() {
+        // When pa == pb, a should be chosen
+        // p = a + b - c, if pa <= pb and pa <= pc, return a
+        // a=100, b=100, c=100: p=100, pa=0, pb=0, pc=0
+        // pa <= pb is true, pa <= pc is true, return a
+        assert_eq!(paeth_predictor(100, 100, 100), 100);
+
+        // a=50, b=100, c=75: p = 50+100-75 = 75
+        // pa = |75-50| = 25, pb = |75-100| = 25, pc = |75-75| = 0
+        // pc is smallest, return c
+        assert_eq!(paeth_predictor(50, 100, 75), 75);
+    }
+
+    #[test]
+    fn test_adaptive_scratch_reuse() {
+        let mut scratch = AdaptiveScratch::new(100);
+        scratch.none.extend_from_slice(&[1, 2, 3]);
+        scratch.sub.extend_from_slice(&[4, 5, 6]);
+
+        assert_eq!(scratch.none.len(), 3);
+        assert_eq!(scratch.sub.len(), 3);
+
+        scratch.clear();
+
+        assert_eq!(scratch.none.len(), 0);
+        assert_eq!(scratch.sub.len(), 0);
+    }
+
+    #[test]
+    fn test_filter_sub_bpp_variations() {
+        // Test with different bytes per pixel values
+        for bpp in 1..=4 {
+            let row: Vec<u8> = (0..20).collect();
+            let mut output = Vec::new();
+            filter_sub(&row, bpp, &mut output);
+            assert_eq!(output.len(), row.len());
+
+            // First bpp bytes should equal original (no left reference)
+            for i in 0..bpp {
+                assert_eq!(output[i], row[i]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_filter_up_first_row() {
+        // First row uses zero as previous row
+        let row = vec![10, 20, 30, 40];
+        let zero_row = vec![0u8; 4];
+        let mut output = Vec::new();
+        filter_up(&row, &zero_row, &mut output);
+
+        // Should just be the original row values (minus zero)
+        assert_eq!(output, row);
+    }
+
+    #[test]
+    fn test_apply_filters_sub_strategy() {
+        let data = vec![10, 20, 30, 40, 50, 60]; // Single row
+        let options = PngOptions {
+            filter_strategy: FilterStrategy::Sub,
+            ..Default::default()
+        };
+
+        let filtered = apply_filters(&data, 2, 1, 3, &options);
+
+        assert_eq!(filtered[0], FILTER_SUB);
+        // Check the filtered values
+        assert_eq!(filtered.len(), 1 + 6); // 1 filter byte + 6 data bytes
+    }
+
+    #[test]
+    fn test_apply_filters_up_strategy() {
+        let data = vec![
+            10, 20, 30, // Row 1
+            50, 60, 70, // Row 2
+        ];
+        let options = PngOptions {
+            filter_strategy: FilterStrategy::Up,
+            ..Default::default()
+        };
+
+        let filtered = apply_filters(&data, 1, 2, 3, &options);
+
+        // Both rows should use Up filter
+        assert_eq!(filtered[0], FILTER_UP);
+        assert_eq!(filtered[4], FILTER_UP);
+    }
+
+    #[test]
+    fn test_apply_filters_average_strategy() {
+        let data = vec![100, 100, 100];
+        let options = PngOptions {
+            filter_strategy: FilterStrategy::Average,
+            ..Default::default()
+        };
+
+        let filtered = apply_filters(&data, 1, 1, 3, &options);
+
+        assert_eq!(filtered[0], FILTER_AVERAGE);
+    }
+
+    #[test]
+    fn test_apply_filters_paeth_strategy() {
+        let data = vec![100, 100, 100];
+        let options = PngOptions {
+            filter_strategy: FilterStrategy::Paeth,
+            ..Default::default()
+        };
+
+        let filtered = apply_filters(&data, 1, 1, 3, &options);
+
+        assert_eq!(filtered[0], FILTER_PAETH);
+    }
+
+    #[test]
+    fn test_apply_filters_minsum_strategy() {
+        let data = vec![0u8; 100]; // All zeros should favor None filter
+        let options = PngOptions {
+            filter_strategy: FilterStrategy::MinSum,
+            ..Default::default()
+        };
+
+        let filtered = apply_filters(&data, 10, 1, 10, &options);
+
+        // Should produce valid output
+        assert_eq!(filtered.len(), 1 + 100); // 1 row: 1 filter byte + 100 data bytes
+    }
+
+    #[test]
+    fn test_apply_filters_adaptive_strategy() {
+        let data: Vec<u8> = (0..200).map(|i| (i % 256) as u8).collect();
+        let options = PngOptions {
+            filter_strategy: FilterStrategy::Adaptive,
+            ..Default::default()
+        };
+
+        let filtered = apply_filters(&data, 10, 2, 10, &options);
+
+        // Should produce valid output with filter bytes
+        assert_eq!(filtered.len(), 2 * (1 + 100)); // 2 rows
+    }
+
+    #[test]
+    fn test_filter_wrapping() {
+        // Test that filters handle wrapping correctly
+        let row = vec![5, 10, 15];
+        let prev = vec![10, 20, 30];
+        let mut output = Vec::new();
+
+        filter_up(&row, &prev, &mut output);
+
+        // 5 - 10 = -5, wraps to 251
+        assert_eq!(output[0], 5u8.wrapping_sub(10));
+        // 10 - 20 = -10, wraps to 246
+        assert_eq!(output[1], 10u8.wrapping_sub(20));
+    }
+
+    #[test]
+    fn test_small_image_uses_sub() {
+        // Small images (area <= 4096) should use Sub instead of Adaptive
+        let data = vec![0u8; 64 * 3]; // 64 pixels = area < 4096
+        let options = PngOptions {
+            filter_strategy: FilterStrategy::Adaptive,
+            ..Default::default()
+        };
+
+        let filtered = apply_filters(&data, 8, 8, 3, &options);
+
+        // Should use Sub filter for small images
+        // (Filter byte is the first byte)
+        assert_eq!(filtered[0], FILTER_SUB);
     }
 }

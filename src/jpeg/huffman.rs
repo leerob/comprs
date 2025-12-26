@@ -521,4 +521,288 @@ mod tests {
         assert_eq!(new_dc, 0);
         assert!(!writer.is_empty());
     }
+
+    #[test]
+    fn test_build_code_lengths_single_symbol() {
+        // Only one symbol with non-zero frequency
+        let counts = [0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let lengths = build_code_lengths(&counts);
+        assert!(lengths.is_some());
+        let lengths = lengths.unwrap();
+        // Single symbol should have length 1
+        assert_eq!(lengths[2], 1);
+        // Other symbols should have length 0
+        assert_eq!(lengths[0], 0);
+        assert_eq!(lengths[1], 0);
+    }
+
+    #[test]
+    fn test_build_code_lengths_two_symbols() {
+        // Two symbols with equal frequency
+        let counts = [100, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let lengths = build_code_lengths(&counts);
+        assert!(lengths.is_some());
+        let lengths = lengths.unwrap();
+        // Both should have equal length (the implementation uses depth+1 in tree traversal)
+        assert_eq!(lengths[0], lengths[1]);
+        assert!(lengths[0] > 0);
+    }
+
+    #[test]
+    fn test_build_code_lengths_empty() {
+        // All zeros - should return None
+        let counts = [0u64; 12];
+        let lengths = build_code_lengths(&counts);
+        assert!(lengths.is_none());
+    }
+
+    #[test]
+    fn test_build_code_lengths_unequal_frequencies() {
+        // Unequal frequencies - common symbols should get shorter codes
+        let counts = [1000, 100, 10, 1, 0, 0, 0, 0, 0, 0, 0, 0];
+        let lengths = build_code_lengths(&counts);
+        assert!(lengths.is_some());
+        let lengths = lengths.unwrap();
+        // Most common symbol should have shortest code
+        assert!(lengths[0] <= lengths[1]);
+        assert!(lengths[1] <= lengths[2]);
+        assert!(lengths[2] <= lengths[3]);
+    }
+
+    #[test]
+    fn test_build_bits_vals_basic() {
+        // Simple case: two symbols
+        let counts = [100u64, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let result = build_bits_vals(&counts);
+        assert!(result.is_some());
+        let (bits, vals) = result.unwrap();
+
+        // Should have exactly 2 codes (total)
+        assert_eq!(vals.len(), 2);
+        // bits array should contain 2 total codes across all lengths
+        assert_eq!(bits.iter().map(|&b| b as usize).sum::<usize>(), 2);
+    }
+
+    #[test]
+    fn test_build_bits_vals_empty() {
+        let counts = [0u64; 12];
+        let result = build_bits_vals(&counts);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_build_code_table_basic() {
+        // Standard DC luminance table
+        let codes: Option<[HuffCode; 12]> = build_code_table::<12>(&DC_LUM_BITS, &DC_LUM_VALS, 12);
+        assert!(codes.is_some());
+        let codes = codes.unwrap();
+
+        // All 12 symbols should have codes
+        for i in 0..12 {
+            assert!(codes[i].length > 0, "Symbol {i} should have a code");
+        }
+    }
+
+    #[test]
+    fn test_build_code_table_invalid_symbol() {
+        // Invalid: symbol >= table_len
+        let bits = [1u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let vals = [20u8]; // Symbol 20 is >= table_len of 12
+        let result: Option<[HuffCode; 12]> = build_code_table::<12>(&bits, &vals, 12);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_optimized_from_counts_basic() {
+        // Create frequency counts that should produce valid tables
+        let mut dc_lum_counts = [0u64; 12];
+        dc_lum_counts[0] = 100; // Category 0 (DC = 0)
+        dc_lum_counts[1] = 50; // Category 1
+
+        let mut ac_lum_counts = [0u64; 256];
+        ac_lum_counts[0x00] = 200; // EOB
+        ac_lum_counts[0x01] = 100; // (0,1) - run=0, size=1
+
+        let result =
+            HuffmanTables::optimized_from_counts(&dc_lum_counts, None, &ac_lum_counts, None);
+        assert!(result.is_some());
+        let tables = result.unwrap();
+
+        // Should have valid codes
+        let dc0 = tables.get_dc_code(0, true);
+        assert!(dc0.length > 0);
+        let eob = tables.get_ac_code(0x00, true);
+        assert!(eob.length > 0);
+    }
+
+    #[test]
+    fn test_optimized_from_counts_with_chroma() {
+        let mut dc_lum_counts = [0u64; 12];
+        dc_lum_counts[0] = 100;
+        dc_lum_counts[1] = 50;
+
+        let mut dc_chrom_counts = [0u64; 12];
+        dc_chrom_counts[0] = 80;
+        dc_chrom_counts[1] = 40;
+
+        let mut ac_lum_counts = [0u64; 256];
+        ac_lum_counts[0x00] = 200;
+        ac_lum_counts[0x01] = 100;
+
+        let mut ac_chrom_counts = [0u64; 256];
+        ac_chrom_counts[0x00] = 150;
+        ac_chrom_counts[0x01] = 75;
+
+        let result = HuffmanTables::optimized_from_counts(
+            &dc_lum_counts,
+            Some(&dc_chrom_counts),
+            &ac_lum_counts,
+            Some(&ac_chrom_counts),
+        );
+        assert!(result.is_some());
+        let tables = result.unwrap();
+
+        // Check both luminance and chrominance codes
+        let dc_lum = tables.get_dc_code(0, true);
+        let dc_chrom = tables.get_dc_code(0, false);
+        assert!(dc_lum.length > 0);
+        assert!(dc_chrom.length > 0);
+    }
+
+    #[test]
+    fn test_category_large_values() {
+        // Test larger values
+        assert_eq!(category(256), 9);
+        assert_eq!(category(512), 10);
+        assert_eq!(category(1023), 10);
+        assert_eq!(category(1024), 11);
+        assert_eq!(category(-1024), 11);
+        // Max i16 value
+        assert_eq!(category(i16::MAX), 15);
+        assert_eq!(category(i16::MIN + 1), 15);
+    }
+
+    #[test]
+    fn test_encode_value_negative() {
+        // Test negative value encoding (ones' complement)
+        let (bits, len) = encode_value(-2);
+        assert_eq!(len, 2);
+        assert_eq!(bits, 1); // -2 in ones' complement for 2 bits = 01
+
+        let (bits, len) = encode_value(-4);
+        assert_eq!(len, 3);
+        assert_eq!(bits, 3); // -4 in ones' complement for 3 bits = 011
+
+        let (bits, len) = encode_value(-127);
+        assert_eq!(len, 7);
+        // -127 -> ones' complement is 0 (since -127 - 1 = -128 = 0x80, masked to 7 bits = 0)
+        assert_eq!(bits, 0);
+    }
+
+    #[test]
+    fn test_encode_block_with_dc_diff() {
+        let tables = HuffmanTables::new();
+        let mut writer = BitWriterMsb::new();
+
+        let mut block = [0i16; 64];
+        block[0] = 100; // DC coefficient
+
+        let prev_dc = 50;
+        let new_dc = encode_block(&mut writer, &block, prev_dc, true, &tables);
+
+        // DC should return the block's DC value
+        assert_eq!(new_dc, 100);
+        // Should have written some data
+        assert!(!writer.is_empty());
+    }
+
+    #[test]
+    fn test_encode_block_with_ac_coefficients() {
+        let tables = HuffmanTables::new();
+        let mut writer = BitWriterMsb::new();
+
+        let mut block = [0i16; 64];
+        block[0] = 50; // DC
+        block[1] = 10; // AC coefficient at position 1 in natural order
+        block[8] = 5; // AC coefficient at position 8 in natural order
+
+        let new_dc = encode_block(&mut writer, &block, 50, true, &tables);
+
+        assert_eq!(new_dc, 50);
+        // Should produce more output than a zero block
+        let zero_block = [0i16; 64];
+        let mut writer2 = BitWriterMsb::new();
+        encode_block(&mut writer2, &zero_block, 0, true, &tables);
+
+        // Block with AC coefficients should produce more data
+        assert!(writer.len() > writer2.len());
+    }
+
+    #[test]
+    fn test_encode_block_chrominance() {
+        let tables = HuffmanTables::new();
+
+        // Test luminance
+        let mut writer_lum = BitWriterMsb::new();
+        let mut block = [0i16; 64];
+        block[0] = 30;
+        encode_block(&mut writer_lum, &block, 0, true, &tables);
+
+        // Test chrominance
+        let mut writer_chrom = BitWriterMsb::new();
+        encode_block(&mut writer_chrom, &block, 0, false, &tables);
+
+        // Both should produce output (may be different sizes due to different tables)
+        assert!(!writer_lum.is_empty());
+        assert!(!writer_chrom.is_empty());
+    }
+
+    #[test]
+    fn test_build_codes_standard_tables() {
+        // Test that standard DC luminance codes are built correctly
+        let codes = build_codes(&DC_LUM_BITS, &DC_LUM_VALS);
+
+        // All 12 DC categories should have codes
+        for i in 0..12 {
+            assert!(codes[i].length > 0, "DC category {i} missing code");
+            assert!(codes[i].length <= 16, "DC category {i} code too long");
+        }
+    }
+
+    #[test]
+    fn test_build_codes_256_standard_ac() {
+        // Test that standard AC luminance codes are built correctly
+        let codes = build_codes_256(&AC_LUM_BITS, &AC_LUM_VALS);
+
+        // EOB (0x00) and common AC symbols should have codes
+        assert!(codes[0x00].length > 0, "EOB missing");
+        assert!(codes[0x01].length > 0, "AC (0,1) missing");
+        assert!(codes[0xF0].length > 0, "ZRL missing");
+    }
+
+    #[test]
+    fn test_encode_block_long_zero_run() {
+        let tables = HuffmanTables::new();
+        let mut writer = BitWriterMsb::new();
+
+        // Create a block with zeros followed by a non-zero AC at the end
+        let mut block = [0i16; 64];
+        block[0] = 10; // DC
+                       // Place a non-zero coefficient late in zigzag order
+                       // Zigzag index 63 corresponds to position 63 in natural order
+        block[63] = 5;
+
+        let new_dc = encode_block(&mut writer, &block, 10, true, &tables);
+        assert_eq!(new_dc, 10);
+        // Should encode ZRL codes for long zero runs
+        assert!(!writer.is_empty());
+    }
+
+    #[test]
+    fn test_huffman_tables_default() {
+        let tables = HuffmanTables::default();
+        // Should be equivalent to new()
+        let dc0 = tables.get_dc_code(0, true);
+        assert!(dc0.length > 0);
+    }
 }

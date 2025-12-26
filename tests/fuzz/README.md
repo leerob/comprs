@@ -1,6 +1,6 @@
 # Fuzzing
 
-This directory contains fuzz targets for testing comprs with [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz).
+This directory contains fuzz targets for testing pixo with [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz).
 
 ## Prerequisites
 

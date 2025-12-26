@@ -30,10 +30,10 @@ fuzz_target!(|input: PngInput| {
 
     // Select color type
     let color_type = match input.color_type % 4 {
-        0 => comprs::ColorType::Gray,
-        1 => comprs::ColorType::GrayAlpha,
-        2 => comprs::ColorType::Rgb,
-        _ => comprs::ColorType::Rgba,
+        0 => pixo::ColorType::Gray,
+        1 => pixo::ColorType::GrayAlpha,
+        2 => pixo::ColorType::Rgb,
+        _ => pixo::ColorType::Rgba,
     };
 
     // Calculate expected data length
@@ -52,13 +52,13 @@ fuzz_target!(|input: PngInput| {
     let compression_level = (input.compression_level % 9).max(1);
 
     // Build options
-    let options = comprs::png::PngOptions {
+    let options = pixo::png::PngOptions {
         compression_level,
         ..Default::default()
     };
 
     // Try to encode - should not panic
-    let result = comprs::png::encode_with_options(pixel_data, width, height, color_type, &options);
+    let result = pixo::png::encode_with_options(pixel_data, width, height, color_type, &options);
 
     // If encoding succeeded, verify basic structure
     if let Ok(encoded) = result {

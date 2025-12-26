@@ -1,6 +1,6 @@
 # WebAssembly (WASM)
 
-Use comprs in browser and Node.js applications via WebAssembly.
+Use pixo in browser and Node.js applications via WebAssembly.
 
 ## API
 
@@ -31,17 +31,17 @@ cargo install wasm-bindgen-cli
 # Build the WASM module
 cargo build --target wasm32-unknown-unknown --release --no-default-features --features wasm,simd
 
-# Generate JS bindings (output to web/src/lib/comprs-wasm/)
+# Generate JS bindings (output to web/src/lib/pixo-wasm/)
 wasm-bindgen --target web \
-  --out-dir web/src/lib/comprs-wasm \
-  --out-name comprs \
-  target/wasm32-unknown-unknown/release/comprs.wasm
+  --out-dir web/src/lib/pixo-wasm \
+  --out-name pixo \
+  target/wasm32-unknown-unknown/release/pixo.wasm
 
 # (Optional but recommended) Optimize with binaryen for minimal size
 wasm-opt -Oz --strip-debug --strip-dwarf --strip-producers --strip-target-features \
   --enable-bulk-memory --enable-sign-ext --enable-nontrapping-float-to-int \
-  -o web/src/lib/comprs-wasm/comprs_bg.wasm \
-  web/src/lib/comprs-wasm/comprs_bg.wasm
+  -o web/src/lib/pixo-wasm/pixo_bg.wasm \
+  web/src/lib/pixo-wasm/pixo_bg.wasm
 ```
 
 ## Troubleshooting

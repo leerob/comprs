@@ -32,7 +32,7 @@ fuzz_target!(|input: Lz77Input| {
     let level = (input.level % 9).max(1);
 
     // Create compressor
-    let mut compressor = comprs::compress::lz77::Lz77Compressor::new(level);
+    let mut compressor = pixo::compress::lz77::Lz77Compressor::new(level);
 
     // Compress using token output
     let tokens = compressor.compress(&input.data);
@@ -42,10 +42,10 @@ fuzz_target!(|input: Lz77Input| {
 
     for token in &tokens {
         match token {
-            comprs::compress::lz77::Token::Literal(byte) => {
+            pixo::compress::lz77::Token::Literal(byte) => {
                 reconstructed.push(*byte);
             }
-            comprs::compress::lz77::Token::Match { length, distance } => {
+            pixo::compress::lz77::Token::Match { length, distance } => {
                 let start = reconstructed.len() - *distance as usize;
                 for i in 0..*length as usize {
                     let byte = reconstructed[start + i];

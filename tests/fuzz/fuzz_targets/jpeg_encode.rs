@@ -32,9 +32,9 @@ fuzz_target!(|input: JpegInput| {
 
     // Select color type
     let color_type = if input.grayscale {
-        comprs::ColorType::Gray
+        pixo::ColorType::Gray
     } else {
-        comprs::ColorType::Rgb
+        pixo::ColorType::Rgb
     };
 
     // Calculate expected data length
@@ -53,7 +53,7 @@ fuzz_target!(|input: JpegInput| {
     let quality = (input.quality % 100).max(1);
 
     // Build options
-    let options = comprs::jpeg::JpegOptions {
+    let options = pixo::jpeg::JpegOptions {
         quality,
         progressive: input.progressive,
         ..Default::default()
@@ -61,7 +61,7 @@ fuzz_target!(|input: JpegInput| {
 
     // Try to encode - should not panic
     let result =
-        comprs::jpeg::encode_with_options(pixel_data, width, height, color_type, &options);
+        pixo::jpeg::encode_with_options(pixel_data, width, height, color_type, &options);
 
     // If encoding succeeded, verify basic structure
     if let Ok(encoded) = result {

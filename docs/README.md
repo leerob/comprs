@@ -1,6 +1,6 @@
-# comprs Documentation
+# pixo Documentation
 
-Welcome to the comprehensive documentation for **comprs**, a minimal-dependency, high-performance image compression library written in Rust.
+Welcome to the comprehensive documentation for **pixo**, a minimal-dependency, high-performance image compression library written in Rust.
 
 This documentation is designed to be accessible to developers who may not be familiar with the low-level details of image compression. We use clear explanations, visual examples, and step-by-step breakdowns to help you understand not just *how* these algorithms work, but *why* they work.
 

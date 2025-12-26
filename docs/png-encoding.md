@@ -223,7 +223,7 @@ Our library provides several strategies:
 | `Adaptive` | Try all 5 per row | Slow | Best |
 
 ```rust
-use comprs::png::{PngOptions, FilterStrategy};
+use pixo::png::{PngOptions, FilterStrategy};
 
 let options = PngOptions {
     filter_strategy: FilterStrategy::MinSum,

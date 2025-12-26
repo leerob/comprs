@@ -967,7 +967,7 @@
 {/snippet}
 
 <svelte:head>
-  <title>comprs</title>
+  <title>pixo</title>
   <meta
     name="description"
     content="Client-side PNG/JPEG compression powered by Rust WASM."

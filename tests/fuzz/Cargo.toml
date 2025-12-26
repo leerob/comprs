@@ -1,5 +1,5 @@
 [package]
-name = "comprs-fuzz"
+name = "pixo-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2021"
@@ -11,7 +11,7 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 arbitrary = { version = "1", features = ["derive"] }
 
-[dependencies.comprs]
+[dependencies.pixo]
 path = "../.."
 
 # Prevent this from interfering with workspaces

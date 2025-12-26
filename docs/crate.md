@@ -1,6 +1,6 @@
 # Rust Crate
 
-Use comprs as a library in your Rust projects.
+Use pixo as a library in your Rust projects.
 
 ## Installation
 
@@ -8,7 +8,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-comprs = "0.1"
+pixo = "0.1"
 ```
 
 ## Toolchain
@@ -18,14 +18,14 @@ The project builds and tests on **stable Rust 1.82+**.
 ## PNG Encoding
 
 ```rust
-use comprs::{png, ColorType};
+use pixo::{png, ColorType};
 
 // Encode RGB pixels as PNG
 let pixels: Vec<u8> = vec![255, 0, 0, 0, 255, 0, 0, 0, 255]; // 3 RGB pixels
 let png_data = png::encode(&pixels, 3, 1, ColorType::Rgb).unwrap();
 
 // With custom options
-use comprs::png::{PngOptions, FilterStrategy};
+use pixo::png::{PngOptions, FilterStrategy};
 
 let options = PngOptions {
     compression_level: 9,  // validated: 1-9, higher = better compression
@@ -37,14 +37,14 @@ let png_data = png::encode_with_options(&pixels, 3, 1, ColorType::Rgb, &options)
 ## JPEG Encoding
 
 ```rust
-use comprs::jpeg;
+use pixo::jpeg;
 
 // Encode RGB pixels as JPEG
 let pixels: Vec<u8> = vec![255, 128, 64]; // 1 RGB pixel
 let jpeg_data = jpeg::encode(&pixels, 1, 1, 85).unwrap(); // quality: 1-100
 
 // With subsampling options (4:4:4 default, 4:2:0 available)
-use comprs::jpeg::{JpegOptions, Subsampling};
+use pixo::jpeg::{JpegOptions, Subsampling};
 
 let options = JpegOptions {
     quality: 85,

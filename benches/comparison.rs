@@ -1,6 +1,6 @@
 //! Comprehensive library comparison benchmark.
 //!
-//! Compares comprs against popular image compression libraries and external tools,
+//! Compares pixo against popular image compression libraries and external tools,
 //! including oxipng for PNG and mozjpeg for JPEG.
 //!
 //! Run with: cargo bench --bench comparison
@@ -21,9 +21,9 @@ use image::ImageEncoder;
 use jpeg_encoder::{ColorType as JpegColorType, Encoder as JpegEncoderCrate, SamplingFactor};
 use libdeflater::{CompressionLvl, Compressor as LibdeflateCompressor};
 
-use comprs::compress::deflate::deflate_zlib;
-use comprs::png::{QuantizationMode, QuantizationOptions};
-use comprs::{jpeg, png, ColorType};
+use pixo::compress::deflate::deflate_zlib;
+use pixo::png::{QuantizationMode, QuantizationOptions};
+use pixo::{jpeg, png, ColorType};
 
 // ============================================================================
 // Test Data Generation
@@ -483,7 +483,7 @@ fn encode_with_imagequant(pixels: &[u8], width: u32, height: u32) -> Option<(usi
     let rgb_palette: Vec<[u8; 3]> = palette.iter().map(|c| [c.r, c.g, c.b]).collect();
     let alpha: Vec<u8> = palette.iter().map(|c| c.a).collect();
 
-    // Use comprs to encode the indexed PNG
+    // Use pixo to encode the indexed PNG
     let mut opts = png::PngOptions::balanced();
     opts.quantization.mode = QuantizationMode::Off; // Already quantized
 
@@ -517,9 +517,9 @@ fn bench_png_all_presets(c: &mut Criterion) {
 
         let mut png_buf = Vec::new();
 
-        // comprs Fast preset
+        // pixo Fast preset
         group.bench_with_input(
-            BenchmarkId::new("comprs_fast", format!("{size}x{size}")),
+            BenchmarkId::new("pixo_fast", format!("{size}x{size}")),
             &gradient,
             |b, pixels| {
                 b.iter(|| {
@@ -536,9 +536,9 @@ fn bench_png_all_presets(c: &mut Criterion) {
             },
         );
 
-        // comprs Balanced preset
+        // pixo Balanced preset
         group.bench_with_input(
-            BenchmarkId::new("comprs_balanced", format!("{size}x{size}")),
+            BenchmarkId::new("pixo_balanced", format!("{size}x{size}")),
             &gradient,
             |b, pixels| {
                 b.iter(|| {
@@ -555,9 +555,9 @@ fn bench_png_all_presets(c: &mut Criterion) {
             },
         );
 
-        // comprs Max preset (skip in normal benchmarks - too slow)
+        // pixo Max preset (skip in normal benchmarks - too slow)
         // group.bench_with_input(
-        //     BenchmarkId::new("comprs_max", format!("{size}x{size}")),
+        //     BenchmarkId::new("pixo_max", format!("{size}x{size}")),
         //     &gradient,
         //     |b, pixels| {
         //         b.iter(|| {
@@ -610,9 +610,9 @@ fn bench_png_lossy_comparison(c: &mut Criterion) {
 
         let mut png_buf = Vec::new();
 
-        // comprs lossless (baseline)
+        // pixo lossless (baseline)
         group.bench_with_input(
-            BenchmarkId::new("comprs_lossless", format!("{size}x{size}")),
+            BenchmarkId::new("pixo_lossless", format!("{size}x{size}")),
             &gradient,
             |b, pixels| {
                 b.iter(|| {
@@ -629,7 +629,7 @@ fn bench_png_lossy_comparison(c: &mut Criterion) {
             },
         );
 
-        // comprs lossy with auto quantization
+        // pixo lossy with auto quantization
         let mut lossy_opts = png::PngOptions::balanced();
         lossy_opts.quantization = QuantizationOptions {
             mode: QuantizationMode::Auto,
@@ -637,7 +637,7 @@ fn bench_png_lossy_comparison(c: &mut Criterion) {
             dithering: false,
         };
         group.bench_with_input(
-            BenchmarkId::new("comprs_lossy_auto", format!("{size}x{size}")),
+            BenchmarkId::new("pixo_lossy_auto", format!("{size}x{size}")),
             &gradient,
             |b, pixels| {
                 b.iter(|| {
@@ -654,7 +654,7 @@ fn bench_png_lossy_comparison(c: &mut Criterion) {
             },
         );
 
-        // comprs lossy with forced quantization
+        // pixo lossy with forced quantization
         let mut force_opts = png::PngOptions::balanced();
         force_opts.quantization = QuantizationOptions {
             mode: QuantizationMode::Force,
@@ -662,7 +662,7 @@ fn bench_png_lossy_comparison(c: &mut Criterion) {
             dithering: false,
         };
         group.bench_with_input(
-            BenchmarkId::new("comprs_lossy_force", format!("{size}x{size}")),
+            BenchmarkId::new("pixo_lossy_force", format!("{size}x{size}")),
             &gradient,
             |b, pixels| {
                 b.iter(|| {
@@ -708,9 +708,9 @@ fn bench_jpeg_all_presets(c: &mut Criterion) {
 
         let mut jpeg_buf = Vec::new();
 
-        // comprs Fast preset
+        // pixo Fast preset
         group.bench_with_input(
-            BenchmarkId::new("comprs_fast", format!("{size}x{size}")),
+            BenchmarkId::new("pixo_fast", format!("{size}x{size}")),
             &gradient,
             |b, pixels| {
                 b.iter(|| {
@@ -727,9 +727,9 @@ fn bench_jpeg_all_presets(c: &mut Criterion) {
             },
         );
 
-        // comprs Balanced preset
+        // pixo Balanced preset
         group.bench_with_input(
-            BenchmarkId::new("comprs_balanced", format!("{size}x{size}")),
+            BenchmarkId::new("pixo_balanced", format!("{size}x{size}")),
             &gradient,
             |b, pixels| {
                 b.iter(|| {
@@ -746,9 +746,9 @@ fn bench_jpeg_all_presets(c: &mut Criterion) {
             },
         );
 
-        // comprs Max preset
+        // pixo Max preset
         group.bench_with_input(
-            BenchmarkId::new("comprs_max", format!("{size}x{size}")),
+            BenchmarkId::new("pixo_max", format!("{size}x{size}")),
             &gradient,
             |b, pixels| {
                 b.iter(|| {
@@ -788,7 +788,7 @@ fn bench_jpeg_all_presets(c: &mut Criterion) {
 
 // ============================================================================
 // DEFLATE/zlib Comparison - Comprehensive
-// Tests comprs vs flate2 vs libdeflate vs zopfli at multiple levels
+// Tests pixo vs flate2 vs libdeflate vs zopfli at multiple levels
 // ============================================================================
 
 fn bench_deflate_comparison(c: &mut Criterion) {
@@ -803,8 +803,8 @@ fn bench_deflate_comparison(c: &mut Criterion) {
         let bytes = data.len() as u64;
         group.throughput(Throughput::Bytes(bytes));
 
-        // comprs at level 6 (default)
-        group.bench_with_input(BenchmarkId::new("comprs_lvl6", name), data, |b, input| {
+        // pixo at level 6 (default)
+        group.bench_with_input(BenchmarkId::new("pixo_lvl6", name), data, |b, input| {
             b.iter(|| {
                 let encoded = deflate_zlib(black_box(input), 6);
                 black_box(encoded.len())
@@ -869,9 +869,9 @@ fn bench_deflate_zopfli(c: &mut Criterion) {
     let bytes = compressible.len() as u64;
     group.throughput(Throughput::Bytes(bytes));
 
-    // comprs at level 9 for comparison
+    // pixo at level 9 for comparison
     group.bench_with_input(
-        BenchmarkId::new("comprs_lvl9", "compressible_64kb"),
+        BenchmarkId::new("pixo_lvl9", "compressible_64kb"),
         &compressible,
         |b, input| {
             b.iter(|| {
@@ -922,29 +922,25 @@ fn bench_png_equivalent_settings(c: &mut Criterion) {
 
         let mut buf = Vec::new();
 
-        // comprs at level 6 with Adaptive filter
-        let comprs_opts = png::PngOptions::builder()
+        // pixo at level 6 with Adaptive filter
+        let pixo_opts = png::PngOptions::builder()
             .compression_level(6)
             .filter_strategy(png::FilterStrategy::Adaptive)
             .build();
 
-        group.bench_with_input(
-            BenchmarkId::new("comprs_lvl6", name),
-            pixels,
-            |b, pixels| {
-                b.iter(|| {
-                    png::encode_into(
-                        &mut buf,
-                        black_box(pixels),
-                        512,
-                        512,
-                        ColorType::Rgb,
-                        &comprs_opts,
-                    )
-                    .unwrap()
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("pixo_lvl6", name), pixels, |b, pixels| {
+            b.iter(|| {
+                png::encode_into(
+                    &mut buf,
+                    black_box(pixels),
+                    512,
+                    512,
+                    ColorType::Rgb,
+                    &pixo_opts,
+                )
+                .unwrap()
+            });
+        });
 
         // image crate with default settings (uses flate2 level 6)
         group.bench_with_input(
@@ -975,13 +971,13 @@ fn bench_png_equivalent_settings(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(pixel_bytes));
 
         let mut buf = Vec::new();
-        let comprs_opts = png::PngOptions::builder()
+        let pixo_opts = png::PngOptions::builder()
             .compression_level(6)
             .filter_strategy(png::FilterStrategy::Adaptive)
             .build();
 
         group.bench_with_input(
-            BenchmarkId::new("comprs_lvl6", &img.name),
+            BenchmarkId::new("pixo_lvl6", &img.name),
             &img.pixels,
             |b, pixels| {
                 b.iter(|| {
@@ -991,7 +987,7 @@ fn bench_png_equivalent_settings(c: &mut Criterion) {
                         img.width,
                         img.height,
                         ColorType::Rgb,
-                        &comprs_opts,
+                        &pixo_opts,
                     )
                     .unwrap()
                 });
@@ -1056,8 +1052,8 @@ fn bench_jpeg_equivalent_settings(c: &mut Criterion) {
 
         let mut buf = Vec::new();
 
-        // comprs at Q85, 4:2:0, baseline (non-progressive)
-        let comprs_opts = jpeg::JpegOptions {
+        // pixo at Q85, 4:2:0, baseline (non-progressive)
+        let pixo_opts = jpeg::JpegOptions {
             quality: 85,
             subsampling: jpeg::Subsampling::S420, // 4:2:0
             restart_interval: None,
@@ -1066,23 +1062,19 @@ fn bench_jpeg_equivalent_settings(c: &mut Criterion) {
             trellis_quant: false,
         };
 
-        group.bench_with_input(
-            BenchmarkId::new("comprs_q85", name),
-            *pixels,
-            |b, pixels| {
-                b.iter(|| {
-                    jpeg::encode_with_options_into(
-                        &mut buf,
-                        black_box(pixels),
-                        *width,
-                        *height,
-                        ColorType::Rgb,
-                        &comprs_opts,
-                    )
-                    .unwrap()
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("pixo_q85", name), *pixels, |b, pixels| {
+            b.iter(|| {
+                jpeg::encode_with_options_into(
+                    &mut buf,
+                    black_box(pixels),
+                    *width,
+                    *height,
+                    ColorType::Rgb,
+                    &pixo_opts,
+                )
+                .unwrap()
+            });
+        });
 
         // image crate with quality 85
         group.bench_with_input(
@@ -1130,7 +1122,7 @@ fn bench_jpeg_equivalent_settings(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(pixel_bytes));
 
         let mut buf = Vec::new();
-        let comprs_opts = jpeg::JpegOptions {
+        let pixo_opts = jpeg::JpegOptions {
             quality: 85,
             subsampling: jpeg::Subsampling::S420,
             restart_interval: None,
@@ -1140,7 +1132,7 @@ fn bench_jpeg_equivalent_settings(c: &mut Criterion) {
         };
 
         group.bench_with_input(
-            BenchmarkId::new("comprs_q85", &img.name),
+            BenchmarkId::new("pixo_q85", &img.name),
             &img.pixels,
             |b, pixels| {
                 b.iter(|| {
@@ -1150,7 +1142,7 @@ fn bench_jpeg_equivalent_settings(c: &mut Criterion) {
                         img.width,
                         img.height,
                         ColorType::Rgb,
-                        &comprs_opts,
+                        &pixo_opts,
                     )
                     .unwrap()
                 });
@@ -1216,9 +1208,9 @@ fn bench_png_best_effort(c: &mut Criterion) {
 
     let mut buf = Vec::new();
 
-    // comprs with balanced preset (good speed/size tradeoff)
+    // pixo with balanced preset (good speed/size tradeoff)
     group.bench_with_input(
-        BenchmarkId::new("comprs_balanced", "512x512"),
+        BenchmarkId::new("pixo_balanced", "512x512"),
         &gradient,
         |b, pixels| {
             b.iter(|| {
@@ -1235,10 +1227,10 @@ fn bench_png_best_effort(c: &mut Criterion) {
         },
     );
 
-    // comprs with max preset (best compression)
+    // pixo with max preset (best compression)
     // Note: This is slow, so we only run it once per iteration
     group.bench_with_input(
-        BenchmarkId::new("comprs_max", "512x512"),
+        BenchmarkId::new("pixo_max", "512x512"),
         &gradient,
         |b, pixels| {
             b.iter(|| {
@@ -1296,9 +1288,9 @@ fn bench_jpeg_best_effort(c: &mut Criterion) {
 
     let mut buf = Vec::new();
 
-    // comprs with max preset (progressive + trellis + optimized Huffman)
+    // pixo with max preset (progressive + trellis + optimized Huffman)
     group.bench_with_input(
-        BenchmarkId::new("comprs_max", "512x512"),
+        BenchmarkId::new("pixo_max", "512x512"),
         &gradient,
         |b, pixels| {
             b.iter(|| {
@@ -1315,9 +1307,9 @@ fn bench_jpeg_best_effort(c: &mut Criterion) {
         },
     );
 
-    // comprs with balanced preset
+    // pixo with balanced preset
     group.bench_with_input(
-        BenchmarkId::new("comprs_balanced", "512x512"),
+        BenchmarkId::new("pixo_balanced", "512x512"),
         &gradient,
         |b, pixels| {
             b.iter(|| {
@@ -1381,7 +1373,7 @@ fn print_summary_report() {
 
     println!("\n");
     println!("╔══════════════════════════════════════════════════════════════════════════════════════════════════╗");
-    println!("║                                    COMPRS BENCHMARK RESULTS                                      ║");
+    println!("║                                    PIXO BENCHMARK RESULTS                                      ║");
     println!("╚══════════════════════════════════════════════════════════════════════════════════════════════════╝");
     println!();
     println!("This benchmark uses equivalent settings across all encoders for fair comparison.");
@@ -1421,15 +1413,15 @@ fn print_summary_report() {
     println!("│ Library            │ WASM Size   │ Notes                                                        │");
     println!("├────────────────────┼─────────────┼──────────────────────────────────────────────────────────────┤");
 
-    let comprs_wasm_size = get_wasm_size();
-    let comprs_size_str = match comprs_wasm_size {
+    let pixo_wasm_size = get_wasm_size();
+    let pixo_size_str = match pixo_wasm_size {
         Some(size) => format_size(size),
         None => "146 KB".to_string(),
     };
 
     println!(
         "│ {:<18} │ {:>11} │ {:<60} │",
-        "comprs", comprs_size_str, "Zero deps, pure Rust"
+        "pixo", pixo_size_str, "Zero deps, pure Rust"
     );
     println!(
         "│ {:<18} │ {:>11} │ {:<60} │",
@@ -1459,28 +1451,28 @@ fn print_summary_report() {
 
     let gradient = generate_gradient_image(512, 512);
 
-    // comprs Fast
+    // pixo Fast
     let (fast_size, fast_time) = measure_png_encode(&gradient, 512, 512, &png::PngOptions::fast());
     println!(
         "│ {:<18} │ {:>11} │ {:>11} │ {:<45} │",
-        "comprs Fast",
+        "pixo Fast",
         format_size(fast_size),
         format_duration(fast_time),
         "level=2, AdaptiveFast filter"
     );
 
-    // comprs Balanced
+    // pixo Balanced
     let (balanced_size, balanced_time) =
         measure_png_encode(&gradient, 512, 512, &png::PngOptions::balanced());
     println!(
         "│ {:<18} │ {:>11} │ {:>11} │ {:<45} │",
-        "comprs Balanced",
+        "pixo Balanced",
         format_size(balanced_size),
         format_duration(balanced_time),
         "level=6, Adaptive filter"
     );
 
-    // comprs Max (single iteration - too slow for multiple)
+    // pixo Max (single iteration - too slow for multiple)
     let max_start = Instant::now();
     let mut max_buf = Vec::new();
     png::encode_into(
@@ -1495,7 +1487,7 @@ fn print_summary_report() {
     let max_time = max_start.elapsed();
     println!(
         "│ {:<18} │ {:>11} │ {:>11} │ {:<45} │",
-        "comprs Max",
+        "pixo Max",
         format_size(max_buf.len()),
         format_duration(max_time),
         "level=9, MinSum, optimal LZ77"
@@ -1538,16 +1530,16 @@ fn print_summary_report() {
     println!("│ Encoder            │ Size        │ Time        │ Notes                                         │");
     println!("├────────────────────┼─────────────┼─────────────┼───────────────────────────────────────────────┤");
 
-    // comprs lossless (baseline)
+    // pixo lossless (baseline)
     println!(
         "│ {:<18} │ {:>11} │ {:>11} │ {:<45} │",
-        "comprs Lossless",
+        "pixo Lossless",
         format_size(balanced_size),
         format_duration(balanced_time),
         "Baseline (no quantization)"
     );
 
-    // comprs lossy with forced quantization
+    // pixo lossy with forced quantization
     let mut lossy_opts = png::PngOptions::balanced();
     lossy_opts.quantization = QuantizationOptions {
         mode: QuantizationMode::Force,
@@ -1558,7 +1550,7 @@ fn print_summary_report() {
     let lossy_savings = (1.0 - lossy_size as f64 / balanced_size as f64) * 100.0;
     println!(
         "│ {:<18} │ {:>11} │ {:>11} │ {:<45} │",
-        "comprs Lossy",
+        "pixo Lossy",
         format_size(lossy_size),
         format_duration(lossy_time),
         format!("256 colors, no dithering (-{:.1}%)", lossy_savings)
@@ -1599,9 +1591,9 @@ fn print_summary_report() {
 
     // --- Real Image Lossy Comparison ---
     println!("┌────────────────────────────────────────────────────────────────────────────────────────────────┐");
-    println!("│ PNG Lossy Compression (Real Images: comprs vs pngquant)                                        │");
+    println!("│ PNG Lossy Compression (Real Images: pixo vs pngquant)                                        │");
     println!("├────────────────────┬─────────────┬─────────────┬─────────────┬──────────────────────────────────┤");
-    println!("│ Image              │ comprs Lossy│ pngquant    │ Delta       │ Notes                            │");
+    println!("│ Image              │ pixo Lossy│ pngquant    │ Delta       │ Notes                            │");
     println!("├────────────────────┼─────────────┼─────────────┼─────────────┼──────────────────────────────────┤");
 
     let real_images = [
@@ -1610,20 +1602,20 @@ fn print_summary_report() {
     ];
 
     for (name, path) in real_images {
-        if let Some((comprs_size, _comprs_time, pq_size, _pq_time)) =
+        if let Some((pixo_size, _pixo_time, pq_size, _pq_time)) =
             compare_real_image_lossy(path, &tmp_dir)
         {
-            let delta = (comprs_size as f64 / pq_size as f64 - 1.0) * 100.0;
+            let delta = (pixo_size as f64 / pq_size as f64 - 1.0) * 100.0;
             let delta_str = format!("{delta:+.0}%");
             let note = if delta < 0.0 {
-                "comprs wins"
+                "pixo wins"
             } else {
                 "pngquant wins"
             };
             println!(
                 "│ {:<18} │ {:>11} │ {:>11} │ {:>11} │ {:<32} │",
                 name,
-                format_size(comprs_size),
+                format_size(pixo_size),
                 format_size(pq_size),
                 delta_str,
                 note
@@ -1663,34 +1655,34 @@ fn print_summary_report() {
     println!("│ Encoder            │ Size        │ Time        │ Notes                                         │");
     println!("├────────────────────┼─────────────┼─────────────┼───────────────────────────────────────────────┤");
 
-    // comprs Fast
+    // pixo Fast
     let (fast_size, fast_time) =
         measure_jpeg_encode(&gradient, 512, 512, &jpeg::JpegOptions::fast(85));
     println!(
         "│ {:<18} │ {:>11} │ {:>11} │ {:<45} │",
-        "comprs Fast",
+        "pixo Fast",
         format_size(fast_size),
         format_duration(fast_time),
         "4:4:4, baseline, no optimization"
     );
 
-    // comprs Balanced
+    // pixo Balanced
     let (balanced_size, balanced_time) =
         measure_jpeg_encode(&gradient, 512, 512, &jpeg::JpegOptions::balanced(85));
     println!(
         "│ {:<18} │ {:>11} │ {:>11} │ {:<45} │",
-        "comprs Balanced",
+        "pixo Balanced",
         format_size(balanced_size),
         format_duration(balanced_time),
         "4:4:4, Huffman optimization"
     );
 
-    // comprs Max
+    // pixo Max
     let (max_size, max_time) =
         measure_jpeg_encode(&gradient, 512, 512, &jpeg::JpegOptions::max(85));
     println!(
         "│ {:<18} │ {:>11} │ {:>11} │ {:<45} │",
-        "comprs Max",
+        "pixo Max",
         format_size(max_size),
         format_duration(max_time),
         "4:2:0, progressive, trellis"
@@ -1736,9 +1728,9 @@ fn print_summary_report() {
     let compressible = make_compressible(1 << 20);
     let input_size = compressible.len();
 
-    // comprs
-    let comprs_deflate = deflate_zlib(&compressible, 6);
-    let comprs_ratio = input_size as f64 / comprs_deflate.len() as f64;
+    // pixo
+    let pixo_deflate = deflate_zlib(&compressible, 6);
+    let pixo_ratio = input_size as f64 / pixo_deflate.len() as f64;
 
     // flate2
     let mut flate2_enc = ZlibEncoder::new(Vec::new(), Compression::new(6));
@@ -1757,9 +1749,9 @@ fn print_summary_report() {
 
     println!(
         "│ {:<18} │ {:>11} │ {:>10.1}x │ {:<45} │",
-        "comprs (lvl 6)",
-        format_size(comprs_deflate.len()),
-        comprs_ratio,
+        "pixo (lvl 6)",
+        format_size(pixo_deflate.len()),
+        pixo_ratio,
         "Pure Rust, zero deps"
     );
     println!(
@@ -1792,8 +1784,8 @@ fn print_summary_report() {
 // Helper Functions
 // ============================================================================
 
-/// Compare comprs lossy vs pngquant on a real image file
-/// Returns (comprs_size, comprs_time, pngquant_size, pngquant_time)
+/// Compare pixo lossy vs pngquant on a real image file
+/// Returns (pixo_size, pixo_time, pngquant_size, pngquant_time)
 fn compare_real_image_lossy(
     path: &str,
     tmp_dir: &Path,
@@ -1809,7 +1801,7 @@ fn compare_real_image_lossy(
     let (width, height) = img.dimensions();
     let pixels = rgba.as_raw();
 
-    // comprs lossy
+    // pixo lossy
     let mut lossy_opts = png::PngOptions::balanced();
     lossy_opts.quantization = QuantizationOptions {
         mode: QuantizationMode::Force,
@@ -1828,7 +1820,7 @@ fn compare_real_image_lossy(
         &lossy_opts,
     )
     .ok()?;
-    let comprs_time = start.elapsed();
+    let pixo_time = start.elapsed();
 
     // pngquant - first encode lossless for input
     let lossless = png::encode(pixels, width, height, ColorType::Rgba).ok()?;
@@ -1857,7 +1849,7 @@ fn compare_real_image_lossy(
 
     let pq_size = fs::metadata(&output_path).ok()?.len() as usize;
 
-    Some((lossy_buf.len(), comprs_time, pq_size, pq_time))
+    Some((lossy_buf.len(), pixo_time, pq_size, pq_time))
 }
 
 fn measure_png_encode(
@@ -1966,9 +1958,9 @@ fn measure_image_jpeg_encode(pixels: &[u8], width: u32, height: u32) -> (usize, 
 
 fn get_wasm_size() -> Option<usize> {
     let paths = [
-        "target/wasm32-unknown-unknown/release/comprs.wasm",
-        "target/wasm32-unknown-unknown/release/comprs_bg.wasm",
-        "my-app/src/lib/comprs-wasm/comprs_bg.wasm",
+        "target/wasm32-unknown-unknown/release/pixo.wasm",
+        "target/wasm32-unknown-unknown/release/pixo_bg.wasm",
+        "my-app/src/lib/pixo-wasm/pixo_bg.wasm",
     ];
 
     for path in paths {

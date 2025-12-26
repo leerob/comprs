@@ -1,5 +1,5 @@
 [package]
-name = "comprs"
+name = "pixo"
 version = "0.1.0"
 edition = "2021"
 description = "A minimal-dependency, high-performance image compression library"
@@ -9,17 +9,17 @@ keywords = ["image", "compression", "png", "jpeg", "encoding"]
 categories = ["compression", "encoding", "multimedia::images"]
 
 [lib]
-name = "comprs"
+name = "pixo"
 path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 
 [[bin]]
-name = "comprs"
-path = "src/bin/comprs.rs"
+name = "pixo"
+path = "src/bin/pixo.rs"
 required-features = ["cli"]
 
 [[bin]]
-name = "comprs-web"
+name = "pixo-web"
 path = "src/bin/web.rs"
 required-features = ["wasm"]
 

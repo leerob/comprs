@@ -815,7 +815,7 @@ fn fetch_pngsuite_category(
 /// Fetch all valid (non-corrupted) PNGSuite images.
 pub fn fetch_pngsuite(fixtures_dir: &Path) -> Result<(), String> {
     let client = Client::builder()
-        .user_agent("comprs-test/0.1")
+        .user_agent("pixo-test/0.1")
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -837,7 +837,7 @@ pub fn fetch_pngsuite(fixtures_dir: &Path) -> Result<(), String> {
 /// Fetch corrupted PNGSuite images for error handling tests.
 pub fn fetch_pngsuite_corrupted(fixtures_dir: &Path) -> Result<(), String> {
     let client = Client::builder()
-        .user_agent("comprs-test/0.1")
+        .user_agent("pixo-test/0.1")
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -877,7 +877,7 @@ pub fn read_pngsuite() -> Result<Vec<(PathBuf, Vec<u8>)>, String> {
 pub fn read_pngsuite_basic() -> Result<Vec<(PathBuf, Vec<u8>)>, String> {
     let fixtures_dir = Path::new("tests/fixtures/pngsuite");
     let client = Client::builder()
-        .user_agent("comprs-test/0.1")
+        .user_agent("pixo-test/0.1")
         .build()
         .map_err(|e| e.to_string())?;
 

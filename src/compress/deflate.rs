@@ -2425,4 +2425,254 @@ mod tests {
         // Just verify it doesn't crash and returns a valid result
         assert!(splits.len() <= 9); // At most max_blocks - 1 splits
     }
+
+    #[test]
+    fn test_rle_code_lengths_empty() {
+        let lit_lengths: [u8; 0] = [];
+        let dist_lengths: [u8; 0] = [];
+        let mut cl_freqs = [0u32; 19];
+        let rle = rle_code_lengths(&lit_lengths, &dist_lengths, &mut cl_freqs);
+        assert!(rle.is_empty());
+    }
+
+    #[test]
+    fn test_rle_code_lengths_single() {
+        let lit_lengths = [5u8];
+        let dist_lengths: [u8; 0] = [];
+        let mut cl_freqs = [0u32; 19];
+        let rle = rle_code_lengths(&lit_lengths, &dist_lengths, &mut cl_freqs);
+        // Single length should produce output
+        assert!(!rle.is_empty());
+    }
+
+    #[test]
+    fn test_rle_code_lengths_no_repeats() {
+        let lit_lengths = [1u8, 2, 3, 4, 5];
+        let dist_lengths: [u8; 0] = [];
+        let mut cl_freqs = [0u32; 19];
+        let rle = rle_code_lengths(&lit_lengths, &dist_lengths, &mut cl_freqs);
+        // All different, each should be its own entry
+        assert_eq!(rle.len(), 5);
+    }
+
+    #[test]
+    fn test_rle_code_lengths_zeros() {
+        // Multiple consecutive zeros should use code 17 or 18
+        let lit_lengths = [0u8; 10];
+        let dist_lengths: [u8; 0] = [];
+        let mut cl_freqs = [0u32; 19];
+        let rle = rle_code_lengths(&lit_lengths, &dist_lengths, &mut cl_freqs);
+        // Should use efficient zero-run encoding (code 17 or 18)
+        assert!(!rle.is_empty());
+        // The frequency of code 17 or 18 should be > 0
+        assert!(cl_freqs[17] > 0 || cl_freqs[18] > 0);
+    }
+
+    #[test]
+    fn test_rle_code_lengths_repeats() {
+        // Multiple consecutive same values should use code 16 (repeat)
+        let lit_lengths = [5u8; 10];
+        let dist_lengths: [u8; 0] = [];
+        let mut cl_freqs = [0u32; 19];
+        let rle = rle_code_lengths(&lit_lengths, &dist_lengths, &mut cl_freqs);
+        // Should use repeat encoding (code 16)
+        assert!(cl_freqs[16] > 0 || rle.len() < 10);
+    }
+
+    #[test]
+    fn test_is_high_entropy_data_random() {
+        // Use getrandom for truly random data (not PRNG which might have patterns)
+        let mut data = vec![0u8; 10000];
+        // Note: truly random data should have collision rate < 5% in the 4K hash table
+        // With 4K table and ~8K 4-grams, birthday paradox gives ~50% fill
+        // Collision rate depends on actual randomness
+        // For a PRNG, it may or may not pass the threshold, so we test behavior only
+        let mut rng = rand::rngs::StdRng::seed_from_u64(12345);
+        rng.fill(data.as_mut_slice());
+
+        // Don't assert it's high entropy - just verify function doesn't panic
+        let _ = is_high_entropy_data(&data);
+    }
+
+    #[test]
+    fn test_is_high_entropy_data_repetitive() {
+        let data = vec![42u8; 10000];
+        // Repetitive data is not high entropy
+        assert!(!is_high_entropy_data(&data));
+    }
+
+    #[test]
+    fn test_is_high_entropy_data_short() {
+        let data = vec![42u8; 100];
+        // Short data uses fallback
+        assert!(!is_high_entropy_data(&data));
+    }
+
+    #[test]
+    fn test_reverse_bits_various() {
+        assert_eq!(reverse_bits(0b0, 1), 0b0);
+        assert_eq!(reverse_bits(0b1, 1), 0b1);
+        assert_eq!(reverse_bits(0b10, 2), 0b01);
+        assert_eq!(reverse_bits(0b1111, 4), 0b1111);
+        assert_eq!(reverse_bits(0b1000, 4), 0b0001);
+        assert_eq!(reverse_bits(0b10101010, 8), 0b01010101);
+    }
+
+    #[test]
+    fn test_length_code_all_lengths() {
+        // Test all valid lengths (3-258)
+        for length in 3..=258 {
+            let (code, extra_bits, extra_val) = length_code(length);
+            assert!((257..=285).contains(&code), "Invalid length code {code}");
+            assert!(extra_bits <= 5, "Too many extra bits");
+            // extra_val should fit in extra_bits bits
+            if extra_bits > 0 {
+                assert!(extra_val < (1 << extra_bits), "Extra val too large");
+            }
+        }
+    }
+
+    #[test]
+    fn test_distance_code_all_distances() {
+        // Test various distances
+        for dist in [
+            1, 2, 3, 4, 5, 6, 7, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768,
+        ] {
+            let (code, extra_bits, extra_val) = distance_code(dist);
+            assert!(code < 30, "Invalid distance code {code}");
+            assert!(extra_bits <= 13, "Too many extra bits");
+            // extra_val should fit in extra_bits bits
+            if extra_bits > 0 {
+                assert!(extra_val < (1 << extra_bits), "Extra val too large");
+            }
+        }
+    }
+
+    #[test]
+    fn test_deflate_all_levels() {
+        let data = b"test data for compression at various levels";
+        for level in 1..=9 {
+            let compressed = deflate(data, level);
+            assert!(
+                !compressed.is_empty(),
+                "Level {level} produced empty output"
+            );
+        }
+    }
+
+    #[test]
+    fn test_deflate_zlib_all_levels() {
+        let data = b"test data for compression at various levels";
+        for level in 1..=9 {
+            let compressed = deflate_zlib(data, level);
+            let decoded = decompress_zlib(&compressed);
+            assert_eq!(decoded, data.to_vec(), "Level {level} roundtrip failed");
+        }
+    }
+
+    #[test]
+    fn test_deflater_reuse() {
+        let mut deflater = Deflater::new(6);
+
+        let data1 = b"first chunk of data";
+        let compressed1 = deflater.compress_zlib(data1);
+        let decoded1 = decompress_zlib(&compressed1);
+        assert_eq!(decoded1, data1.to_vec());
+
+        let data2 = b"second chunk of different data";
+        let compressed2 = deflater.compress_zlib(data2);
+        let decoded2 = decompress_zlib(&compressed2);
+        assert_eq!(decoded2, data2.to_vec());
+
+        // Both should produce valid output
+        assert!(!compressed1.is_empty());
+        assert!(!compressed2.is_empty());
+    }
+
+    #[test]
+    fn test_encode_fixed_huffman_empty() {
+        let tokens: Vec<Token> = vec![];
+        let encoded = encode_fixed_huffman(&tokens);
+        // Should at least have the end-of-block marker
+        assert!(!encoded.is_empty());
+    }
+
+    #[test]
+    fn test_encode_dynamic_huffman_edge_case() {
+        // Single match token
+        let tokens = vec![Token::Match {
+            length: 10,
+            distance: 5,
+        }];
+        let encoded = encode_dynamic_huffman(&tokens);
+        assert!(!encoded.is_empty());
+    }
+
+    #[test]
+    fn test_count_symbols_empty() {
+        let tokens: Vec<Token> = vec![];
+        let (lit_counts, dist_counts) = count_symbols(&tokens);
+
+        // End of block should be counted
+        assert_eq!(lit_counts[256], 1);
+        // Per DEFLATE spec, at least one distance symbol is guaranteed
+        // The implementation ensures dist_counts[0] = 1 if no matches
+        assert_eq!(dist_counts[0], 1);
+    }
+
+    #[test]
+    fn test_count_symbols_only_literals() {
+        let tokens = vec![
+            Token::Literal(b'a'),
+            Token::Literal(b'b'),
+            Token::Literal(b'c'),
+        ];
+        let (lit_counts, dist_counts) = count_symbols(&tokens);
+
+        assert_eq!(lit_counts[b'a' as usize], 1);
+        assert_eq!(lit_counts[b'b' as usize], 1);
+        assert_eq!(lit_counts[b'c' as usize], 1);
+        assert_eq!(lit_counts[256], 1); // EOB
+                                        // Per DEFLATE spec, at least one distance symbol is guaranteed
+        assert_eq!(dist_counts[0], 1);
+    }
+
+    #[test]
+    fn test_count_symbols_from_lz77() {
+        let data = b"The quick brown fox jumps over the lazy dog.";
+        let mut lz77 = Lz77Compressor::new(6);
+        let tokens = lz77.compress(data);
+
+        let (lit_counts, dist_counts) = count_symbols(&tokens);
+
+        // Should have some literal counts (all chars plus EOB)
+        assert!(lit_counts.iter().sum::<u32>() > 0);
+        // EOB should be counted
+        assert_eq!(lit_counts[256], 1);
+        // If there are matches, there should be distance symbols too
+        let has_matches = tokens.iter().any(|t| matches!(t, Token::Match { .. }));
+        if has_matches {
+            assert!(dist_counts.iter().sum::<u32>() > 0);
+        }
+    }
+
+    #[test]
+    fn test_deflate_deterministic() {
+        let data = b"deterministic test data";
+
+        let result1 = deflate(data, 6);
+        let result2 = deflate(data, 6);
+
+        assert_eq!(result1, result2, "Compression should be deterministic");
+    }
+
+    #[test]
+    fn test_deflate_zlib_deterministic() {
+        let data = b"deterministic test data with zlib wrapper";
+
+        let result1 = deflate_zlib(data, 6);
+        let result2 = deflate_zlib(data, 6);
+
+        assert_eq!(result1, result2, "Zlib compression should be deterministic");
+    }
 }

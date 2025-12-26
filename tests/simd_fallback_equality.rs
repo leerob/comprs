@@ -9,7 +9,7 @@ use proptest::prelude::*;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
 // Import the fallback implementations for comparison
-use comprs::simd::fallback;
+use pixo::simd::fallback;
 
 /// Test Adler-32 SIMD vs fallback equality on various data sizes.
 #[test]
@@ -29,7 +29,7 @@ fn test_adler32_simd_vs_fallback() {
 
     for data in test_cases {
         let expected = fallback::adler32(&data);
-        let actual = comprs::simd::adler32(&data);
+        let actual = pixo::simd::adler32(&data);
         assert_eq!(
             expected,
             actual,
@@ -57,7 +57,7 @@ fn test_crc32_simd_vs_fallback() {
 
     for data in test_cases {
         let expected = fallback::crc32(&data);
-        let actual = comprs::simd::crc32(&data);
+        let actual = pixo::simd::crc32(&data);
         assert_eq!(expected, actual, "CRC32 mismatch for {} bytes", data.len());
     }
 }
@@ -76,7 +76,7 @@ fn test_match_length_simd_vs_fallback() {
         let max_len = (data.len() - pos2).min(258);
 
         let expected = fallback::match_length(&data, pos1, pos2, max_len);
-        let actual = comprs::simd::match_length(&data, pos1, pos2, max_len);
+        let actual = pixo::simd::match_length(&data, pos1, pos2, max_len);
         assert_eq!(
             expected, actual,
             "match_length mismatch at pos1={pos1}, pos2={pos2}, max_len={max_len}"
@@ -100,7 +100,7 @@ fn test_score_filter_simd_vs_fallback() {
 
     for data in test_cases {
         let expected = fallback::score_filter(&data);
-        let actual = comprs::simd::score_filter(&data);
+        let actual = pixo::simd::score_filter(&data);
         assert_eq!(
             expected,
             actual,
@@ -124,7 +124,7 @@ fn test_filter_sub_simd_vs_fallback() {
             fallback::filter_sub(&row, bpp, &mut expected_output);
 
             let mut actual_output = Vec::new();
-            comprs::simd::filter_sub(&row, bpp, &mut actual_output);
+            pixo::simd::filter_sub(&row, bpp, &mut actual_output);
 
             assert_eq!(
                 expected_output, actual_output,
@@ -149,7 +149,7 @@ fn test_filter_up_simd_vs_fallback() {
         fallback::filter_up(&row, &prev_row, &mut expected_output);
 
         let mut actual_output = Vec::new();
-        comprs::simd::filter_up(&row, &prev_row, &mut actual_output);
+        pixo::simd::filter_up(&row, &prev_row, &mut actual_output);
 
         assert_eq!(
             expected_output, actual_output,
@@ -174,7 +174,7 @@ fn test_filter_average_simd_vs_fallback() {
             fallback::filter_average(&row, &prev_row, bpp, &mut expected_output);
 
             let mut actual_output = Vec::new();
-            comprs::simd::filter_average(&row, &prev_row, bpp, &mut actual_output);
+            pixo::simd::filter_average(&row, &prev_row, bpp, &mut actual_output);
 
             assert_eq!(
                 expected_output, actual_output,
@@ -200,7 +200,7 @@ fn test_filter_paeth_simd_vs_fallback() {
             fallback::filter_paeth(&row, &prev_row, bpp, &mut expected_output);
 
             let mut actual_output = Vec::new();
-            comprs::simd::filter_paeth(&row, &prev_row, bpp, &mut actual_output);
+            pixo::simd::filter_paeth(&row, &prev_row, bpp, &mut actual_output);
 
             assert_eq!(
                 expected_output, actual_output,
@@ -218,7 +218,7 @@ proptest! {
     #[test]
     fn prop_adler32_simd_fallback_equality(data in proptest::collection::vec(any::<u8>(), 0..5000)) {
         let expected = fallback::adler32(&data);
-        let actual = comprs::simd::adler32(&data);
+        let actual = pixo::simd::adler32(&data);
         prop_assert_eq!(expected, actual);
     }
 
@@ -227,14 +227,14 @@ proptest! {
     #[ignore]
     fn prop_crc32_simd_fallback_equality(data in proptest::collection::vec(any::<u8>(), 0..5000)) {
         let expected = fallback::crc32(&data);
-        let actual = comprs::simd::crc32(&data);
+        let actual = pixo::simd::crc32(&data);
         prop_assert_eq!(expected, actual);
     }
 
     #[test]
     fn prop_score_filter_simd_fallback_equality(data in proptest::collection::vec(any::<u8>(), 0..1000)) {
         let expected = fallback::score_filter(&data);
-        let actual = comprs::simd::score_filter(&data);
+        let actual = pixo::simd::score_filter(&data);
         prop_assert_eq!(expected, actual);
     }
 
@@ -247,7 +247,7 @@ proptest! {
         fallback::filter_sub(&row, bpp, &mut expected_output);
 
         let mut actual_output = Vec::new();
-        comprs::simd::filter_sub(&row, bpp, &mut actual_output);
+        pixo::simd::filter_sub(&row, bpp, &mut actual_output);
 
         prop_assert_eq!(expected_output, actual_output);
     }
@@ -263,7 +263,7 @@ proptest! {
         fallback::filter_up(&row, &prev_row, &mut expected_output);
 
         let mut actual_output = Vec::new();
-        comprs::simd::filter_up(&row, &prev_row, &mut actual_output);
+        pixo::simd::filter_up(&row, &prev_row, &mut actual_output);
 
         prop_assert_eq!(expected_output, actual_output);
     }

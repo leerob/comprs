@@ -1,8 +1,8 @@
-//! Error types for the comprs library.
+//! Error types for the pixo library.
 
 use std::fmt;
 
-/// Result type alias for comprs operations.
+/// Result type alias for pixo operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Errors that can occur during image encoding.

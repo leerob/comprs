@@ -259,31 +259,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
-name = "comprs"
-version = "0.1.0"
-dependencies = [
- "clap",
- "criterion",
- "flate2",
- "image",
- "imagequant",
- "jpeg-decoder",
- "jpeg-encoder",
- "libdeflater",
- "lodepng",
- "png",
- "proptest",
- "rand 0.8.5",
- "rayon",
- "reqwest",
- "sha2",
- "talc",
- "url",
- "wasm-bindgen",
- "zopfli",
-]
-
-[[package]]
 name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -954,6 +929,31 @@ name = "pin-utils"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
+
+[[package]]
+name = "pixo"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "criterion",
+ "flate2",
+ "image",
+ "imagequant",
+ "jpeg-decoder",
+ "jpeg-encoder",
+ "libdeflater",
+ "lodepng",
+ "png",
+ "proptest",
+ "rand 0.8.5",
+ "rayon",
+ "reqwest",
+ "sha2",
+ "talc",
+ "url",
+ "wasm-bindgen",
+ "zopfli",
+]
 
 [[package]]
 name = "plotters"

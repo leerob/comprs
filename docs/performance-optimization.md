@@ -1,6 +1,6 @@
 # Performance Optimization Strategies
 
-This document explains the performance optimization techniques used in comprs. These are general principles that apply to any high-performance code, illustrated with concrete examples from this library.
+This document explains the performance optimization techniques used in pixo. These are general principles that apply to any high-performance code, illustrated with concrete examples from this library.
 
 ## The Optimization Mindset
 
@@ -846,7 +846,7 @@ When optimizing, consider these techniques in order of impact:
 
 ## Next Steps
 
-These optimization patterns are applied throughout comprs. To see them in action:
+These optimization patterns are applied throughout pixo. To see them in action:
 
 - **Data transformation**: `src/png/mod.rs` (Zeng palette sorting)
 - **Graph-based optimization**: `src/jpeg/trellis.rs` (trellis quantization)

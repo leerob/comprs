@@ -121,7 +121,7 @@ const KODAK_BASE_URL: &str = "https://r0k.us/graphics/kodak/kodak";
 /// Fetch all Kodak images to the specified directory with SHA256 verification.
 pub fn fetch_kodak(fixtures_dir: &Path) -> Result<(), String> {
     let client = Client::builder()
-        .user_agent("comprs-test/0.1")
+        .user_agent("pixo-test/0.1")
         .build()
         .map_err(|e| e.to_string())?;
 

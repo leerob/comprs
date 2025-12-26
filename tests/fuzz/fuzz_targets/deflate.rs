@@ -31,7 +31,7 @@ fuzz_target!(|input: DeflateInput| {
     let level = (input.level % 9).max(1);
 
     // Compress using our implementation
-    let compressed = comprs::compress::deflate::deflate_zlib(&input.data, level);
+    let compressed = pixo::compress::deflate::deflate_zlib(&input.data, level);
 
     // Verify zlib header
     assert!(compressed.len() >= 6, "Compressed data too short");

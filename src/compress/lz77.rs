@@ -1677,6 +1677,267 @@ mod tests {
             assert!(!tokens.is_empty());
         }
     }
+
+    #[test]
+    fn test_cost_model_match_cost_various_lengths() {
+        let model = CostModel::fixed();
+
+        // Test various lengths
+        let cost_3 = model.match_cost(3, 1);
+        let cost_10 = model.match_cost(10, 1);
+        let cost_100 = model.match_cost(100, 1);
+        let cost_258 = model.match_cost(258, 1);
+
+        // All should be positive
+        assert!(cost_3 > 0.0);
+        assert!(cost_10 > 0.0);
+        assert!(cost_100 > 0.0);
+        assert!(cost_258 > 0.0);
+    }
+
+    #[test]
+    fn test_cost_model_match_cost_various_distances() {
+        let model = CostModel::fixed();
+
+        // Test various distances
+        let cost_1 = model.match_cost(3, 1);
+        let cost_100 = model.match_cost(3, 100);
+        let cost_1000 = model.match_cost(3, 1000);
+        let cost_max = model.match_cost(3, 32768);
+
+        // All should be positive
+        assert!(cost_1 > 0.0);
+        assert!(cost_100 > 0.0);
+        assert!(cost_1000 > 0.0);
+        assert!(cost_max > 0.0);
+
+        // Larger distances should cost more (more extra bits)
+        assert!(cost_max >= cost_1);
+    }
+
+    #[test]
+    fn test_cost_model_literal_all_bytes() {
+        let model = CostModel::fixed();
+
+        for byte in 0u8..=255 {
+            let cost = model.literal_cost(byte);
+            assert!(cost > 0.0, "Literal {byte} should have positive cost");
+            assert!(cost <= 16.0, "Literal {byte} cost should be reasonable");
+        }
+    }
+
+    #[test]
+    fn test_lz77_single_byte() {
+        let mut compressor = Lz77Compressor::new(6);
+        let data = b"a";
+        let tokens = compressor.compress(data);
+
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0], Token::Literal(b'a'));
+    }
+
+    #[test]
+    fn test_lz77_two_bytes() {
+        let mut compressor = Lz77Compressor::new(6);
+        let data = b"ab";
+        let tokens = compressor.compress(data);
+
+        assert_eq!(tokens.len(), 2);
+    }
+
+    #[test]
+    fn test_lz77_all_same_bytes() {
+        let mut compressor = Lz77Compressor::new(6);
+        let data = vec![b'a'; 100];
+        let tokens = compressor.compress(&data);
+
+        // Should compress very well
+        assert!(tokens.len() < 10, "All same bytes should compress well");
+    }
+
+    #[test]
+    fn test_lz77_run_length_encoding() {
+        let mut compressor = Lz77Compressor::new(6);
+        // Long run of same byte
+        let data: Vec<u8> = vec![0xFF; 1000];
+        let tokens = compressor.compress(&data);
+
+        // Should use matches for RLE-like compression
+        assert!(tokens.len() < 50);
+    }
+
+    #[test]
+    fn test_packed_token_boundary_lengths() {
+        // Test minimum and maximum lengths
+        let min = PackedToken::match_(3, 1);
+        assert_eq!(min.as_match(), Some((3, 1)));
+
+        let max_len = PackedToken::match_(258, 1);
+        assert_eq!(max_len.as_match(), Some((258, 1)));
+    }
+
+    #[test]
+    fn test_packed_token_boundary_distances() {
+        // Test minimum and maximum distances
+        let min = PackedToken::match_(3, 1);
+        assert_eq!(min.as_match(), Some((3, 1)));
+
+        let max_dist = PackedToken::match_(3, 32768);
+        assert_eq!(max_dist.as_match(), Some((3, 32768)));
+    }
+
+    #[test]
+    fn test_lz77_compress_deterministic() {
+        let data = b"hello world hello world";
+
+        let mut compressor1 = Lz77Compressor::new(6);
+        let tokens1 = compressor1.compress(data);
+
+        let mut compressor2 = Lz77Compressor::new(6);
+        let tokens2 = compressor2.compress(data);
+
+        assert_eq!(tokens1, tokens2, "Compression should be deterministic");
+    }
+
+    #[test]
+    fn test_optimal_vs_greedy() {
+        let mut compressor = Lz77Compressor::new(6);
+        let cost_model = CostModel::fixed();
+
+        // Some inputs where optimal might differ from greedy
+        let data = b"abcdeabcdfabcde";
+
+        let greedy_tokens = compressor.compress(data);
+        let optimal_tokens = compressor.compress_optimal(data, &cost_model);
+
+        // Both should produce valid output (reconstruct same data)
+        let greedy_output = reconstruct_from_tokens(&greedy_tokens);
+        let optimal_output = reconstruct_from_tokens(&optimal_tokens);
+
+        assert_eq!(greedy_output, data.to_vec());
+        assert_eq!(optimal_output, data.to_vec());
+    }
+
+    fn reconstruct_from_tokens(tokens: &[Token]) -> Vec<u8> {
+        let mut result = Vec::new();
+        for token in tokens {
+            match token {
+                Token::Literal(b) => result.push(*b),
+                Token::Match { length, distance } => {
+                    let start = result.len() - *distance as usize;
+                    for i in 0..*length as usize {
+                        result.push(result[start + i]);
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    #[test]
+    fn test_cost_model_short_match_cost() {
+        let model = CostModel::fixed();
+
+        // Short match cost
+        let short = model.match_cost(3, 1);
+        let long = model.match_cost(100, 1);
+
+        // Both should be reasonable
+        assert!(short > 0.0);
+        assert!(long > 0.0);
+    }
+
+    #[test]
+    fn test_cost_model_frequency_based() {
+        let mut lit_counts = [0u32; 286];
+        let mut dist_counts = [0u32; 30];
+
+        // Very skewed distribution
+        lit_counts[0] = 1000; // null byte very common
+        lit_counts[255] = 1; // 0xFF very rare
+
+        dist_counts[0] = 100; // Short distances common
+
+        let model = CostModel::from_statistics(&lit_counts, &dist_counts);
+
+        // Common byte should cost less
+        assert!(model.literal_cost(0) < model.literal_cost(255));
+    }
+
+    #[test]
+    fn test_lz77_window_size() {
+        // Test that matches respect the window size
+        let mut data = vec![0u8; 40000];
+        // Place pattern at start
+        for i in 0..10 {
+            data[i] = (i + 1) as u8;
+        }
+        // Repeat pattern beyond window size
+        for i in 0..10 {
+            data[35000 + i] = (i + 1) as u8;
+        }
+
+        let mut compressor = Lz77Compressor::new(6);
+        let tokens = compressor.compress(&data);
+
+        // Should produce valid output
+        let reconstructed = reconstruct_from_tokens(&tokens);
+        assert_eq!(reconstructed, data);
+    }
+
+    #[test]
+    fn test_length_to_symbol_edge_cases() {
+        // Test exact boundaries between length codes
+        assert_eq!(length_to_symbol(3).0, 257);
+        assert_eq!(length_to_symbol(4).0, 258);
+        assert_eq!(length_to_symbol(5).0, 259);
+        assert_eq!(length_to_symbol(6).0, 260);
+        assert_eq!(length_to_symbol(7).0, 261);
+        assert_eq!(length_to_symbol(8).0, 262);
+        assert_eq!(length_to_symbol(9).0, 263);
+        assert_eq!(length_to_symbol(10).0, 264);
+    }
+
+    #[test]
+    fn test_distance_to_symbol_edge_cases() {
+        // Small distances have direct codes
+        assert_eq!(distance_to_symbol(1).0, 0);
+        assert_eq!(distance_to_symbol(2).0, 1);
+        assert_eq!(distance_to_symbol(3).0, 2);
+        assert_eq!(distance_to_symbol(4).0, 3);
+    }
+
+    #[test]
+    fn test_optimal_lz77_long_input() {
+        let mut compressor = Lz77Compressor::new(6);
+        let cost_model = CostModel::fixed();
+
+        // Create longer input with repeating patterns
+        let mut data = Vec::new();
+        for _ in 0..100 {
+            data.extend_from_slice(b"pattern");
+        }
+
+        let tokens = compressor.compress_optimal(&data, &cost_model);
+        let reconstructed = reconstruct_from_tokens(&tokens);
+        assert_eq!(reconstructed, data);
+    }
+
+    #[test]
+    fn test_hash_collisions() {
+        // Test that hash collisions are handled correctly
+        let mut compressor = Lz77Compressor::new(6);
+
+        // Data that might cause hash collisions
+        let mut data = Vec::new();
+        for i in 0..1000 {
+            data.push((i % 4) as u8);
+        }
+
+        let tokens = compressor.compress(&data);
+        let reconstructed = reconstruct_from_tokens(&tokens);
+        assert_eq!(reconstructed, data);
+    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-# comprs
+# pixo
 
 A minimal-dependency, high-performance image compression library written in Rust.
 
@@ -14,7 +14,7 @@ This is a work-in-progress and exploration of coding agents.
 
 ## Usage
 
-1. **[Playground](https://comprs.vercel.app/)** (recommended) — Try it in your browser
+1. **[Playground](https://pixo.vercel.app/)** (recommended) — Try it in your browser
 2. **[WASM](./docs/wasm.md)** — Use in browser or Node.js applications
 3. **[CLI](./docs/cli.md)** — Compress images from the command line
 4. **[Rust Crate](./docs/crate.md)** — Use as a library in your Rust projects
@@ -25,7 +25,7 @@ Comprehensive guides explaining the algorithms and compression strategies:
 
 - [Documentation Index](./docs/README.md) — Start here for an overview
 - [Introduction to Image Compression](./docs/introduction-to-image-compression.md) — Why and how we compress images
-- [Introduction to Rust](./docs/introduction-to-rust.md) — Rust features through the lens of comprs
+- [Introduction to Rust](./docs/introduction-to-rust.md) — Rust features through the lens of pixo
 
 ### Core Algorithms
 

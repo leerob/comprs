@@ -1,6 +1,6 @@
 # CLI
 
-The comprs command-line tool for image compression.
+The pixo command-line tool for image compression.
 
 ## Installation
 
@@ -16,46 +16,46 @@ cargo build --release --features cli
 
 ```bash
 # Basic usage - compress to JPEG (default)
-comprs input.png -o output.jpg
+pixo input.png -o output.jpg
 
 # Compress to PNG with maximum compression
-comprs input.jpg -o output.png -c 9
+pixo input.jpg -o output.png -c 9
 
 # JPEG with custom quality (1-100)
-comprs photo.png -o photo.jpg -q 90
+pixo photo.png -o photo.jpg -q 90
 
 # JPEG with 4:2:0 chroma subsampling (smaller files)
-comprs photo.png -o photo.jpg --subsampling s420
+pixo photo.png -o photo.jpg --subsampling s420
 
 # PNG with specific filter strategy
-comprs input.jpg -o output.png --filter paeth
+pixo input.jpg -o output.png --filter paeth
 
 # Adaptive fast (reduced trials) filter strategy
-comprs input.jpg -o output.png --filter adaptive-fast
+pixo input.jpg -o output.png --filter adaptive-fast
 
 # Convert to grayscale
-comprs color.png -o gray.jpg --grayscale
+pixo color.png -o gray.jpg --grayscale
 
 # Verbose output with timing and size info
-comprs input.png -o output.jpg -v
+pixo input.png -o output.jpg -v
 
 # Preview operation without writing (dry run)
-comprs input.png -o output.jpg -n
+pixo input.png -o output.jpg -n
 
 # Quiet mode (suppress output)
-comprs input.png -o output.jpg --quiet
+pixo input.png -o output.jpg --quiet
 
 # JSON output for scripting
-comprs input.png -o output.jpg --json
+pixo input.png -o output.jpg --json
 
 # Read from stdin, write to file
-cat photo.png | comprs - -o output.jpg
+cat photo.png | pixo - -o output.jpg
 
 # Read from file, write to stdout
-comprs input.png -o - -f jpeg > output.jpg
+pixo input.png -o - -f jpeg > output.jpg
 
 # Pipe through compression
-curl https://example.com/image.png | comprs - -o - -f jpeg | upload-service
+curl https://example.com/image.png | pixo - -o - -f jpeg | upload-service
 ```
 
 ## Options
@@ -86,13 +86,13 @@ Use `-` as the input path to read from stdin, or `-` as the output path to write
 
 ```bash
 # Read from stdin (output path required)
-cat image.png | comprs - -o output.jpg
+cat image.png | pixo - -o output.jpg
 
 # Write to stdout
-comprs input.png -o - -f jpeg > output.jpg
+pixo input.png -o - -f jpeg > output.jpg
 
 # Both stdin and stdout
-cat image.png | comprs - -o - -f jpeg > output.jpg
+cat image.png | pixo - -o - -f jpeg > output.jpg
 ```
 
 When writing to stdout, use `-f`/`--format` to specify the output format since it can't be detected from the filename.
@@ -102,13 +102,13 @@ When writing to stdout, use `-f`/`--format` to specify the output format since i
 Use `--json` for machine-readable output, useful for scripting:
 
 ```bash
-$ comprs input.png -o output.jpg --json
+$ pixo input.png -o output.jpg --json
 {"input":"input.png","output":"output.jpg","input_size":102400,"output_size":51200,"ratio":50.0}
 ```
 
 With `--dry-run`:
 
 ```bash
-$ comprs input.png -o output.jpg --json -n
+$ pixo input.png -o output.jpg --json -n
 {"dry_run":true,"input":"input.png","output":"output.jpg","input_size":102400,"output_size":51200,"ratio":50.0}
 ```

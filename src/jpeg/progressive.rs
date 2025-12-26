@@ -497,4 +497,277 @@ mod tests {
         // Fallback returns EOB code
         assert_eq!((code, len), (0, 4));
     }
+
+    #[test]
+    fn test_encode_dc_first_zero() {
+        let tables = HuffmanTables::new();
+        let mut writer = BitWriterMsb::new();
+        let dc_code = get_dc_code(&tables, 0, true); // category 0 for dc_diff = 0
+        encode_dc_first(&mut writer, 0, 0, dc_code);
+        // Should have written just the Huffman code for category 0
+        assert!(!writer.is_empty());
+    }
+
+    #[test]
+    fn test_encode_dc_first_nonzero() {
+        let tables = HuffmanTables::new();
+        let mut writer = BitWriterMsb::new();
+        let dc_diff = 100;
+        let cat = category(dc_diff);
+        let dc_code = get_dc_code(&tables, cat, true);
+        encode_dc_first(&mut writer, dc_diff, 0, dc_code);
+        // Should write Huffman code + value bits
+        assert!(!writer.is_empty());
+    }
+
+    #[test]
+    fn test_encode_dc_first_with_successive_approximation() {
+        let tables = HuffmanTables::new();
+        let mut writer = BitWriterMsb::new();
+        let dc_diff = 128; // Binary: 10000000
+        let al = 2; // Shift by 2 bits
+        let shifted = dc_diff >> al; // 32
+        let cat = category(shifted);
+        let dc_code = get_dc_code(&tables, cat, true);
+        encode_dc_first(&mut writer, dc_diff, al, dc_code);
+        assert!(!writer.is_empty());
+    }
+
+    #[test]
+    fn test_encode_dc_refine() {
+        let mut writer = BitWriterMsb::new();
+        // Test refinement with al=0, should output the LSB
+        encode_dc_refine(&mut writer, 5, 0); // 5 = 0b101, bit 0 = 1
+        encode_dc_refine(&mut writer, 4, 0); // 4 = 0b100, bit 0 = 0
+        assert!(!writer.is_empty());
+    }
+
+    #[test]
+    fn test_encode_dc_refine_higher_bit() {
+        let mut writer = BitWriterMsb::new();
+        encode_dc_refine(&mut writer, 6, 1); // 6 = 0b110, bit 1 = 1
+        encode_dc_refine(&mut writer, 5, 1); // 5 = 0b101, bit 1 = 0
+        assert!(!writer.is_empty());
+    }
+
+    #[test]
+    fn test_encode_ac_first_all_zeros() {
+        let tables = HuffmanTables::new();
+        let mut writer = BitWriterMsb::new();
+        let block = [0i16; 64];
+        let mut eob_run = 0u16;
+
+        encode_ac_first(&mut writer, &block, 1, 63, 0, &mut eob_run, &tables, true);
+
+        // All zeros should just accumulate EOB run
+        assert_eq!(eob_run, 1);
+    }
+
+    #[test]
+    fn test_encode_ac_first_with_coefficients() {
+        let tables = HuffmanTables::new();
+        let mut writer = BitWriterMsb::new();
+        let mut block = [0i16; 64];
+        // Set some AC coefficients in natural order (will be zigzag reordered)
+        block[1] = 10;
+        block[8] = 5;
+        let mut eob_run = 0u16;
+
+        encode_ac_first(&mut writer, &block, 1, 63, 0, &mut eob_run, &tables, true);
+
+        // Should have encoded the coefficients
+        assert!(!writer.is_empty() || eob_run > 0);
+    }
+
+    #[test]
+    fn test_encode_ac_first_successive_approximation() {
+        let tables = HuffmanTables::new();
+        let mut writer = BitWriterMsb::new();
+        let mut block = [0i16; 64];
+        block[1] = 8; // Will be shifted by al
+        let mut eob_run = 0u16;
+        let al = 2;
+
+        encode_ac_first(&mut writer, &block, 1, 10, al, &mut eob_run, &tables, true);
+        // With al=2, 8 >> 2 = 2, which should be encoded
+        assert!(!writer.is_empty() || eob_run > 0);
+    }
+
+    #[test]
+    fn test_flush_eob_run_zero() {
+        let tables = HuffmanTables::new();
+        let mut writer = BitWriterMsb::new();
+        let mut eob_run = 0u16;
+
+        flush_eob_run_public(&mut writer, &mut eob_run, &tables, true);
+        // Should be a no-op when eob_run is 0
+        assert!(writer.is_empty());
+        assert_eq!(eob_run, 0);
+    }
+
+    #[test]
+    fn test_flush_eob_run_small() {
+        let tables = HuffmanTables::new();
+        let mut writer = BitWriterMsb::new();
+        let mut eob_run = 3u16;
+
+        flush_eob_run_public(&mut writer, &mut eob_run, &tables, true);
+        assert!(!writer.is_empty());
+        assert_eq!(eob_run, 0);
+    }
+
+    #[test]
+    fn test_flush_eob_run_large() {
+        let tables = HuffmanTables::new();
+        let mut writer = BitWriterMsb::new();
+        let mut eob_run = 100u16;
+
+        flush_eob_run_public(&mut writer, &mut eob_run, &tables, true);
+        assert!(!writer.is_empty());
+        assert_eq!(eob_run, 0);
+    }
+
+    #[test]
+    fn test_eob_run_max() {
+        let tables = HuffmanTables::new();
+        let block = [0i16; 64];
+
+        // Accumulate many EOB runs to test near-max behavior
+        let mut eob_run = 0u16;
+        for _ in 0..100 {
+            let mut writer = BitWriterMsb::new();
+            encode_ac_first(&mut writer, &block, 1, 63, 0, &mut eob_run, &tables, true);
+        }
+        // EOB run should have accumulated
+        assert!(eob_run > 0);
+    }
+
+    #[test]
+    fn test_get_dc_code_luminance_vs_chrominance() {
+        let tables = HuffmanTables::new();
+
+        let lum_code = get_dc_code(&tables, 1, true);
+        let chrom_code = get_dc_code(&tables, 1, false);
+
+        // Both should have valid codes (may be different)
+        assert!(lum_code.1 > 0);
+        assert!(chrom_code.1 > 0);
+    }
+
+    #[test]
+    fn test_category_boundary_values() {
+        // Test boundary values
+        assert_eq!(category(1), 1);
+        assert_eq!(category(-1), 1);
+        assert_eq!(category(2), 2);
+        assert_eq!(category(-2), 2);
+        assert_eq!(category(3), 2);
+        assert_eq!(category(4), 3);
+        assert_eq!(category(7), 3);
+        assert_eq!(category(8), 4);
+        assert_eq!(category(15), 4);
+        assert_eq!(category(16), 5);
+    }
+
+    #[test]
+    fn test_encode_value_boundary() {
+        // Test that encode_value handles boundaries correctly
+        let (bits, len) = encode_value(1);
+        assert_eq!((bits, len), (1, 1));
+
+        let (bits, len) = encode_value(2);
+        assert_eq!((bits, len), (2, 2));
+
+        let (bits, len) = encode_value(3);
+        assert_eq!((bits, len), (3, 2));
+
+        let (bits, len) = encode_value(4);
+        assert_eq!((bits, len), (4, 3));
+    }
+
+    #[test]
+    fn test_scan_spec_ac_scan() {
+        // Test AC scan identification
+        let ac_scan = ScanSpec::new(vec![0], 1, 63, 0, 0);
+        assert!(!ac_scan.is_dc_scan());
+        assert!(ac_scan.is_first_scan());
+        assert!(!ac_scan.is_refinement_scan());
+    }
+
+    #[test]
+    fn test_scan_spec_partial_ac() {
+        // Test partial AC scan (spectral selection)
+        let partial = ScanSpec::new(vec![0], 1, 10, 0, 0);
+        assert!(!partial.is_dc_scan());
+        assert_eq!(partial.ss, 1);
+        assert_eq!(partial.se, 10);
+    }
+
+    #[test]
+    fn test_default_script_has_all_components() {
+        let script = default_progressive_script();
+
+        // Should have scans for all 3 components
+        let mut has_y = false;
+        let mut has_cb = false;
+        let mut has_cr = false;
+
+        for scan in &script {
+            if scan.components.contains(&0) {
+                has_y = true;
+            }
+            if scan.components.contains(&1) {
+                has_cb = true;
+            }
+            if scan.components.contains(&2) {
+                has_cr = true;
+            }
+        }
+
+        assert!(has_y, "Missing Y component scans");
+        assert!(has_cb, "Missing Cb component scans");
+        assert!(has_cr, "Missing Cr component scans");
+    }
+
+    #[test]
+    fn test_simple_script_complete_coverage() {
+        let script = simple_progressive_script();
+
+        // Verify DC scans cover all frequencies for all components
+        let mut dc_covered = [false; 3];
+        let mut ac_covered = [false; 3];
+
+        for scan in &script {
+            for &c in &scan.components {
+                if scan.is_dc_scan() {
+                    dc_covered[c as usize] = true;
+                } else {
+                    ac_covered[c as usize] = true;
+                }
+            }
+        }
+
+        assert!(
+            dc_covered.iter().all(|&x| x),
+            "Not all DC components covered"
+        );
+        assert!(
+            ac_covered.iter().all(|&x| x),
+            "Not all AC components covered"
+        );
+    }
+
+    #[test]
+    fn test_encode_ac_refine_basic() {
+        let tables = HuffmanTables::new();
+        let mut writer = BitWriterMsb::new();
+        let mut block = [0i16; 64];
+        // Set up a block with previously non-zero coefficient (> 1 << al)
+        block[1] = 10; // In zigzag position
+        let mut eob_run = 0u16;
+
+        encode_ac_refine(&mut writer, &block, 1, 10, 0, &mut eob_run, &tables, true);
+        // Should produce some output or EOB run
+        assert!(!writer.is_empty() || eob_run > 0);
+    }
 }

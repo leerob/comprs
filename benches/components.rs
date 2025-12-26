@@ -1,16 +1,16 @@
-//! Component-level microbenchmarks for comprs.
+//! Component-level microbenchmarks for pixo.
 //! Focuses on LZ77, Huffman encoding, filtering, and checksums.
 
-use comprs::compress::deflate::{
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use pixo::compress::deflate::{
     deflate, deflate_packed, deflate_zlib, deflate_zlib_packed, encode_dynamic_huffman,
     encode_fixed_huffman,
 };
-use comprs::compress::lz77::Lz77Compressor;
-use comprs::compress::{adler32, crc32};
-use comprs::png::filter::apply_filters;
-use comprs::png::{FilterStrategy, PngOptions};
-use comprs::ColorType;
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use pixo::compress::lz77::Lz77Compressor;
+use pixo::compress::{adler32, crc32};
+use pixo::png::filter::apply_filters;
+use pixo::png::{FilterStrategy, PngOptions};
+use pixo::ColorType;
 
 fn make_pattern(len: usize) -> Vec<u8> {
     let mut out = Vec::with_capacity(len);
@@ -255,11 +255,9 @@ fn bench_png_encode(c: &mut Criterion) {
     let mut group = c.benchmark_group("png_encode_512_rgb");
     group.throughput(Throughput::Bytes(bytes));
 
-    group.bench_function("comprs_default", |b| {
+    group.bench_function("pixo_default", |b| {
         b.iter(|| {
-            black_box(
-                comprs::png::encode(black_box(&pixels), width, height, ColorType::Rgb).unwrap(),
-            )
+            black_box(pixo::png::encode(black_box(&pixels), width, height, ColorType::Rgb).unwrap())
         });
     });
 

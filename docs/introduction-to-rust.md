@@ -1,6 +1,6 @@
 # Introduction to Rust
 
-This document introduces the Rust programming language through the lens of comprs. Rather than covering Rust in the abstract, we'll explore how its unique features enable us to write safe, fast, and expressive compression code.
+This document introduces the Rust programming language through the lens of pixo. Rather than covering Rust in the abstract, we'll explore how its unique features enable us to write safe, fast, and expressive compression code.
 
 If you're coming from C, C++, Python, or JavaScript, Rust will feel both familiar and surprisingly different. The initial learning curve is real—but the payoff is code that's fast like C, safe like a garbage-collected language, and expressive like a modern functional language.
 
@@ -841,7 +841,7 @@ This pattern keeps the main logic unindented and easy to follow.
 
 Continue to [Huffman Coding](./huffman-coding.md) to learn the foundational entropy coding technique used in both PNG and JPEG compression.
 
-This introduction covers the Rust features most relevant to understanding comprs. To dive deeper into Rust itself:
+This introduction covers the Rust features most relevant to understanding pixo. To dive deeper into Rust itself:
 
 - **The Rust Book**: https://doc.rust-lang.org/book/
 - **Rust by Example**: https://doc.rust-lang.org/rust-by-example/

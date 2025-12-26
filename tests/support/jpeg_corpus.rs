@@ -104,7 +104,7 @@ fn fetch_jpeg_category(
 /// Fetch all JPEG corpus images.
 pub fn fetch_jpeg_corpus(fixtures_dir: &Path) -> Result<(), String> {
     let client = Client::builder()
-        .user_agent("comprs-test/0.1")
+        .user_agent("pixo-test/0.1")
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -121,7 +121,7 @@ pub fn fetch_jpeg_corpus(fixtures_dir: &Path) -> Result<(), String> {
 /// Fetch the full JPEG corpus including edge cases.
 pub fn fetch_jpeg_corpus_full(fixtures_dir: &Path) -> Result<(), String> {
     let client = Client::builder()
-        .user_agent("comprs-test/0.1")
+        .user_agent("pixo-test/0.1")
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -162,7 +162,7 @@ pub fn read_jpeg_corpus() -> Result<Vec<(PathBuf, Vec<u8>)>, String> {
 pub fn read_jpeg_baseline() -> Result<Vec<(PathBuf, Vec<u8>)>, String> {
     let fixtures_dir = Path::new("tests/fixtures/jpeg_corpus");
     let client = Client::builder()
-        .user_agent("comprs-test/0.1")
+        .user_agent("pixo-test/0.1")
         .build()
         .map_err(|e| e.to_string())?;
 

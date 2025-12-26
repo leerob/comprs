@@ -1,6 +1,6 @@
 # Benchmarks
 
-This directory contains performance benchmarks for the comprs library.
+This directory contains performance benchmarks for the pixo library.
 
 **For comprehensive benchmark results, library comparisons, and recommendations, see [BENCHMARKS.md](BENCHMARKS.md).**
 
@@ -18,10 +18,10 @@ cargo bench --bench comparison -- --summary-only
 
 ### comparison (recommended)
 
-Comprehensive benchmark comparing comprs against all major alternatives:
+Comprehensive benchmark comparing pixo against all major alternatives:
 
 - **All three presets**: Fast, Balanced, Max for PNG and JPEG
-- **Lossy PNG**: Quantization comparison (comprs vs imagequant vs pngquant)
+- **Lossy PNG**: Quantization comparison (pixo vs imagequant vs pngquant)
 - **External tools**: oxipng, mozjpeg, pngquant (if installed)
 - **Rust alternatives**: image crate, flate2, imagequant
 - **Kodak images**: Real photographic images for realistic benchmarks
@@ -65,12 +65,12 @@ pngquant --version
 
 The comparison benchmark includes lossy PNG compression using palette quantization:
 
-### comprs Lossy Mode
+### pixo Lossy Mode
 
-comprs supports lossy PNG compression via `QuantizationMode`:
+pixo supports lossy PNG compression via `QuantizationMode`:
 
 ```rust
-use comprs::png::{PngOptions, QuantizationMode, QuantizationOptions};
+use pixo::png::{PngOptions, QuantizationMode, QuantizationOptions};
 
 let mut opts = PngOptions::balanced();
 opts.quantization = QuantizationOptions {

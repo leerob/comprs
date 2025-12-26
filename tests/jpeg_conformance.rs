@@ -9,8 +9,8 @@
     clippy::unnecessary_cast
 )]
 
-use comprs::{jpeg, ColorType};
 use image::GenericImageView;
+use pixo::{jpeg, ColorType};
 use proptest::prelude::*;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 mod support;
@@ -262,7 +262,7 @@ fn test_image_too_large() {
     let height = 1;
     let pixels = vec![0u8; (width as usize * height as usize * 3) as usize];
     let err = jpeg::encode(&pixels, width, height, 85).unwrap_err();
-    assert!(matches!(err, comprs::Error::ImageTooLarge { .. }));
+    assert!(matches!(err, pixo::Error::ImageTooLarge { .. }));
 }
 
 // ============================================================================

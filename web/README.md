@@ -1,18 +1,18 @@
-# comprs web optimizer (SvelteKit + WASM)
+# pixo web optimizer (SvelteKit + WASM)
 
-Client-side PNG/JPEG compression powered by the `comprs` Rust library compiled to WebAssembly. Select images from disk, tune PNG filters or JPEG quality, and compare originals with a draggable before/after slider—all without leaving the browser.
+Client-side PNG/JPEG compression powered by the `pixo` Rust library compiled to WebAssembly. Select images from disk, tune PNG filters or JPEG quality, and compare originals with a draggable before/after slider—all without leaving the browser.
 
 ## Stack
 - SvelteKit + TypeScript
 - Tailwind CSS
-- WebAssembly build of `comprs` (Rust)
+- WebAssembly build of `pixo` (Rust)
 
 ## Getting started
 ```sh
 # install deps
 npm install
 
-# build the WASM bundle from the Rust crate into src/lib/comprs-wasm
+# build the WASM bundle from the Rust crate into src/lib/pixo-wasm
 npm run wasm:build
 
 # start the dev server

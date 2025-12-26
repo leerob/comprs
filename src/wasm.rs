@@ -1,4 +1,4 @@
-//! WebAssembly bindings for comprs.
+//! WebAssembly bindings for pixo.
 //!
 //! This module provides a minimal WASM API for encoding PNG and JPEG images.
 //! Only 3 functions are exported to keep the binary size small (~214 KB).
@@ -14,14 +14,14 @@
 //! cargo build --target wasm32-unknown-unknown --release --features wasm
 //!
 //! # Generate JS bindings
-//! wasm-bindgen --target web --out-dir web/src/lib/comprs-wasm --out-name comprs \
-//!   target/wasm32-unknown-unknown/release/comprs.wasm
+//! wasm-bindgen --target web --out-dir web/src/lib/pixo-wasm --out-name pixo \
+//!   target/wasm32-unknown-unknown/release/pixo.wasm
 //! ```
 //!
 //! # Example (JavaScript)
 //!
 //! ```javascript
-//! import init, { encodePng, encodeJpeg, bytesPerPixel } from 'comprs';
+//! import init, { encodePng, encodeJpeg, bytesPerPixel } from 'pixo';
 //!
 //! await init();
 //!

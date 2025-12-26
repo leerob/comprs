@@ -105,10 +105,10 @@ jobs:
         run: |
           wasm-bindgen \
             --target web \
-            --out-dir ./web/src/lib/comprs-wasm \
-            --out-name comprs \
-            target/wasm32-unknown-unknown/release/comprs.wasm
-          rm -f ./web/src/lib/comprs-wasm/.gitignore
+            --out-dir ./web/src/lib/pixo-wasm \
+            --out-name pixo \
+            target/wasm32-unknown-unknown/release/pixo.wasm
+          rm -f ./web/src/lib/pixo-wasm/.gitignore
 
       - name: Install binaryen (wasm-opt)
         run: |
@@ -119,19 +119,19 @@ jobs:
         run: |
           wasm-opt -Oz --strip-debug --strip-dwarf --strip-producers --strip-target-features \
             --enable-bulk-memory --enable-sign-ext --enable-nontrapping-float-to-int \
-            -o ./web/src/lib/comprs-wasm/comprs_bg.wasm \
-            ./web/src/lib/comprs-wasm/comprs_bg.wasm
+            -o ./web/src/lib/pixo-wasm/pixo_bg.wasm \
+            ./web/src/lib/pixo-wasm/pixo_bg.wasm
 
       - name: Report WASM size
         run: |
-          ls -lh ./web/src/lib/comprs-wasm/comprs_bg.wasm
-          echo "::notice::WASM size: $(stat -c%s ./web/src/lib/comprs-wasm/comprs_bg.wasm) bytes"
+          ls -lh ./web/src/lib/pixo-wasm/pixo_bg.wasm
+          echo "::notice::WASM size: $(stat -c%s ./web/src/lib/pixo-wasm/pixo_bg.wasm) bytes"
 
       - name: Upload WASM artifact
         uses: actions/upload-artifact@v4
         with:
-          name: comprs-wasm
-          path: web/src/lib/comprs-wasm/
+          name: pixo-wasm
+          path: web/src/lib/pixo-wasm/
           retention-days: 1
 
   # ─────────────────────────────────────────────────────────────────────────────
@@ -155,8 +155,8 @@ jobs:
         if: needs.changes.outputs.rust == 'true'
         uses: actions/download-artifact@v4
         with:
-          name: comprs-wasm
-          path: web/src/lib/comprs-wasm/
+          name: pixo-wasm
+          path: web/src/lib/pixo-wasm/
 
       # Use committed WASM if only frontend changed
       - name: Use committed WASM
