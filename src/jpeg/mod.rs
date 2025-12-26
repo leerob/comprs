@@ -287,7 +287,13 @@ pub fn encode_with_options_into(
     };
 
     // Validate data length
-    let expected_len = width as usize * height as usize * bytes_per_pixel;
+    let expected_len = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|v| v.checked_mul(bytes_per_pixel))
+        .ok_or(Error::InvalidDataLength {
+            expected: usize::MAX,
+            actual: data.len(),
+        })?;
     if data.len() != expected_len {
         return Err(Error::InvalidDataLength {
             expected: expected_len,
@@ -1905,5 +1911,155 @@ mod tests {
         let pixels = vec![0u8; 10]; // Not enough for 4x4 RGB
         let err = encode(&pixels, 4, 4, 85).unwrap_err();
         assert!(matches!(err, Error::InvalidDataLength { .. }));
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    fn test_encode_overflow_data_length() {
+        let pixels = Vec::new();
+        let err = encode(&pixels, MAX_DIMENSION, MAX_DIMENSION, 85).unwrap_err();
+        assert!(matches!(err, Error::InvalidDataLength { .. }));
+    }
+
+    // ============================================================================
+    // Grayscale Encoding Tests
+    // ============================================================================
+
+    #[test]
+    fn test_encode_grayscale_baseline_large() {
+        // Grayscale image (1 byte per pixel) with larger size
+        let pixels: Vec<u8> = (0..64 * 64).map(|i| (i % 256) as u8).collect();
+
+        let opts = JpegOptions {
+            quality: 85,
+            progressive: false,
+            optimize_huffman: false,
+            ..Default::default()
+        };
+
+        let mut output = Vec::new();
+        encode_with_options_into(&mut output, &pixels, 64, 64, ColorType::Gray, &opts).unwrap();
+
+        // Should produce valid JPEG
+        assert_eq!(&output[0..2], &[0xFF, 0xD8]); // SOI
+        assert_eq!(&output[output.len() - 2..], &[0xFF, 0xD9]); // EOI
+    }
+
+    #[test]
+    fn test_encode_grayscale_progressive() {
+        // Grayscale image with progressive encoding
+        let pixels: Vec<u8> = (0..64 * 64).map(|i| (i % 256) as u8).collect();
+
+        let opts = JpegOptions {
+            quality: 85,
+            progressive: true,
+            optimize_huffman: false,
+            ..Default::default()
+        };
+
+        let mut output = Vec::new();
+        encode_with_options_into(&mut output, &pixels, 64, 64, ColorType::Gray, &opts).unwrap();
+
+        // Should produce valid JPEG
+        assert_eq!(&output[0..2], &[0xFF, 0xD8]); // SOI
+        assert_eq!(&output[output.len() - 2..], &[0xFF, 0xD9]); // EOI
+    }
+
+    #[test]
+    fn test_encode_grayscale_optimized_huffman() {
+        // Grayscale image with optimized Huffman tables
+        let pixels: Vec<u8> = (0..64 * 64).map(|i| (i % 256) as u8).collect();
+
+        let opts = JpegOptions {
+            quality: 85,
+            progressive: false,
+            optimize_huffman: true,
+            ..Default::default()
+        };
+
+        let mut output = Vec::new();
+        encode_with_options_into(&mut output, &pixels, 64, 64, ColorType::Gray, &opts).unwrap();
+
+        // Should produce valid JPEG
+        assert_eq!(&output[0..2], &[0xFF, 0xD8]); // SOI
+        assert_eq!(&output[output.len() - 2..], &[0xFF, 0xD9]); // EOI
+    }
+
+    // ============================================================================
+    // 4:2:0 Progressive with Trellis Tests
+    // ============================================================================
+
+    #[test]
+    fn test_encode_420_progressive_trellis() {
+        // RGB image with 4:2:0 subsampling, progressive, and trellis quantization
+        let pixels: Vec<u8> = (0..64 * 64 * 3).map(|i| (i * 7 % 256) as u8).collect();
+
+        let opts = JpegOptions {
+            quality: 85,
+            subsampling: Subsampling::S420,
+            progressive: true,
+            trellis_quant: true,
+            optimize_huffman: false,
+            ..Default::default()
+        };
+
+        let mut output = Vec::new();
+        encode_with_options_into(&mut output, &pixels, 64, 64, ColorType::Rgb, &opts).unwrap();
+
+        // Should produce valid JPEG
+        assert_eq!(&output[0..2], &[0xFF, 0xD8]); // SOI
+        assert_eq!(&output[output.len() - 2..], &[0xFF, 0xD9]); // EOI
+    }
+
+    // ============================================================================
+    // Optimized Huffman with Restart Intervals Tests
+    // ============================================================================
+
+    #[test]
+    fn test_encode_optimized_huffman_with_restart() {
+        // RGB image with optimized Huffman and restart intervals
+        let pixels: Vec<u8> = (0..64 * 64 * 3).map(|i| (i * 11 % 256) as u8).collect();
+
+        let opts = JpegOptions {
+            quality: 85,
+            optimize_huffman: true,
+            restart_interval: Some(8),
+            progressive: false,
+            ..Default::default()
+        };
+
+        let mut output = Vec::new();
+        encode_with_options_into(&mut output, &pixels, 64, 64, ColorType::Rgb, &opts).unwrap();
+
+        // Should produce valid JPEG
+        assert_eq!(&output[0..2], &[0xFF, 0xD8]); // SOI
+        assert_eq!(&output[output.len() - 2..], &[0xFF, 0xD9]); // EOI
+
+        // Should contain DRI marker (0xFF, 0xDD) for restart interval
+        assert!(
+            output.windows(2).any(|w| w == [0xFF, 0xDD]),
+            "should contain DRI marker for restart interval"
+        );
+    }
+
+    #[test]
+    fn test_encode_optimized_huffman_progressive_with_restart() {
+        // Progressive with optimized Huffman and restart intervals
+        let pixels: Vec<u8> = (0..64 * 64 * 3).map(|i| (i * 13 % 256) as u8).collect();
+
+        let opts = JpegOptions {
+            quality: 85,
+            optimize_huffman: true,
+            restart_interval: Some(4),
+            progressive: true,
+            ..Default::default()
+        };
+
+        let mut output = Vec::new();
+        encode_with_options_into(&mut output, &pixels, 64, 64, ColorType::Rgb, &opts).unwrap();
+
+        // Should produce valid JPEG
+        assert_eq!(&output[0..2], &[0xFF, 0xD8]); // SOI
+        assert_eq!(&output[output.len() - 2..], &[0xFF, 0xD9]); // EOI
     }
 }

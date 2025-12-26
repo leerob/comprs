@@ -2673,4 +2673,221 @@ mod tests {
 
         assert_eq!(result1, result2, "Zlib compression should be deterministic");
     }
+
+    // ============================================================================
+    // Block Splitting Tests
+    // ============================================================================
+
+    #[test]
+    fn test_encode_with_block_splitting_small_input() {
+        // Small input should not be split
+        let data = b"small data";
+        let mut lz77 = Lz77Compressor::new(6);
+        let tokens = lz77.compress(data);
+
+        let encoded = encode_with_block_splitting(&tokens, 15);
+        assert!(!encoded.is_empty());
+
+        // Should decode correctly
+        use flate2::read::DeflateDecoder;
+        use std::io::Read;
+        let mut decoder = DeflateDecoder::new(&encoded[..]);
+        let mut decoded = Vec::new();
+        decoder.read_to_end(&mut decoded).expect("decode");
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn test_encode_with_block_splitting_varied_data() {
+        // Create data with distinct statistical regions that might benefit from splitting
+        let mut data = Vec::new();
+        // Region 1: repetitive 'a's
+        data.extend_from_slice(&[b'a'; 2000]);
+        // Region 2: repetitive 'z's
+        data.extend_from_slice(&[b'z'; 2000]);
+        // Region 3: mixed content
+        for i in 0..2000 {
+            data.push((i % 256) as u8);
+        }
+
+        let mut lz77 = Lz77Compressor::new(9);
+        let tokens = lz77.compress(&data);
+
+        let encoded = encode_with_block_splitting(&tokens, 15);
+        assert!(!encoded.is_empty());
+
+        // Verify roundtrip
+        use flate2::read::DeflateDecoder;
+        use std::io::Read;
+        let mut decoder = DeflateDecoder::new(&encoded[..]);
+        let mut decoded = Vec::new();
+        decoder.read_to_end(&mut decoded).expect("decode");
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn test_find_block_splits_too_small() {
+        let tokens: Vec<Token> = (0..10).map(|i| Token::Literal(i as u8)).collect();
+        let splits = find_block_splits(&tokens, 10);
+        // Too small to split
+        assert!(splits.is_empty());
+    }
+
+    #[test]
+    fn test_find_block_splits_max_blocks_one() {
+        let tokens: Vec<Token> = (0..100).map(|i| Token::Literal(i as u8)).collect();
+        let splits = find_block_splits(&tokens, 1);
+        // max_blocks=1 means no splits
+        assert!(splits.is_empty());
+    }
+
+    #[test]
+    fn test_find_best_split_too_small() {
+        let tokens: Vec<Token> = (0..10).map(|i| Token::Literal(i as u8)).collect();
+        let result = find_best_split(&tokens, 0, tokens.len());
+        // Too small to split
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_estimate_block_cost_empty_range() {
+        let tokens: Vec<Token> = vec![Token::Literal(b'a')];
+        let cost = estimate_block_cost(&tokens, 0, 0);
+        assert_eq!(cost, 0.0);
+    }
+
+    #[test]
+    fn test_estimate_block_cost_single_literal() {
+        let tokens: Vec<Token> = vec![Token::Literal(b'a')];
+        let cost = estimate_block_cost(&tokens, 0, 1);
+        // Should return non-zero cost including header overhead
+        assert!(cost > 0.0);
+    }
+
+    #[test]
+    fn test_count_symbols_range() {
+        let tokens = vec![
+            Token::Literal(b'a'),
+            Token::Literal(b'b'),
+            Token::Match {
+                length: 4,
+                distance: 1,
+            },
+            Token::Literal(b'c'),
+        ];
+
+        // Count only first two tokens
+        let (lit_counts, dist_counts) = count_symbols_range(&tokens, 0, 2);
+        assert_eq!(lit_counts[b'a' as usize], 1);
+        assert_eq!(lit_counts[b'b' as usize], 1);
+        assert_eq!(lit_counts[b'c' as usize], 0);
+        assert_eq!(lit_counts[256], 1); // EOB
+                                        // No matches in range, so dist_counts[0] = 1 (minimum per spec)
+        assert_eq!(dist_counts[0], 1);
+
+        // Count range with match
+        let (lit_counts2, dist_counts2) = count_symbols_range(&tokens, 2, 3);
+        // Match length 4 -> length code 258
+        assert_eq!(lit_counts2[258], 1);
+        // Match distance 1 -> distance code 0
+        assert_eq!(dist_counts2[0], 1);
+    }
+
+    #[test]
+    fn test_deflate_optimal_zlib_large_input_skips_splitting() {
+        // Create data larger than BLOCK_SPLIT_SIZE_LIMIT (512KB)
+        // to exercise the path that skips block splitting for large inputs
+        let large_size = 520 * 1024; // 520KB > 512KB
+        let mut data = Vec::with_capacity(large_size);
+        for i in 0..large_size {
+            data.push(((i * 7) % 256) as u8);
+        }
+
+        let encoded = deflate_optimal_zlib(&data, 3);
+        assert!(!encoded.is_empty());
+
+        // Verify roundtrip
+        let decoded = decompress_zlib(&encoded);
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn test_deflate_optimal_split_varied_content() {
+        // Test deflate_optimal_split directly with medium-sized input
+        let mut data = Vec::new();
+        // Create varied content for splitting
+        for _ in 0..50 {
+            data.extend_from_slice(b"abcdefghijklmnopqrstuvwxyz");
+        }
+        for _ in 0..50 {
+            data.extend_from_slice(b"0123456789");
+        }
+
+        let encoded = deflate_optimal_split(&data, 3, 10);
+        assert!(!encoded.is_empty());
+
+        // Verify roundtrip
+        use flate2::read::DeflateDecoder;
+        use std::io::Read;
+        let mut decoder = DeflateDecoder::new(&encoded[..]);
+        let mut decoded = Vec::new();
+        decoder.read_to_end(&mut decoded).expect("decode");
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn test_deflater_compress_zlib_with_block_splitting() {
+        // Level >= 5 and data > SMALL_INPUT_BYTES should use block splitting
+        let mut data = Vec::new();
+        // Create data larger than SMALL_INPUT_BYTES (1KB) but <= BLOCK_SPLIT_SIZE_LIMIT
+        for i in 0..5000 {
+            data.push(((i * 13) % 256) as u8);
+        }
+
+        let mut deflater = Deflater::new(6);
+        let encoded = deflater.compress_zlib(&data);
+        assert!(!encoded.is_empty());
+
+        // Verify roundtrip
+        let decoded = decompress_zlib(&encoded);
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn test_deflater_compress_zlib_level_below_5_no_splitting() {
+        // Level < 5 should not use block splitting
+        let mut data = Vec::new();
+        for i in 0..5000 {
+            data.push(((i * 13) % 256) as u8);
+        }
+
+        let mut deflater = Deflater::new(4);
+        let encoded = deflater.compress_zlib(&data);
+        assert!(!encoded.is_empty());
+
+        // Verify roundtrip
+        let decoded = decompress_zlib(&encoded);
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn test_deflater_compress_with_block_splitting() {
+        // Test the non-zlib compress path with level >= 5
+        let mut data = Vec::new();
+        for i in 0..5000 {
+            data.push(((i * 17) % 256) as u8);
+        }
+
+        let mut deflater = Deflater::new(7);
+        let encoded = deflater.compress(&data);
+        assert!(!encoded.is_empty());
+
+        // Verify roundtrip
+        use flate2::read::DeflateDecoder;
+        use std::io::Read;
+        let mut decoder = DeflateDecoder::new(&encoded[..]);
+        let mut decoded = Vec::new();
+        decoder.read_to_end(&mut decoded).expect("decode");
+        assert_eq!(decoded, data);
+    }
 }

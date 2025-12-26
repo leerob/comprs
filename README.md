@@ -16,7 +16,7 @@ This is a work-in-progress and exploration of coding agents.
 - **Entirely in Rust** — No C or C++ codecs required
 - **PNG and JPEG support** — Lossless PNG, lossy PNG (quantization), and lossy JPEG
 - **Small WASM binary** — 142 KB with competitive compression ([benchmarks](./benches/BENCHMARKS.md))
-- **Well-tested** — 82% code coverage, 533 tests ([codebase comparison](./docs/codebase-size-comparison.md))
+- **Well-tested** — 85% code coverage, 533 tests ([codebase comparison](./docs/codebase-size-comparison.md))
 
 ## Usage
 

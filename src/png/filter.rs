@@ -57,6 +57,18 @@ pub fn apply_filters(
     options: &PngOptions,
 ) -> Vec<u8> {
     let row_bytes = width as usize * bytes_per_pixel;
+    apply_filters_with_row_bytes(data, width, height, row_bytes, bytes_per_pixel, options)
+}
+
+/// Apply PNG filtering with a precomputed row byte length.
+pub fn apply_filters_with_row_bytes(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    row_bytes: usize,
+    bytes_per_pixel: usize,
+    options: &PngOptions,
+) -> Vec<u8> {
     let filtered_row_size = row_bytes + 1; // +1 for filter type byte
     let zero_row = vec![0u8; row_bytes];
 
@@ -100,7 +112,15 @@ pub fn apply_filters(
     }
 
     // Sequential path
-    let mut output = Vec::with_capacity(filtered_row_size * height as usize);
+    let height = height as usize;
+    debug_assert_eq!(
+        data.len(),
+        row_bytes.saturating_mul(height),
+        "filtered rows expect {} bytes, got {}",
+        row_bytes.saturating_mul(height),
+        data.len()
+    );
+    let mut output = Vec::with_capacity(filtered_row_size * height);
     let mut prev_row: &[u8] = &zero_row;
     let mut adaptive_scratch = AdaptiveScratch::new(row_bytes);
     let mut last_filter: u8 = FILTER_PAETH; // default guess for sampled reuse
@@ -108,10 +128,9 @@ pub fn apply_filters(
     let mut last_adaptive_filter: Option<u8> = None;
     let mut filter_counts = [0usize; 5];
 
-    for y in 0..height as usize {
+    for y in 0..height {
         let row_start = y * row_bytes;
-        let end = (row_start + row_bytes).min(data.len());
-        let row = &data[row_start..end];
+        let row = &data[row_start..row_start + row_bytes];
         match strategy {
             FilterStrategy::MinSum => {
                 minsum_filter(
@@ -174,7 +193,7 @@ pub fn apply_filters(
         eprintln!(
             "PNG filters: strategy={:?}, rows={} counts={{None:{}, Sub:{}, Up:{}, Avg:{}, Paeth:{}}}",
             strategy,
-            height,
+            height as u32,
             filter_counts[0],
             filter_counts[1],
             filter_counts[2],
@@ -936,5 +955,38 @@ mod tests {
         // Should use Sub filter for small images
         // (Filter byte is the first byte)
         assert_eq!(filtered[0], FILTER_SUB);
+    }
+
+    #[test]
+    fn test_verbose_filter_log_does_not_panic() {
+        // Test that verbose_filter_log option works without errors
+        let data: Vec<u8> = (0..100).map(|i| (i % 256) as u8).collect();
+        let options = PngOptions {
+            filter_strategy: FilterStrategy::Adaptive,
+            verbose_filter_log: true,
+            ..Default::default()
+        };
+
+        // This will write to stderr but should not panic
+        let filtered = apply_filters(&data, 10, 1, 10, &options);
+
+        // Should produce valid output
+        assert_eq!(filtered.len(), 1 + 100);
+    }
+
+    #[test]
+    fn test_verbose_filter_log_with_multiple_rows() {
+        // Test verbose logging with multiple rows
+        let data: Vec<u8> = (0..500).map(|i| (i % 256) as u8).collect();
+        let options = PngOptions {
+            filter_strategy: FilterStrategy::MinSum,
+            verbose_filter_log: true,
+            ..Default::default()
+        };
+
+        let filtered = apply_filters(&data, 10, 5, 10, &options);
+
+        // Should produce valid output (5 rows, each with filter byte + 100 bytes)
+        assert_eq!(filtered.len(), 5 * (1 + 100));
     }
 }

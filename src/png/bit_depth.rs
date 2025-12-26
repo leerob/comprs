@@ -45,6 +45,7 @@ fn reduce_gray_bit_depth(data: &[u8]) -> Option<u8> {
     }
 }
 
+#[cfg(test)]
 pub fn pack_gray(data: &[u8], bit_depth: u8) -> Vec<u8> {
     match bit_depth {
         1 => pack_bits(data, 1),
@@ -55,6 +56,7 @@ pub fn pack_gray(data: &[u8], bit_depth: u8) -> Vec<u8> {
     }
 }
 
+#[cfg(test)]
 pub fn pack_indexed(data: &[u8], bit_depth: u8) -> Vec<u8> {
     match bit_depth {
         1 => pack_bits(data, 1),
@@ -65,6 +67,15 @@ pub fn pack_indexed(data: &[u8], bit_depth: u8) -> Vec<u8> {
     }
 }
 
+pub fn pack_gray_rows(data: &[u8], width: usize, bit_depth: u8) -> Vec<u8> {
+    pack_bits_rows(data, width, bit_depth)
+}
+
+pub fn pack_indexed_rows(data: &[u8], width: usize, bit_depth: u8) -> Vec<u8> {
+    pack_bits_rows(data, width, bit_depth)
+}
+
+#[cfg(test)]
 pub fn pack_bits(data: &[u8], bits: u8) -> Vec<u8> {
     debug_assert!(
         matches!(bits, 1 | 2 | 4 | 8),
@@ -88,6 +99,51 @@ pub fn pack_bits(data: &[u8], bits: u8) -> Vec<u8> {
         acc <<= 8 - acc_bits;
         out.push(acc);
     }
+    out
+}
+
+fn pack_bits_rows(data: &[u8], width: usize, bits: u8) -> Vec<u8> {
+    debug_assert!(
+        matches!(bits, 1 | 2 | 4 | 8),
+        "pack_bits_rows expected bit depth 1, 2, 4, or 8"
+    );
+    if bits == 8 {
+        return data.to_vec();
+    }
+    if width == 0 || data.is_empty() {
+        return Vec::new();
+    }
+
+    let row_bytes = (width * bits as usize).div_ceil(8);
+    let height = data.len() / width;
+    let mut out = Vec::with_capacity(row_bytes * height);
+    let mask = (1u8 << bits) - 1;
+
+    for row in data.chunks_exact(width) {
+        let mut acc: u8 = 0;
+        let mut acc_bits = 0usize;
+        for &v in row {
+            let clipped = v & mask;
+            acc = (acc << bits) | clipped;
+            acc_bits += bits as usize;
+            if acc_bits == 8 {
+                out.push(acc);
+                acc = 0;
+                acc_bits = 0;
+            }
+        }
+        if acc_bits > 0 {
+            acc <<= 8 - acc_bits;
+            out.push(acc);
+        }
+    }
+
+    debug_assert!(
+        data.len() % width == 0,
+        "pack_bits_rows expects full rows (len {}, width {})",
+        data.len(),
+        width
+    );
     out
 }
 

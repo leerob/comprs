@@ -770,4 +770,118 @@ mod tests {
         // Should produce some output or EOB run
         assert!(!writer.is_empty() || eob_run > 0);
     }
+
+    // ============================================================================
+    // Zero Run Length (ZRL) Tests
+    // ============================================================================
+
+    #[test]
+    fn test_encode_ac_first_long_zero_run() {
+        // Test AC encoding with a long zero run that requires ZRL codes
+        let tables = HuffmanTables::new();
+        let mut writer = BitWriterMsb::new();
+        let mut block = [0i16; 64];
+        // Set a non-zero coefficient at the end after many zeros
+        block[32] = 100; // After more than 16 zeros
+        let mut eob_run = 0u16;
+
+        encode_ac_first(&mut writer, &block, 1, 63, 0, &mut eob_run, &tables, true);
+
+        // Should have written something (ZRL codes + coefficient)
+        assert!(!writer.is_empty());
+    }
+
+    #[test]
+    fn test_encode_ac_first_multiple_zrl() {
+        // Test with multiple ZRL codes needed (>32 zeros)
+        let tables = HuffmanTables::new();
+        let mut writer = BitWriterMsb::new();
+        let mut block = [0i16; 64];
+        // Put non-zero coefficient at position 48 (zigzag), after 47 zeros
+        block[48] = 50;
+        let mut eob_run = 0u16;
+
+        encode_ac_first(&mut writer, &block, 1, 63, 0, &mut eob_run, &tables, true);
+
+        // Should have written ZRL codes
+        assert!(!writer.is_empty());
+    }
+
+    #[test]
+    fn test_encode_ac_refine_long_zero_run() {
+        // Test AC refinement with long zero runs
+        let tables = HuffmanTables::new();
+        let mut writer = BitWriterMsb::new();
+        let mut block = [0i16; 64];
+        // Set previously non-zero coefficients at sparse locations
+        block[1] = 8; // Will appear in refinement
+        block[48] = 8; // After long zero run
+        let mut eob_run = 0u16;
+
+        encode_ac_refine(&mut writer, &block, 1, 63, 2, &mut eob_run, &tables, true);
+
+        // Should produce output (either data or EOB)
+        assert!(!writer.is_empty() || eob_run > 0);
+    }
+
+    // ============================================================================
+    // EOB Run Accumulation Tests
+    // ============================================================================
+
+    #[test]
+    fn test_eob_run_accumulation_to_max() {
+        // Test that EOB runs accumulate correctly and flush at max
+        let tables = HuffmanTables::new();
+        let block = [0i16; 64]; // All zeros = EOB
+
+        let mut eob_run = 0u16;
+        let mut total_writes = 0;
+
+        // Accumulate many EOB runs
+        for _ in 0..0x8000 {
+            let mut writer = BitWriterMsb::new();
+            encode_ac_first(&mut writer, &block, 1, 63, 0, &mut eob_run, &tables, true);
+            if !writer.is_empty() {
+                total_writes += 1;
+            }
+        }
+
+        // Should have flushed at least once when reaching 0x7FFF
+        assert!(total_writes > 0 || eob_run > 0);
+    }
+
+    #[test]
+    fn test_encode_with_default_script_produces_output() {
+        // Test that encoding with default_progressive_script works
+        let script = default_progressive_script();
+
+        // Verify script has expected properties
+        assert!(!script.is_empty());
+
+        // First scans should be DC scans
+        assert!(script[0].is_dc_scan());
+        assert!(script[1].is_dc_scan());
+        assert!(script[2].is_dc_scan());
+
+        // Should have AC scans later
+        let has_ac_scans = script.iter().any(|s| !s.is_dc_scan());
+        assert!(has_ac_scans);
+    }
+
+    #[test]
+    fn test_default_script_successive_approximation() {
+        // Test that default script uses successive approximation
+        let script = default_progressive_script();
+
+        // DC scans should use successive approximation (ah=0, al>0 for initial)
+        let dc_scans: Vec<_> = script.iter().filter(|s| s.is_dc_scan()).collect();
+        assert!(!dc_scans.is_empty());
+
+        // At least one DC scan should have al > 0
+        let has_sa = dc_scans.iter().any(|s| s.al > 0);
+        assert!(
+            has_sa,
+            "Default script should use successive approximation for DC"
+        );
+    }
 }

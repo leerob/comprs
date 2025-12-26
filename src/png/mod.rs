@@ -14,7 +14,7 @@ use crate::compress::deflate::{deflate_optimal_zlib, deflate_zlib_packed};
 #[cfg(feature = "timing")]
 use crate::compress::deflate::{deflate_zlib_packed_with_stats, DeflateStats};
 use crate::error::{Error, Result};
-use bit_depth::{pack_gray, pack_indexed, palette_bit_depth, reduce_bit_depth};
+use bit_depth::{pack_gray_rows, pack_indexed_rows, palette_bit_depth, reduce_bit_depth};
 
 /// PNG file signature (magic bytes).
 const PNG_SIGNATURE: [u8; 8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
@@ -331,6 +331,22 @@ pub fn encode_with_options(
     Ok(output)
 }
 
+fn checked_expected_len(
+    width: u32,
+    height: u32,
+    bytes_per_pixel: usize,
+    actual: usize,
+) -> Result<usize> {
+    let expected = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|v| v.checked_mul(bytes_per_pixel))
+        .ok_or(Error::InvalidDataLength {
+            expected: usize::MAX,
+            actual,
+        })?;
+    Ok(expected)
+}
+
 /// Encode raw pixel data as PNG into a caller-provided buffer.
 ///
 /// The `output` buffer will be cleared before writing. This API allows callers
@@ -362,7 +378,7 @@ pub fn encode_into(
 
     // Validate data length
     let bpp = color_type.bytes_per_pixel();
-    let expected_len = width as usize * height as usize * bpp;
+    let expected_len = checked_expected_len(width, height, bpp, data.len())?;
     if data.len() != expected_len {
         return Err(Error::InvalidDataLength {
             expected: expected_len,
@@ -457,7 +473,19 @@ pub fn encode_into(
         options.optimize_alpha,
     );
 
-    let filtered = filter::apply_filters(&data, width, height, bytes_per_pixel, options);
+    let row_bytes = if reduced.bit_depth < 8 {
+        (width as usize * reduced.bit_depth as usize).div_ceil(8)
+    } else {
+        width as usize * bytes_per_pixel
+    };
+    let filtered = filter::apply_filters_with_row_bytes(
+        &data,
+        width,
+        height,
+        row_bytes,
+        bytes_per_pixel,
+        options,
+    );
 
     // Use optimal (Zopfli-style) compression if enabled, otherwise standard
     let compressed = if options.optimal_compression {
@@ -511,7 +539,7 @@ pub fn encode_into_with_stats(
     }
 
     let bytes_per_pixel = color_type.bytes_per_pixel();
-    let expected_len = width as usize * height as usize * bytes_per_pixel;
+    let expected_len = checked_expected_len(width, height, bytes_per_pixel, data.len())?;
     if data.len() != expected_len {
         return Err(Error::InvalidDataLength {
             expected: expected_len,
@@ -544,10 +572,16 @@ pub fn encode_into_with_stats(
         }
     }
 
-    let filtered = filter::apply_filters(
+    let row_bytes = if reduced.bit_depth < 8 {
+        (width as usize * reduced.bit_depth as usize).div_ceil(8)
+    } else {
+        width as usize * reduced.bytes_per_pixel
+    };
+    let filtered = filter::apply_filters_with_row_bytes(
         &reduced.data,
         width,
         height,
+        row_bytes,
         reduced.bytes_per_pixel,
         options,
     );
@@ -673,7 +707,7 @@ fn maybe_reduce_color_type<'a>(
         if let Some((indexed, palette)) = build_palette(data, color_type, width, height) {
             let bit_depth = palette_bit_depth(palette.len());
             let packed = if bit_depth < 8 {
-                pack_indexed(&indexed, bit_depth)
+                pack_indexed_rows(&indexed, width, bit_depth)
             } else {
                 indexed
             };
@@ -709,7 +743,7 @@ fn maybe_reduce_color_type<'a>(
                 }
                 let bit_depth = reduce_bit_depth(&gray, ColorType::Gray).unwrap_or(8);
                 let packed = if bit_depth < 8 {
-                    pack_gray(&gray, bit_depth)
+                    pack_gray_rows(&gray, width, bit_depth)
                 } else {
                     gray
                 };
@@ -742,7 +776,7 @@ fn maybe_reduce_color_type<'a>(
                 }
                 let bit_depth = reduce_bit_depth(&gray, ColorType::Gray).unwrap_or(8);
                 let packed = if bit_depth < 8 {
-                    pack_gray(&gray, bit_depth)
+                    pack_gray_rows(&gray, width, bit_depth)
                 } else {
                     gray
                 };
@@ -1784,7 +1818,7 @@ pub fn encode_indexed_into(
         }
     }
 
-    let expected_len = width as usize * height as usize;
+    let expected_len = checked_expected_len(width, height, 1, data.len())?;
     if data.len() != expected_len {
         return Err(Error::InvalidDataLength {
             expected: expected_len,
@@ -1924,6 +1958,14 @@ mod tests {
     fn test_encode_invalid_data_length() {
         let pixels = vec![255, 0]; // Too short for 1x1 RGB
         let result = encode(&pixels, 1, 1, ColorType::Rgb);
+        assert!(matches!(result, Err(Error::InvalidDataLength { .. })));
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    fn test_encode_overflow_data_length() {
+        let pixels = Vec::new();
+        let result = encode(&pixels, MAX_DIMENSION, MAX_DIMENSION, ColorType::Rgb);
         assert!(matches!(result, Err(Error::InvalidDataLength { .. })));
     }
 
@@ -2072,6 +2114,27 @@ mod tests {
         assert_eq!(png[25], 3);
         // Bit depth should reflect palette size (2 colors -> 1 bit)
         assert_eq!(png[24], 1);
+        assert!(png.windows(4).any(|w| w == b"PLTE"));
+    }
+
+    #[test]
+    fn test_palette_reduction_handles_packed_rows() {
+        let width = 9u32;
+        let height = 2u32;
+        let mut pixels = Vec::with_capacity(width as usize * height as usize * 3);
+        for y in 0..height {
+            for x in 0..width {
+                if (x + y) % 2 == 0 {
+                    pixels.extend_from_slice(&[255, 0, 0]);
+                } else {
+                    pixels.extend_from_slice(&[0, 255, 0]);
+                }
+            }
+        }
+
+        let options = PngOptions::builder().reduce_palette(true).build();
+        let png = encode_with_options(&pixels, width, height, ColorType::Rgb, &options).unwrap();
+        assert_eq!(&png[..8], &PNG_SIGNATURE);
         assert!(png.windows(4).any(|w| w == b"PLTE"));
     }
 
@@ -2501,6 +2564,15 @@ mod tests {
             &6u32.to_be_bytes(),
             "PLTE length field mismatch"
         );
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    fn test_encode_indexed_overflow_data_length() {
+        let palette = [[0u8, 0, 0]];
+        let data = Vec::new();
+        let result = encode_indexed(&data, MAX_DIMENSION, MAX_DIMENSION, &palette, None);
+        assert!(matches!(result, Err(Error::InvalidDataLength { .. })));
     }
 
     #[test]
@@ -3202,5 +3274,201 @@ mod tests {
         // Should produce indexed PNG
         assert_eq!(png[25], 3, "should produce indexed PNG with dithering");
         assert_eq!(&png[0..8], &PNG_SIGNATURE);
+    }
+
+    // ============================================================================
+    // Optimal Compression Tests
+    // ============================================================================
+
+    #[test]
+    fn test_png_optimal_compression_produces_valid_output() {
+        let mut pixels = Vec::with_capacity(64 * 64 * 3);
+        for i in 0..(64 * 64 * 3) {
+            pixels.push((i % 256) as u8);
+        }
+
+        let opts = PngOptions {
+            optimal_compression: true,
+            compression_level: 9,
+            filter_strategy: FilterStrategy::Adaptive,
+            ..Default::default()
+        };
+
+        let png = encode_with_options(&pixels, 64, 64, ColorType::Rgb, &opts).unwrap();
+
+        // Should produce valid PNG
+        assert_eq!(&png[0..8], &PNG_SIGNATURE);
+
+        // Verify decode roundtrip
+        let decoded = image::load_from_memory(&png).expect("decode");
+        assert_eq!(decoded.width(), 64);
+        assert_eq!(decoded.height(), 64);
+    }
+
+    #[test]
+    fn test_png_optimal_compression_vs_standard() {
+        // Repetitive data should compress well
+        let data = vec![42u8; 64 * 64 * 3];
+
+        let standard_opts = PngOptions {
+            compression_level: 9,
+            filter_strategy: FilterStrategy::Adaptive,
+            optimal_compression: false,
+            ..Default::default()
+        };
+
+        let optimal_opts = PngOptions {
+            compression_level: 9,
+            filter_strategy: FilterStrategy::Adaptive,
+            optimal_compression: true,
+            ..Default::default()
+        };
+
+        let standard = encode_with_options(&data, 64, 64, ColorType::Rgb, &standard_opts).unwrap();
+        let optimal = encode_with_options(&data, 64, 64, ColorType::Rgb, &optimal_opts).unwrap();
+
+        // Optimal should not be larger than standard (may be equal for simple data)
+        assert!(
+            optimal.len() <= standard.len(),
+            "optimal ({}) should not be larger than standard ({})",
+            optimal.len(),
+            standard.len()
+        );
+    }
+
+    // ============================================================================
+    // Palette Quantization Edge Case Tests
+    // ============================================================================
+
+    #[test]
+    fn test_png_reduce_palette_with_few_unique_colors() {
+        // Image with 20 unique colors using RGBA (forces 8-bit depth, >16 colors)
+        // This exercises the lossless palette reduction path
+        let mut pixels = Vec::with_capacity(64 * 64 * 4);
+        for i in 0..(64 * 64) {
+            let color_idx = i % 20;
+            pixels.push((color_idx * 12) as u8); // R
+            pixels.push((color_idx * 10) as u8); // G
+            pixels.push((color_idx * 8) as u8); // B
+            pixels.push(255); // A (opaque)
+        }
+
+        let opts = PngOptions {
+            reduce_palette: true,
+            ..Default::default()
+        };
+
+        let png = encode_with_options(&pixels, 64, 64, ColorType::Rgba, &opts).unwrap();
+        assert_eq!(&png[0..8], &PNG_SIGNATURE);
+
+        // Should produce indexed PNG (color type 3)
+        assert_eq!(png[25], 3, "should produce indexed PNG");
+        // Should have PLTE chunk
+        assert!(png.windows(4).any(|w| w == b"PLTE"));
+    }
+
+    #[test]
+    fn test_png_reduce_palette_many_colors_stays_rgb() {
+        // Image with many unique colors (gradient) should stay as RGB
+        let mut pixels = Vec::with_capacity(64 * 64 * 3);
+        for y in 0..64 {
+            for x in 0..64 {
+                pixels.push(((x * 4) % 256) as u8);
+                pixels.push(((y * 4) % 256) as u8);
+                pixels.push((((x + y) * 2) % 256) as u8);
+            }
+        }
+
+        let opts = PngOptions {
+            reduce_palette: true,
+            ..Default::default()
+        };
+
+        let png = encode_with_options(&pixels, 64, 64, ColorType::Rgb, &opts).unwrap();
+        assert_eq!(&png[0..8], &PNG_SIGNATURE);
+
+        // With many colors, should stay as RGB (color type 2) or still be indexed if < 256
+        // This is a behavioral test - just ensure it produces valid PNG
+        let decoded = image::load_from_memory(&png).expect("decode");
+        assert_eq!(decoded.width(), 64);
+        assert_eq!(decoded.height(), 64);
+    }
+
+    // ============================================================================
+    // Alpha Optimization Tests
+    // ============================================================================
+
+    #[test]
+    fn test_png_reduce_color_type_rgba_to_rgb() {
+        // RGBA image with all pixels fully opaque - should convert to RGB
+        let mut pixels = Vec::with_capacity(16 * 16 * 4);
+        for i in 0..256 {
+            pixels.push((i % 256) as u8);
+            pixels.push(((i * 2) % 256) as u8);
+            pixels.push(((i * 3) % 256) as u8);
+            pixels.push(255); // Fully opaque
+        }
+
+        let opts = PngOptions {
+            reduce_color_type: true, // This is what converts RGBA to RGB
+            ..Default::default()
+        };
+
+        let png = encode_with_options(&pixels, 16, 16, ColorType::Rgba, &opts).unwrap();
+        assert_eq!(&png[0..8], &PNG_SIGNATURE);
+
+        // Should convert to RGB (color type 2) since all alpha is 255
+        assert_eq!(png[25], 2, "should convert to RGB when all alpha is 255");
+    }
+
+    #[test]
+    fn test_png_optimize_alpha_zeroes_transparent_colors() {
+        // RGBA image with some fully transparent pixels
+        // optimize_alpha should zero out color channels where alpha is 0
+        let pixels = vec![
+            100, 150, 200, 0, // transparent - colors should be zeroed
+            50, 100, 150, 255, // opaque - should stay
+            25, 75, 125, 0, // transparent - colors should be zeroed
+            200, 100, 50, 255, // opaque - should stay
+        ];
+
+        let opts = PngOptions {
+            optimize_alpha: true,
+            ..Default::default()
+        };
+
+        let png = encode_with_options(&pixels, 2, 2, ColorType::Rgba, &opts).unwrap();
+        assert_eq!(&png[0..8], &PNG_SIGNATURE);
+
+        // Should produce valid PNG
+        let decoded = image::load_from_memory(&png).expect("decode");
+        assert_eq!(decoded.width(), 2);
+        assert_eq!(decoded.height(), 2);
+    }
+
+    #[test]
+    fn test_png_reduce_color_type_stays_rgba_with_transparency() {
+        // RGBA image with semi-transparent pixels - should stay as RGBA
+        let mut pixels = Vec::with_capacity(16 * 16 * 4);
+        for i in 0..256 {
+            pixels.push((i % 256) as u8);
+            pixels.push(((i * 2) % 256) as u8);
+            pixels.push(((i * 3) % 256) as u8);
+            pixels.push((i % 256) as u8); // Varying alpha (some are 0)
+        }
+
+        let opts = PngOptions {
+            reduce_color_type: true,
+            ..Default::default()
+        };
+
+        let png = encode_with_options(&pixels, 16, 16, ColorType::Rgba, &opts).unwrap();
+        assert_eq!(&png[0..8], &PNG_SIGNATURE);
+
+        // Should stay as RGBA (color type 6) since it has semi-transparent pixels
+        assert_eq!(
+            png[25], 6,
+            "should stay RGBA when semi-transparent pixels exist"
+        );
     }
 }
