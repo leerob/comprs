@@ -1160,18 +1160,18 @@ unsafe fn dct_columns_avx2(workspace: &[i32; 64], result: &mut [i32; 64]) {
     let tmp3_odd = _mm256_sub_epi32(row3, row4);
 
     // Final output stage: descale and output
-    let descale = dct_constants::PASS1_BITS + 3;
-    let round = _mm256_set1_epi32(1 << (descale - 1));
+    const DESCALE: i32 = dct_constants::PASS1_BITS + 3;
+    let round = _mm256_set1_epi32(1 << (DESCALE - 1));
 
-    // result[col + 0] = (tmp10 + tmp11 + round) >> descale
+    // result[col + 0] = (tmp10 + tmp11 + round) >> DESCALE
     let out0 = _mm256_srai_epi32(
         _mm256_add_epi32(_mm256_add_epi32(tmp10, tmp11), round),
-        descale,
+        DESCALE,
     );
-    // result[col + 32] = (tmp10 - tmp11 + round) >> descale
+    // result[col + 32] = (tmp10 - tmp11 + round) >> DESCALE
     let out4 = _mm256_srai_epi32(
         _mm256_add_epi32(_mm256_sub_epi32(tmp10, tmp11), round),
-        descale,
+        DESCALE,
     );
 
     // z1 = fix_mul(tmp12 + tmp13, FIX_0_541196100)
@@ -1183,10 +1183,10 @@ unsafe fn dct_columns_avx2(workspace: &[i32; 64], result: &mut [i32; 64]) {
     let z1 = avx2_fix_mul(z1_input, fix_0_541);
 
     let out2_pre = _mm256_add_epi32(z1, avx2_fix_mul(tmp12, fix_0_765));
-    let out2 = _mm256_srai_epi32(_mm256_add_epi32(out2_pre, round), descale);
+    let out2 = _mm256_srai_epi32(_mm256_add_epi32(out2_pre, round), DESCALE);
 
     let out6_pre = _mm256_sub_epi32(z1, avx2_fix_mul(tmp13, fix_1_847));
-    let out6 = _mm256_srai_epi32(_mm256_add_epi32(out6_pre, round), descale);
+    let out6 = _mm256_srai_epi32(_mm256_add_epi32(out6_pre, round), DESCALE);
 
     // Odd part
     let tmp10_o = _mm256_add_epi32(tmp0_odd, tmp3_odd);
@@ -1216,16 +1216,16 @@ unsafe fn dct_columns_avx2(workspace: &[i32; 64], result: &mut [i32; 64]) {
     let tmp13_m = _mm256_add_epi32(avx2_fix_mul(tmp13_o, fix_n1_961), z1_o);
 
     let out1_pre = _mm256_add_epi32(_mm256_add_epi32(tmp0_m, tmp10_m), tmp12_m);
-    let out1 = _mm256_srai_epi32(_mm256_add_epi32(out1_pre, round), descale);
+    let out1 = _mm256_srai_epi32(_mm256_add_epi32(out1_pre, round), DESCALE);
 
     let out3_pre = _mm256_add_epi32(_mm256_add_epi32(tmp1_m, tmp11_m), tmp13_m);
-    let out3 = _mm256_srai_epi32(_mm256_add_epi32(out3_pre, round), descale);
+    let out3 = _mm256_srai_epi32(_mm256_add_epi32(out3_pre, round), DESCALE);
 
     let out5_pre = _mm256_add_epi32(_mm256_add_epi32(tmp2_m, tmp11_m), tmp12_m);
-    let out5 = _mm256_srai_epi32(_mm256_add_epi32(out5_pre, round), descale);
+    let out5 = _mm256_srai_epi32(_mm256_add_epi32(out5_pre, round), DESCALE);
 
     let out7_pre = _mm256_add_epi32(_mm256_add_epi32(tmp3_m, tmp10_m), tmp13_m);
-    let out7 = _mm256_srai_epi32(_mm256_add_epi32(out7_pre, round), descale);
+    let out7 = _mm256_srai_epi32(_mm256_add_epi32(out7_pre, round), DESCALE);
 
     // Store results - need to transpose back to column-major storage
     // out0 contains [col0_row0, col1_row0, ..., col7_row0]
