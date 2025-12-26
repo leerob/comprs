@@ -1,6 +1,6 @@
 # Comprehensive Benchmark Report
 
-Last updated: December 2025
+Last updated: December 25, 2025
 
 This document provides a comprehensive comparison of pixo against other image compression tools, helping you make informed decisions based on your specific requirements.
 
@@ -53,23 +53,24 @@ All encoders tested at **compression level 6** with adaptive filtering for a fai
 
 ### Synthetic Images (512×512)
 
-| Image Type  | pixo         | image crate     | lodepng        | Winner         |
-| ----------- | -------------- | --------------- | -------------- | -------------- |
-| Gradient    | 7.6 KB / 2.4ms | 76.8 KB / 0.6ms | 7.5 KB / 1.8ms | lodepng (size) |
-| Flat Blocks | 0.4 KB / 2.5ms | 0.5 KB / 0.5ms  | 0.4 KB / 3.3ms | Tie            |
+| Image Type  | pixo           | image crate     | lodepng        | Winner             |
+| ----------- | -------------- | --------------- | -------------- | ------------------ |
+| Gradient    | 7.6 KB / 1.8ms | 76.8 KB / 0.6ms | 7.5 KB / 1.8ms | Tie (pixo/lodepng) |
+| Flat Blocks | 0.4 KB / 1.4ms | 0.5 KB / 0.5ms  | 0.4 KB / 3.2ms | pixo (speed)       |
 
 ### Real Images (Kodak Photos)
 
-| Image   | Dimensions | pixo        | image crate  | lodepng       | Winner               |
-| ------- | ---------- | ------------- | ------------ | ------------- | -------------------- |
-| kodim01 | 768×512    | 475 KB / 15ms | 673 KB / 3ms | 475 KB / 12ms | Tie (pixo/lodepng) |
-| kodim03 | 768×512    | 364 KB / 13ms | 497 KB / 3ms | 364 KB / 10ms | Tie (pixo/lodepng) |
+| Image   | Dimensions | pixo          | image crate    | lodepng         | Winner                  |
+| ------- | ---------- | ------------- | -------------- | --------------- | ----------------------- |
+| kodim01 | 768×512    | 475 KB / 43ms | 673 KB / 1.9ms | 475 KB / 19.8ms | Tie (pixo/lodepng size) |
+| kodim03 | 768×512    | 364 KB / 57ms | 497 KB / 1.9ms | 364 KB / 32ms   | Tie (pixo/lodepng size) |
 
 **Key Findings:**
 
 - pixo and lodepng produce **nearly identical file sizes** at level 6
-- pixo is **2-3× slower** than image crate but produces **10× smaller files**
-- lodepng (C library) is slightly faster than pixo but requires native bindings
+- pixo is **~20× slower** than image crate on large images but produces **10× smaller files**
+- pixo and lodepng have similar performance on synthetic images
+- lodepng (C library) is faster on real images but requires native bindings
 
 ---
 
@@ -79,17 +80,17 @@ All encoders tested at **quality 85, 4:2:0 subsampling, baseline mode** for fair
 
 ### Synthetic Images (512×512)
 
-| Image Type  | pixo          | image crate     | jpeg-encoder    | Winner               |
+| Image Type  | pixo            | image crate     | jpeg-encoder    | Winner               |
 | ----------- | --------------- | --------------- | --------------- | -------------------- |
-| Gradient    | 17.3 KB / 1.6ms | 16.7 KB / 1.5ms | 17.4 KB / 0.9ms | jpeg-encoder (speed) |
-| Flat Blocks | 3.5 KB / 1.5ms  | 3.4 KB / 1.4ms  | 3.5 KB / 0.8ms  | jpeg-encoder (speed) |
+| Gradient    | 17.3 KB / 1.2ms | 16.7 KB / 1.4ms | 17.4 KB / 1.0ms | jpeg-encoder (speed) |
+| Flat Blocks | 3.5 KB / 1.1ms  | 3.4 KB / 1.4ms  | 3.5 KB / 0.96ms | jpeg-encoder (speed) |
 
 ### Real Images (Kodak Photos)
 
-| Image   | Dimensions | pixo        | image crate   | jpeg-encoder  | Winner     |
-| ------- | ---------- | ------------- | ------------- | ------------- | ---------- |
-| kodim01 | 768×512    | 52.8 KB / 5ms | 53.0 KB / 5ms | 53.2 KB / 3ms | Tie (size) |
-| kodim03 | 768×512    | 39.2 KB / 5ms | 39.5 KB / 5ms | 39.4 KB / 3ms | Tie (size) |
+| Image   | Dimensions | pixo            | image crate     | jpeg-encoder    | Winner               |
+| ------- | ---------- | --------------- | --------------- | --------------- | -------------------- |
+| kodim01 | 768×512    | 52.8 KB / 3.3ms | 53.0 KB / 3.7ms | 53.2 KB / 2.2ms | jpeg-encoder (speed) |
+| kodim03 | 768×512    | 39.2 KB / 2.4ms | 39.5 KB / 2.8ms | 39.4 KB / 1.8ms | jpeg-encoder (speed) |
 
 **Key Findings:**
 
@@ -107,7 +108,7 @@ All libraries tested at **compression level 6** on 1 MB payloads.
 
 | Library    | Output Size | Ratio  | Throughput  | Notes                |
 | ---------- | ----------- | ------ | ----------- | -------------------- |
-| **pixo** | 3.0 KB      | 336.6× | 865 MiB/s   | Pure Rust, zero deps |
+| **pixo**   | 3.0 KB      | 336.6× | 865 MiB/s   | Pure Rust, zero deps |
 | libdeflate | 3.1 KB      | 332.4× | 4,265 MiB/s | C library, fastest   |
 | flate2     | 6.0 KB      | 169.9× | 989 MiB/s   | miniz_oxide backend  |
 
@@ -115,16 +116,16 @@ All libraries tested at **compression level 6** on 1 MB payloads.
 
 | Library    | Output Size | Ratio | Throughput | Notes       |
 | ---------- | ----------- | ----- | ---------- | ----------- |
-| **pixo** | 1.0 MB      | 1.0×  | 185 MiB/s  | Pure Rust   |
+| **pixo**   | 1.0 MB      | 1.0×  | 185 MiB/s  | Pure Rust   |
 | libdeflate | 1.0 MB      | 1.0×  | 94 MiB/s   | C library   |
 | flate2     | 1.0 MB      | 1.0×  | 67 MiB/s   | miniz_oxide |
 
 ### Max Compression (Zopfli comparison, 64 KB data)
 
-| Library        | Output Size | Time   | Notes                              |
-| -------------- | ----------- | ------ | ---------------------------------- |
+| Library      | Output Size | Time   | Notes                              |
+| ------------ | ----------- | ------ | ---------------------------------- |
 | pixo (lvl 9) | 146 B       | 91 µs  | Fast, good compression             |
-| **zopfli**     | 189 B       | 222 ms | Best compression, **2400× slower** |
+| **zopfli**   | 189 B       | 222 ms | Best compression, **2400× slower** |
 
 **Key Findings:**
 
@@ -139,12 +140,13 @@ All libraries tested at **compression level 6** on 1 MB payloads.
 
 Comparing pixo presets against oxipng and the image crate. All columns show **size / time**.
 
-| Image                       | Dimensions | pixo Fast      | pixo Balanced  | pixo Max      | oxipng           | image crate   | Delta vs oxipng |
-| --------------------------- | ---------- | ---------------- | ---------------- | --------------- | ---------------- | ------------- | --------------- |
-| playground.png              | 1460×1080  | 1,475,576 / 0.4s | 1,340,919 / 0.2s | 1,332,458 / 77s | 1,134,213 / 2.1s | ~1.4MB / 0.3s | +17.5%          |
-| squoosh_example.png         | 1460×1280  | 2,366,900 / 0.2s | 1,928,383 / 0.4s | 1,859,691 / 41s | 1,633,408 / 1.8s | ~2.0MB / 0.4s | +13.9%          |
-| squoosh_example_palette.png | 800×600    | 268,636 / 48ms   | 147,626 / 45ms   | 144,855 / 2.8s  | 104,206 / 0.9s   | ~180KB / 50ms | +39.0%          |
-| rocket.png                  | 800×600    | 1,716,340 / 0.1s | 1,390,853 / 0.2s | 1,379,515 / 15s | 1,280,518 / 1.2s | ~1.5MB / 0.2s | +7.7%           |
+| Image                       | Dimensions | pixo Fast        | pixo Balanced    | pixo Max        | oxipng           | image crate     | Delta vs oxipng    |
+| --------------------------- | ---------- | ---------------- | ---------------- | --------------- | ---------------- | --------------- | ------------------ |
+| Gradient (512×512)          | 512×512    | 10.9 KB / 1.7ms  | 10.1 KB / 4.6ms  | 5.0 KB / 23.0s  | 4.3 KB / 112ms   | 76.8 KB / 0.7ms | +134.7% (Balanced) |
+| playground.png              | 1460×1080  | 1,475,576 / 0.4s | 1,340,919 / 0.2s | 1,332,458 / 77s | 1,134,213 / 2.1s | ~1.4MB / 0.3s   | +17.5%             |
+| squoosh_example.png         | 1460×1280  | 2,366,900 / 0.2s | 1,928,383 / 0.4s | 1,859,691 / 41s | 1,633,408 / 1.8s | ~2.0MB / 0.4s   | +13.9%             |
+| squoosh_example_palette.png | 800×600    | 268,636 / 48ms   | 147,626 / 45ms   | 144,855 / 2.8s  | 104,206 / 0.9s   | ~180KB / 50ms   | +39.0%             |
+| rocket.png                  | 800×600    | 1,716,340 / 0.1s | 1,390,853 / 0.2s | 1,379,515 / 15s | 1,280,518 / 1.2s | ~1.5MB / 0.2s   | +7.7%              |
 
 ### PNG Preset Summary
 
@@ -156,13 +158,13 @@ Comparing pixo presets against oxipng and the image crate. All columns show **si
 
 ### PNG Settings Footnotes
 
-| Tool                | Settings                                                                         |
-| ------------------- | -------------------------------------------------------------------------------- |
+| Tool              | Settings                                                                         |
+| ----------------- | -------------------------------------------------------------------------------- |
 | pixo Fast [1]     | level=2, AdaptiveFast filter, no optimizations                                   |
 | pixo Balanced [2] | level=6, Adaptive filter, alpha_opt, reduce_color, reduce_palette, strip_meta    |
 | pixo Max [3]      | level=9, MinSum filter, optimal LZ77 parsing, iterative Huffman, block splitting |
-| oxipng [4]          | `-o4 --strip safe` (Homebrew install)                                            |
-| image crate [5]     | Default PngEncoder settings                                                      |
+| oxipng [4]        | `-o4 --strip safe` (Homebrew install)                                            |
+| image crate [5]   | Default PngEncoder settings                                                      |
 
 ---
 
@@ -174,10 +176,10 @@ Lossy PNG compression reduces file size by limiting the color palette to 256 col
 
 Testing on actual images from the test fixtures:
 
-| Image            | Dimensions | pixo Lossy | pngquant | Delta    | Winner     |
-| ---------------- | ---------- | ------------ | -------- | -------- | ---------- |
-| avatar-color.png | 740×740    | 122.9 KB     | 113.1 KB | +9%      | pngquant   |
-| rocket.png       | 1376×768   | 279.0 KB     | 392.9 KB | **-29%** | **pixo** |
+| Image            | Dimensions | pixo Lossy | pngquant | Delta    | Winner   |
+| ---------------- | ---------- | ---------- | -------- | -------- | -------- |
+| avatar-color.png | 740×740    | 123.1 KB   | 113.1 KB | +9%      | pngquant |
+| rocket.png       | 1376×768   | 286.2 KB   | 392.9 KB | **-27%** | **pixo** |
 
 **Key findings:**
 
@@ -190,32 +192,32 @@ Testing on actual images from the test fixtures:
 
 Gradient images are a **worst-case scenario** for quantization because they contain many unique colors that require dithering, making compression less effective.
 
-| Encoder         | Size    | Time     | Notes                              |
-| --------------- | ------- | -------- | ---------------------------------- |
-| pixo Lossless | 7.6 KB  | 5.46 ms  | Baseline (no quantization)         |
-| pixo Lossy    | 5.4 KB  | 8.18 ms  | 256 colors, no dithering (-29%)    |
-| imagequant      | 64.2 KB | 36.38 ms | libimagequant (dithered, larger)   |
-| pngquant        | 61.6 KB | 54.32 ms | --quality=65-80 (dithered, larger) |
+| Encoder       | Size    | Time     | Notes                              |
+| ------------- | ------- | -------- | ---------------------------------- |
+| pixo Lossless | 10.1 KB | 4.64 ms  | Baseline (no quantization)         |
+| pixo Lossy    | 5.9 KB  | 7.99 ms  | 256 colors, no dithering (-41.5%)  |
+| imagequant    | 64.4 KB | 40.72 ms | libimagequant (dithered, larger)   |
+| pngquant      | 61.6 KB | 56.46 ms | --quality=65-80 (dithered, larger) |
 
 > **Note**: On gradient images, the dithering applied by imagequant/pngquant creates noise patterns that are harder to compress with DEFLATE. pixo's simpler median-cut without dithering produces better results for this edge case.
 
 ### When to Use Lossy PNG
 
-| Scenario                            | Recommendation                               |
-| ----------------------------------- | -------------------------------------------- |
-| **Photographic images**             | Use lossy - 50-80% smaller than lossless     |
+| Scenario                            | Recommendation                             |
+| ----------------------------------- | ------------------------------------------ |
+| **Photographic images**             | Use lossy - 50-80% smaller than lossless   |
 | **Images with flat colors/UI**      | pixo Lossy often beats pngquant            |
-| **Complex photos, max compression** | pngquant produces smaller files              |
-| **Icons and logos (<256 colors)**   | Use lossless - already optimized             |
+| **Complex photos, max compression** | pngquant produces smaller files            |
+| **Icons and logos (<256 colors)**   | Use lossless - already optimized           |
 | **WASM bundle size matters**        | pixo Lossy (no external deps, 146 KB WASM) |
 
 ### Lossy PNG Settings
 
-| Tool         | Settings                                                                |
-| ------------ | ----------------------------------------------------------------------- |
+| Tool       | Settings                                                                |
+| ---------- | ----------------------------------------------------------------------- |
 | pixo Lossy | median-cut quantization, 256 colors, optional Floyd-Steinberg dithering |
-| pngquant     | `--quality=65-80 --speed=4` (libimagequant internally)                  |
-| imagequant   | Rust bindings to libimagequant library                                  |
+| pngquant   | `--quality=65-80 --speed=4` (libimagequant internally)                  |
+| imagequant | Rust bindings to libimagequant library                                  |
 
 ---
 
@@ -223,12 +225,13 @@ Gradient images are a **worst-case scenario** for quantization because they cont
 
 Comparing pixo presets against mozjpeg and the image crate. All columns show **size / time**.
 
-| Image           | Dimensions | pixo Fast     | pixo Balanced | pixo Max      | mozjpeg          | image crate     | Delta vs mozjpeg |
-| --------------- | ---------- | --------------- | --------------- | --------------- | ---------------- | --------------- | ---------------- |
-| multi-agent.jpg | 2300×1342  | 435.9KB / 94ms  | 435.9KB / 181ms | 368.0KB / 251ms | 352.3KB / ~200ms | ~480KB / ~100ms | **+4.4%**        |
-| browser.jpg     | 2300×1342  | 383.4KB / 94ms  | 383.4KB / 179ms | 309.7KB / 253ms | 297.2KB / ~200ms | ~420KB / ~100ms | **+4.2%**        |
-| review.jpg      | 2300×1342  | 405.9KB / 94ms  | 405.9KB / 181ms | 334.3KB / 251ms | 317.9KB / ~200ms | ~450KB / ~100ms | **+5.2%**        |
-| web.jpg         | 3220×1812  | 664.3KB / 177ms | 664.3KB / 339ms | 547.1KB / 474ms | 518.5KB / ~350ms | ~730KB / ~180ms | **+5.5%**        |
+| Image              | Dimensions | pixo Fast       | pixo Balanced   | pixo Max         | mozjpeg          | image crate     | Delta vs mozjpeg |
+| ------------------ | ---------- | --------------- | --------------- | ---------------- | ---------------- | --------------- | ---------------- |
+| Gradient (512×512) | 512×512    | 17.3 KB / 1.8ms | 17.7 KB / 3.4ms | 10.5 KB / 11.8ms | 8.2 KB / 15.7ms  | 16.7 KB / 1.5ms | **+28.3%** (Max) |
+| multi-agent.jpg    | 2300×1342  | 435.9KB / 94ms  | 435.9KB / 181ms | 368.0KB / 251ms  | 352.3KB / ~200ms | ~480KB / ~100ms | **+4.4%**        |
+| browser.jpg        | 2300×1342  | 383.4KB / 94ms  | 383.4KB / 179ms | 309.7KB / 253ms  | 297.2KB / ~200ms | ~420KB / ~100ms | **+4.2%**        |
+| review.jpg         | 2300×1342  | 405.9KB / 94ms  | 405.9KB / 181ms | 334.3KB / 251ms  | 317.9KB / ~200ms | ~450KB / ~100ms | **+5.2%**        |
+| web.jpg            | 3220×1812  | 664.3KB / 177ms | 664.3KB / 339ms | 547.1KB / 474ms  | 518.5KB / ~350ms | ~730KB / ~180ms | **+5.5%**        |
 
 ### JPEG Preset Summary
 
@@ -240,13 +243,13 @@ Comparing pixo presets against mozjpeg and the image crate. All columns show **s
 
 ### JPEG Settings Footnotes
 
-| Tool                | Settings                                                               |
-| ------------------- | ---------------------------------------------------------------------- |
+| Tool              | Settings                                                               |
+| ----------------- | ---------------------------------------------------------------------- |
 | pixo Fast [1]     | quality 85, 4:4:4 subsampling, baseline DCT, no optimization           |
 | pixo Balanced [2] | quality 85, 4:4:4 subsampling, Huffman optimization                    |
 | pixo Max [3]      | quality 85, 4:2:0 subsampling, progressive, trellis quant, Huffman opt |
-| mozjpeg [4]         | `cjpeg -quality 85 -optimize -progressive` (Homebrew install)          |
-| image crate [5]     | quality 85, default settings                                           |
+| mozjpeg [4]       | `cjpeg -quality 85 -optimize -progressive` (Homebrew install)          |
+| image crate [5]   | quality 85, default settings                                           |
 
 ---
 
@@ -256,7 +259,7 @@ Critical for web applications where bundle size impacts load time.
 
 | Library         | WASM Size  | Notes                               |
 | --------------- | ---------- | ----------------------------------- |
-| **pixo**      | **146 KB** | Zero deps, pure Rust, lossy PNG [1] |
+| **pixo**        | **146 KB** | Zero deps, pure Rust, lossy PNG [1] |
 | wasm-mozjpeg    | ~208 KB    | Emscripten compiled                 |
 | squoosh oxipng  | ~625 KB    | Google's Squoosh codec              |
 | squoosh mozjpeg | ~803 KB    | Google's Squoosh codec              |
@@ -296,7 +299,7 @@ Comparison of Rust image compression libraries.
 
 | Library        | WASM-friendly   | Binary Size  | Throughput | SIMD Support | Notes                                          |
 | -------------- | --------------- | ------------ | ---------- | ------------ | ---------------------------------------------- |
-| **pixo**     | Yes             | ~146 KB      | Excellent  | NEON + AVX2  | Zero deps, pure Rust, lossy PNG, parallel JPEG |
+| **pixo**       | Yes             | ~146 KB      | Excellent  | NEON + AVX2  | Zero deps, pure Rust, lossy PNG, parallel JPEG |
 | `image`        | Yes             | ~2-4 MB      | Good       | Limited      | Pure Rust, many codecs included                |
 | `jpeg-encoder` | Yes             | ~50 KB       | Excellent  | AVX2         | Pure Rust JPEG encoder, SIMD optimized         |
 | `lodepng`      | No (C bindings) | N/A          | Excellent  | No           | C lodepng library bindings                     |
@@ -308,7 +311,7 @@ Comparison of Rust image compression libraries.
 
 | Library       | WASM-friendly   | Throughput  | Compression | Notes                            |
 | ------------- | --------------- | ----------- | ----------- | -------------------------------- |
-| **pixo**    | Yes             | 865 MiB/s   | 336×        | Pure Rust, zero deps             |
+| **pixo**      | Yes             | 865 MiB/s   | 336×        | Pure Rust, zero deps             |
 | `flate2`      | Yes             | 989 MiB/s   | 170×        | miniz_oxide backend, widely used |
 | `libdeflater` | No (C bindings) | 4,265 MiB/s | 332×        | C libdeflate bindings, fastest   |
 | `zopfli`      | Yes             | 0.3 MiB/s   | 340×        | Max compression, very slow       |
@@ -403,28 +406,28 @@ cargo build --release --no-default-features --features simd
 
 ### Performance Summary (Apple Silicon M-series)
 
-| Operation                   | pixo            | Competitor                  | Result                        |
-| --------------------------- | ----------------- | --------------------------- | ----------------------------- |
-| DEFLATE (compressible 1MB)  | 1.15 ms, 3.0 KB   | flate2: 1.0 ms, 6.0 KB      | **2× better compression**     |
-| DEFLATE (compressible 1MB)  | 1.15 ms, 3.0 KB   | libdeflate: 0.23 ms, 3.1 KB | libdeflate 5× faster          |
+| Operation                   | pixo              | Competitor                  | Result                      |
+| --------------------------- | ----------------- | --------------------------- | --------------------------- |
+| DEFLATE (compressible 1MB)  | 1.15 ms, 3.0 KB   | flate2: 1.0 ms, 6.0 KB      | **2× better compression**   |
+| DEFLATE (compressible 1MB)  | 1.15 ms, 3.0 KB   | libdeflate: 0.23 ms, 3.1 KB | libdeflate 5× faster        |
 | DEFLATE (random 1MB)        | 5.4 ms, 185 MiB/s | flate2: 14.9 ms, 67 MiB/s   | **pixo 2.75× faster**       |
-| PNG 512×512 (level 6)       | 2.4 ms, 7.6 KB    | lodepng: 1.8 ms, 7.5 KB     | Tie (lodepng slightly faster) |
-| PNG 512×512 (level 6)       | 2.4 ms, 7.6 KB    | image: 0.6 ms, 76.8 KB      | **10× smaller output**        |
-| PNG 512×512 Balanced        | 5.2 ms, 7.6 KB    | oxipng: 100 ms, 4.3 KB      | **19× faster**                |
-| JPEG 512×512 (Q85 baseline) | 1.6 ms, 17.3 KB   | jpeg-encoder: 0.9 ms        | jpeg-encoder 1.8× faster      |
-| JPEG 512×512 Max            | 9.1 ms, 10.5 KB   | mozjpeg: 10.0 ms, 8.2 KB    | Comparable speed              |
+| PNG 512×512 (level 6)       | 1.8 ms, 7.6 KB    | lodepng: 1.8 ms, 7.5 KB     | Tie (identical performance) |
+| PNG 512×512 (level 6)       | 1.8 ms, 7.6 KB    | image: 0.6 ms, 76.8 KB      | **10× smaller output**      |
+| PNG 512×512 Balanced        | 4.6 ms, 10.1 KB   | oxipng: 112 ms, 4.3 KB      | **24× faster**              |
+| JPEG 512×512 (Q85 baseline) | 1.2 ms, 17.3 KB   | jpeg-encoder: 1.0 ms        | jpeg-encoder 1.2× faster    |
+| JPEG 512×512 Max            | 11.8 ms, 10.5 KB  | mozjpeg: 15.7 ms, 8.2 KB    | **pixo 1.3× faster**        |
 
 ### Decision Matrix by Primary Constraint
 
-| If you need...             | PNG                   | JPEG                  | Why                                |
-| -------------------------- | --------------------- | --------------------- | ---------------------------------- |
+| If you need...             | PNG                 | JPEG                | Why                                |
+| -------------------------- | ------------------- | ------------------- | ---------------------------------- |
 | Smallest WASM binary       | pixo (146 KB)       | pixo (146 KB)       | 4× smaller than Squoosh            |
-| Best lossless compression  | oxipng                | N/A                   | Gold standard, but larger binaries |
-| Best lossy PNG compression | pixo Lossy/pngquant | N/A                   | 50-80% smaller than lossless       |
+| Best lossless compression  | oxipng              | N/A                 | Gold standard, but larger binaries |
+| Best lossy PNG compression | pixo Lossy/pngquant | N/A                 | 50-80% smaller than lossless       |
 | Fastest encoding           | pixo Fast or image  | pixo Fast           | Minimal overhead                   |
 | Best speed/size tradeoff   | pixo Balanced       | pixo Balanced       | Good compression, fast enough      |
 | Browser + Node support     | pixo, pngjs, jimp   | pixo, jpeg-js, jimp | Pure JS/WASM, no native deps       |
-| Node.js only, max perf     | sharp                 | sharp                 | Native libvips, fastest            |
+| Node.js only, max perf     | sharp               | sharp               | Native libvips, fastest            |
 | Zero dependencies          | pixo                | pixo                | Pure Rust, no C toolchain          |
 
 ### The pixo Philosophy
@@ -433,15 +436,15 @@ cargo build --release --no-default-features --features simd
 
 #### The Landscape Today
 
-| Tool     | Language | Dependencies                                         |
-| -------- | -------- | ---------------------------------------------------- |
-| oxipng   | Rust     | Uses **libdeflate** (C) for DEFLATE compression      |
-| mozjpeg  | C        | Requires C toolchain, complex build                  |
-| pngquant | C        | Uses **libimagequant** (C) for quantization          |
-| sharp    | Node.js  | Uses **libvips** (C), 7-12 MB native binaries        |
-| squoosh  | WASM     | Emscripten-compiled C/C++ codecs (600KB-800KB each)  |
-| image    | Rust     | Pure Rust but includes many codecs (~2-4 MB)         |
-| zune-png | Rust     | Pure Rust, but PNG-only                              |
+| Tool     | Language | Dependencies                                        |
+| -------- | -------- | --------------------------------------------------- |
+| oxipng   | Rust     | Uses **libdeflate** (C) for DEFLATE compression     |
+| mozjpeg  | C        | Requires C toolchain, complex build                 |
+| pngquant | C        | Uses **libimagequant** (C) for quantization         |
+| sharp    | Node.js  | Uses **libvips** (C), 7-12 MB native binaries       |
+| squoosh  | WASM     | Emscripten-compiled C/C++ codecs (600KB-800KB each) |
+| image    | Rust     | Pure Rust but includes many codecs (~2-4 MB)        |
+| zune-png | Rust     | Pure Rust, but PNG-only                             |
 
 Even "Rust" libraries often delegate the heavy lifting to C. oxipng's compression advantage comes almost entirely from libdeflate—a highly optimized C library. pngquant's superior quantization comes from libimagequant, also written in C.
 
@@ -459,25 +462,25 @@ Even "Rust" libraries often delegate the heavy lifting to C. oxipng's compressio
 
 Being pure Rust with zero dependencies means accepting some compression ratio gaps:
 
-| Comparison              | Gap      | Root Cause                                    |
-| ----------------------- | -------- | --------------------------------------------- |
-| PNG Max vs oxipng       | +8-17%   | libdeflate has 20+ years of C optimization    |
-| JPEG Max vs mozjpeg     | +4-5%    | mozjpeg has sophisticated trellis refinement  |
-| Lossy PNG vs pngquant   | +9%      | libimagequant uses advanced k-means iteration |
+| Comparison            | Gap    | Root Cause                                    |
+| --------------------- | ------ | --------------------------------------------- |
+| PNG Max vs oxipng     | +8-17% | libdeflate has 20+ years of C optimization    |
+| JPEG Max vs mozjpeg   | +4-5%  | mozjpeg has sophisticated trellis refinement  |
+| Lossy PNG vs pngquant | +9%    | libimagequant uses advanced k-means iteration |
 
 These gaps are the cost of independence. For many use cases—especially web applications where binary size matters—the tradeoffs are worth it.
 
 #### When to Choose pixo
 
-| Scenario                                     | Recommendation                                          |
-| -------------------------------------------- | ------------------------------------------------------- |
+| Scenario                                     | Recommendation                                        |
+| -------------------------------------------- | ----------------------------------------------------- |
 | **Building a web app with WASM?**            | Use pixo (146 KB binary, good compression)            |
 | **Need smallest PNG file size?**             | Use pixo Lossy (50-80% smaller than lossless)         |
 | **Want zero native dependencies?**           | Use pixo (pure Rust, no C toolchain)                  |
 | **Need predictable output across browsers?** | Use pixo (identical output everywhere)                |
-| **CLI tool, size doesn't matter?**           | Use oxipng/mozjpeg/pngquant (best compression ratios)   |
-| **Node.js server, need speed?**              | Use sharp (native bindings, excellent performance)      |
-| **Optimizing existing images in CI/CD?**     | Use oxipng/mozjpeg/pngquant CLI tools                   |
+| **CLI tool, size doesn't matter?**           | Use oxipng/mozjpeg/pngquant (best compression ratios) |
+| **Node.js server, need speed?**              | Use sharp (native bindings, excellent performance)    |
+| **Optimizing existing images in CI/CD?**     | Use oxipng/mozjpeg/pngquant CLI tools                 |
 
 ## Running Benchmarks
 
@@ -503,14 +506,14 @@ cargo bench --bench comparison -- --summary-only
 
 ### Benchmark Groups
 
-| Group                    | Description                                   |
-| ------------------------ | --------------------------------------------- |
-| PNG Equivalent Settings  | All PNG encoders at level 6                   |
-| JPEG Equivalent Settings | All JPEG encoders at Q85, 4:2:0, baseline     |
-| PNG/JPEG Best Effort     | Each encoder using optimal settings           |
+| Group                    | Description                                 |
+| ------------------------ | ------------------------------------------- |
+| PNG Equivalent Settings  | All PNG encoders at level 6                 |
+| JPEG Equivalent Settings | All JPEG encoders at Q85, 4:2:0, baseline   |
+| PNG/JPEG Best Effort     | Each encoder using optimal settings         |
 | DEFLATE Comparison       | pixo vs flate2 vs libdeflate (levels 1,6,9) |
-| DEFLATE Zopfli           | Max compression comparison                    |
-| Kodak Real Images        | Real photographic images                      |
+| DEFLATE Zopfli           | Max compression comparison                  |
+| Kodak Real Images        | Real photographic images                    |
 | PNG/JPEG All Presets     | pixo Fast/Balanced/Max presets              |
 
 Results are saved to `target/criterion/` with HTML reports.

@@ -4,7 +4,7 @@
 
 use crate::bits::BitWriter64;
 use crate::compress::lz77::{
-    CostModel, Lz77Compressor, PackedToken, Token, MAX_MATCH_LENGTH, MIN_MATCH_LENGTH,
+    CostModel, Lz77Compressor, PackedToken, Token, MAX_DISTANCE, MAX_MATCH_LENGTH, MIN_MATCH_LENGTH,
 };
 use crate::compress::{adler32::adler32, huffman};
 use std::sync::{LazyLock, Mutex};
@@ -179,6 +179,43 @@ fn encode_best_huffman_packed(tokens: &[PackedToken], est_bytes: usize) -> (Vec<
     } else {
         (fixed, false)
     }
+}
+
+/// Encode tokens using adaptive block splitting (dynamic Huffman per block).
+fn encode_with_block_splitting(tokens: &[Token], max_blocks: usize) -> Vec<u8> {
+    if tokens.len() < MIN_BLOCK_SIZE * 2 {
+        // Too small to benefit
+        return encode_dynamic_huffman_with_capacity(tokens, tokens.len() * 2);
+    }
+
+    debug_assert!(
+        tokens.iter().all(|t| match t {
+            Token::Match { distance, .. } => *distance >= 1,
+            _ => true,
+        }),
+        "Found zero-distance match before block splitting"
+    );
+
+    let splits = find_block_splits(tokens, max_blocks);
+    if splits.is_empty() {
+        return encode_dynamic_huffman_with_capacity(tokens, tokens.len() * 2);
+    }
+
+    let mut writer = BitWriter64::with_capacity(tokens.len() * 2);
+    let boundaries: Vec<usize> = std::iter::once(0)
+        .chain(splits.iter().copied())
+        .chain(std::iter::once(tokens.len()))
+        .collect();
+
+    for i in 0..boundaries.len() - 1 {
+        let start = boundaries[i];
+        let end = boundaries[i + 1];
+        let is_final = i == boundaries.len() - 2;
+        let block_tokens = &tokens[start..end];
+        write_dynamic_huffman_block(&mut writer, block_tokens, is_final);
+    }
+
+    writer.finish()
 }
 
 /// Lookup table for distance codes: maps distance (1-32768) to code index.
@@ -398,12 +435,18 @@ fn count_symbols(tokens: &[Token]) -> ([u32; 286], [u32; 30]) {
     let mut lit_len_counts = [0u32; 286];
     let mut dist_counts = [0u32; 30];
 
-    for token in tokens {
+    for (i, token) in tokens.iter().enumerate() {
         match *token {
             Token::Literal(b) => {
                 lit_len_counts[b as usize] += 1;
             }
             Token::Match { length, distance } => {
+                debug_assert!(
+                    (1..=MAX_DISTANCE as u16).contains(&distance),
+                    "bad distance {} at token {}",
+                    distance,
+                    i
+                );
                 let (len_symbol, _, _) = length_code(length);
                 lit_len_counts[len_symbol as usize] += 1;
 
@@ -441,12 +484,18 @@ fn count_symbols_range(tokens: &[Token], start: usize, end: usize) -> ([u32; 286
     let mut lit_len_counts = [0u32; 286];
     let mut dist_counts = [0u32; 30];
 
-    for token in &tokens[start..end] {
+    for (i, token) in tokens[start..end].iter().enumerate() {
         match *token {
             Token::Literal(b) => {
                 lit_len_counts[b as usize] += 1;
             }
             Token::Match { length, distance } => {
+                debug_assert!(
+                    (1..=MAX_DISTANCE as u16).contains(&distance),
+                    "bad distance {} in range count at token {}",
+                    distance,
+                    start + i
+                );
                 let (len_symbol, _, _) = length_code(length);
                 lit_len_counts[len_symbol as usize] += 1;
 
@@ -794,6 +843,17 @@ pub fn deflate_optimal_split(data: &[u8], iterations: usize, max_blocks: usize) 
         }
     }
 
+    if best_tokens
+        .iter()
+        .any(|t| matches!(t, Token::Match { distance, .. } if *distance == 0))
+    {
+        // Fallback to greedy tokens if we somehow produced an invalid match.
+        let fallback_tokens = lz77.compress(data);
+        let (encoded, _) =
+            encode_best_huffman(&fallback_tokens, estimated_deflate_size(data.len(), 9));
+        return encoded;
+    }
+
     // Find optimal block splits
     let splits = find_block_splits(&best_tokens, max_blocks);
 
@@ -961,8 +1021,16 @@ impl Deflater {
         self.lz77.compress_into(data, &mut self.tokens);
 
         let est_bytes = estimated_deflate_size(data.len(), self.level);
-        let (encoded, _) = encode_best_huffman(&self.tokens, est_bytes);
-        encoded
+        let use_split = self.level >= 5
+            && data.len() > SMALL_INPUT_BYTES
+            && data.len() <= BLOCK_SPLIT_SIZE_LIMIT;
+
+        if use_split {
+            encode_with_block_splitting(&self.tokens, DEFAULT_MAX_BLOCKS)
+        } else {
+            let (encoded, _) = encode_best_huffman(&self.tokens, est_bytes);
+            encoded
+        }
     }
 
     /// Compress using only fixed Huffman codes (for very small inputs).
@@ -989,7 +1057,15 @@ impl Deflater {
         self.lz77.compress_into(data, &mut self.tokens);
 
         let est_bytes = estimated_deflate_size(data.len(), self.level);
-        let (deflated, _) = encode_best_huffman(&self.tokens, est_bytes);
+        let use_split = self.level >= 5
+            && data.len() > SMALL_INPUT_BYTES
+            && data.len() <= BLOCK_SPLIT_SIZE_LIMIT;
+        let deflated = if use_split {
+            encode_with_block_splitting(&self.tokens, DEFAULT_MAX_BLOCKS)
+        } else {
+            let (deflated, _) = encode_best_huffman(&self.tokens, est_bytes);
+            deflated
+        };
 
         let use_stored = should_use_stored(data.len(), deflated.len());
 

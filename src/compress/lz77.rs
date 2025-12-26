@@ -11,7 +11,7 @@
 pub const MAX_DISTANCE: usize = 32768;
 
 /// Threshold for "good enough" match - skip lazy matching above this length.
-/// This is a common optimization used by zlib to speed up compression.
+/// This is a common optimization used by zlib/libdeflate to speed up compression.
 const GOOD_MATCH_LENGTH: usize = 16;
 
 /// Maximum match length (as per DEFLATE spec).
@@ -20,9 +20,17 @@ pub const MAX_MATCH_LENGTH: usize = 258;
 /// Minimum match length worth encoding.
 pub const MIN_MATCH_LENGTH: usize = 3;
 
-/// Size of the hash table (power of 2 for fast modulo).
+/// Size of the 4-byte hash table (power of 2 for fast modulo).
 /// Enlarged to reduce collisions when using 4-byte hashes.
 const HASH_SIZE: usize = 1 << 16; // 65536 entries
+
+/// Size of the 3-byte hash table (singleton buckets).
+const HASH3_SIZE: usize = 1 << 15;
+
+/// Parameters for HT-style fast matchfinder (level 1).
+const HT_HASH_BITS: usize = 15;
+const HT_HASH_SIZE: usize = 1 << HT_HASH_BITS;
+const HT_BUCKET_SIZE: usize = 2;
 
 /// LZ77 token representing either a literal or a match.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +57,24 @@ pub enum Token {
 /// which fits in 15 bits and avoids collision with the LITERAL_FLAG.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PackedToken(u32);
+
+/// Parsing strategy for lazy matching.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LazyKind {
+    None,
+    Lazy,
+    Lazy2,
+}
+
+/// Level-specific tuning parameters.
+#[derive(Debug, Clone, Copy)]
+struct LevelConfig {
+    max_chain_length: usize,
+    max_search_depth: usize,
+    nice_length: usize,
+    lazy: LazyKind,
+    use_ht: bool,
+}
 
 impl PackedToken {
     const LITERAL_FLAG: u32 = 0x8000_0000;
@@ -150,16 +176,72 @@ fn hash4(data: &[u8], pos: usize) -> usize {
     ((val.wrapping_mul(0x1E35_A7BD)) >> 16) as usize & (HASH_SIZE - 1)
 }
 
+/// Hash function for 3-byte sequences (singleton buckets).
+#[inline(always)]
+fn hash3(data: &[u8], pos: usize) -> usize {
+    if pos + 2 >= data.len() {
+        return 0;
+    }
+    let val = u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], 0]);
+    ((val.wrapping_mul(0x1E35_A7BD)) >> 17) as usize & (HASH3_SIZE - 1)
+}
+
+/// Hash for HT buckets (15-bit) based on 4-byte sequence.
+#[inline(always)]
+fn hash4_ht(data: &[u8], pos: usize) -> usize {
+    if pos + 3 >= data.len() {
+        return 0;
+    }
+    let val = u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
+    (val.wrapping_mul(0x1E35_A7BD) >> (32 - HT_HASH_BITS)) as usize & (HT_HASH_SIZE - 1)
+}
+
+/// Heuristic: choose a minimum match length based on literal diversity and search depth.
+fn calculate_min_match_len(data: &[u8], max_search_depth: usize) -> usize {
+    let mut used = [false; 256];
+    let mut num_used = 0usize;
+    let scan = data.len().min(4096);
+    for &b in &data[..scan] {
+        if !used[b as usize] {
+            used[b as usize] = true;
+            num_used += 1;
+        }
+    }
+    choose_min_match_len(num_used, max_search_depth)
+}
+
+fn choose_min_match_len(num_used_literals: usize, max_search_depth: usize) -> usize {
+    if max_search_depth <= 4 {
+        return MIN_MATCH_LENGTH;
+    }
+
+    let mut min_len = MIN_MATCH_LENGTH;
+
+    if num_used_literals > 32 {
+        min_len = 4;
+    }
+    if num_used_literals > 64 && max_search_depth >= 10 {
+        min_len = 5;
+    }
+    if num_used_literals > 96 && max_search_depth >= 20 {
+        min_len = 6;
+    }
+
+    min_len.min(MAX_MATCH_LENGTH)
+}
+
 /// LZ77 compressor with hash chain for fast matching.
 pub struct Lz77Compressor {
     /// Hash table: maps hash -> most recent position
     head: Vec<i32>,
+    /// Hash table for 3-byte matches (singleton buckets)
+    head3: Vec<i32>,
+    /// Buckets for the fast HT-style matchfinder (level 1)
+    ht_buckets: Vec<[i32; HT_BUCKET_SIZE]>,
     /// Chain links: prev[pos % window] -> previous position with same hash
     prev: Vec<i32>,
-    /// Compression level (affects search depth)
-    max_chain_length: usize,
-    /// Lazy matching: check if next position has better match
-    lazy_matching: bool,
+    /// Level tuning knobs
+    config: LevelConfig,
 }
 
 impl Lz77Compressor {
@@ -167,28 +249,14 @@ impl Lz77Compressor {
     pub fn new(level: u8) -> Self {
         let level = level.clamp(1, 9);
 
-        // Tune chain length and lazy matching based on level.
-        // Note: Lazy matching is disabled because empirical testing shows it hurts
-        // compression ratio for PNG-style data with many short matches. The longer
-        // chain lengths at higher levels provide better compression without it.
-        let (max_chain_length, lazy_matching) = match level {
-            1 => (4, false),
-            2 => (8, false),
-            3 => (16, false),
-            4 => (32, false),
-            5 => (64, false),
-            6 => (128, false),
-            7 => (256, false),
-            8 => (1024, false),
-            9 => (4096, false), // Exhaustive search for maximum compression
-            _ => (128, false),
-        };
+        let config = Self::config_for_level(level);
 
         Self {
             head: vec![-1; HASH_SIZE],
+            head3: vec![-1; HASH3_SIZE],
+            ht_buckets: vec![[-1; HT_BUCKET_SIZE]; HT_HASH_SIZE],
             prev: vec![-1; MAX_DISTANCE],
-            max_chain_length,
-            lazy_matching,
+            config,
         }
     }
 
@@ -209,6 +277,9 @@ impl Lz77Compressor {
             return;
         }
 
+        // Heuristic minimum match length based on literal diversity and search depth.
+        let min_match_len = calculate_min_match_len(data, self.config.max_search_depth);
+
         sink.clear();
         sink.reserve(data.len());
         let mut pos = 0;
@@ -221,6 +292,10 @@ impl Lz77Compressor {
 
         // Reset hash tables
         self.head.fill(-1);
+        self.head3.fill(-1);
+        for bucket in &mut self.ht_buckets {
+            *bucket = [-1; HT_BUCKET_SIZE];
+        }
         self.prev.fill(-1);
 
         while pos < data.len() {
@@ -228,9 +303,13 @@ impl Lz77Compressor {
                 // Periodically probe for a match with a very shallow chain to exit early if data changes.
                 if probe_since_last >= INCOMPRESSIBLE_PROBE_INTERVAL {
                     probe_since_last = 0;
-                    if let Some((length, distance)) =
-                        self.find_best_match(data, pos, INCOMPRESSIBLE_CHAIN_LIMIT)
-                    {
+                    if let Some((length, distance)) = self.find_best_match(
+                        data,
+                        pos,
+                        INCOMPRESSIBLE_CHAIN_LIMIT.min(self.config.max_search_depth),
+                        self.config.nice_length,
+                        min_match_len,
+                    ) {
                         incompressible_mode = false;
                         literal_streak = 0;
 
@@ -262,15 +341,23 @@ impl Lz77Compressor {
                 probe_since_last = 0;
                 INCOMPRESSIBLE_CHAIN_LIMIT
             } else {
-                self.max_chain_length
+                self.config.max_chain_length
             };
 
             // If we have a pending match from lazy evaluation, use it directly
             // (prevents cascading deferrals)
             let best_match = if let Some(pending) = pending_match.take() {
                 Some(pending)
+            } else if self.config.use_ht {
+                self.find_best_match_ht(data, pos, self.config.nice_length, min_match_len)
             } else {
-                self.find_best_match(data, pos, chain_limit)
+                self.find_best_match(
+                    data,
+                    pos,
+                    chain_limit.min(self.config.max_search_depth),
+                    self.config.nice_length,
+                    min_match_len,
+                )
             };
 
             if let Some((length, distance)) = best_match {
@@ -278,20 +365,53 @@ impl Lz77Compressor {
                 incompressible_mode = false;
                 probe_since_last = 0;
 
+                if distance == 0 {
+                    // Defensive: treat as literal if match distance is invalid.
+                    sink.push_literal(data[pos]);
+                    self.update_hash(data, pos);
+                    pos += 1;
+                    continue;
+                }
+
                 // Check for lazy match if enabled, but skip for "good enough" matches.
                 // Only defer if the next match is significantly better (>= 3 bytes longer)
                 // to justify the cost of emitting a literal.
-                if self.lazy_matching && length < GOOD_MATCH_LENGTH && pos + 1 < data.len() {
+                if self.config.lazy != LazyKind::None
+                    && length < self.config.nice_length
+                    && length < GOOD_MATCH_LENGTH
+                    && pos + 1 < data.len()
+                {
                     // Update hash for current position before looking ahead
                     self.update_hash(data, pos);
 
-                    if let Some((next_length, next_distance)) =
-                        self.find_best_match(data, pos + 1, chain_limit)
-                    {
+                    let next_chain = if self.config.lazy == LazyKind::Lazy2 {
+                        (chain_limit / 2).max(1)
+                    } else {
+                        chain_limit
+                    };
+
+                    let next_match = if self.config.use_ht {
+                        self.find_best_match_ht(
+                            data,
+                            pos + 1,
+                            self.config.nice_length,
+                            min_match_len,
+                        )
+                    } else {
+                        self.find_best_match(
+                            data,
+                            pos + 1,
+                            next_chain.min(self.config.max_search_depth),
+                            self.config.nice_length,
+                            min_match_len,
+                        )
+                    };
+
+                    if let Some((next_length, next_distance)) = next_match {
                         // Require significant improvement to justify deferral.
                         // A literal costs ~8-9 bits, so the next match should save more than that.
                         // Length difference of 3+ bytes typically saves 24+ bits of match data.
-                        if next_length >= length + 3 {
+                        if next_length >= length + 3 || next_length >= self.config.nice_length {
                             // Better match at next position, emit literal and store pending match
                             sink.push_literal(data[pos]);
                             pending_match = Some((next_length, next_distance));
@@ -339,15 +459,45 @@ impl Lz77Compressor {
         data: &[u8],
         pos: usize,
         chain_limit: usize,
+        nice_length: usize,
+        min_match_length: usize,
     ) -> Option<(usize, usize)> {
         if pos + MIN_MATCH_LENGTH > data.len() {
             return None;
         }
 
+        // Check length-3 singleton hash first (cheap path)
+        let mut best_length = min_match_length.saturating_sub(1);
+        let mut best_distance = 0;
+
+        let hash3 = hash3(data, pos);
+        let cand3 = self.head3[hash3];
+        if cand3 >= 0 {
+            let match_pos = cand3 as usize;
+            let distance = pos - match_pos;
+            if distance == 0 {
+                // Skip self-reference
+            } else if distance <= MAX_DISTANCE && match_pos + 3 <= data.len() {
+                let a = &data[pos..pos + 3];
+                let b = &data[match_pos..match_pos + 3];
+                if a == b {
+                    let len = self
+                        .match_length(data, match_pos, pos)
+                        .min(MAX_MATCH_LENGTH);
+                    // Gate short matches: reject length 3 with very long distance.
+                    if len >= min_match_length && !(len == 3 && distance > 8192) {
+                        best_length = len;
+                        best_distance = distance;
+                        if best_length >= nice_length {
+                            return Some((best_length, best_distance));
+                        }
+                    }
+                }
+            }
+        }
+
         let hash = hash4(data, pos);
         let mut chain_pos = self.head[hash];
-        let mut best_length = MIN_MATCH_LENGTH - 1;
-        let mut best_distance = 0;
 
         let max_distance = pos.min(MAX_DISTANCE);
         let mut chain_remaining = chain_limit;
@@ -367,6 +517,12 @@ impl Lz77Compressor {
         while chain_pos >= 0 && chain_remaining > 0 {
             let match_pos = chain_pos as usize;
             let distance = pos - match_pos;
+
+            if distance == 0 {
+                chain_pos = self.prev[match_pos % MAX_DISTANCE];
+                chain_remaining -= 1;
+                continue;
+            }
 
             if distance > max_distance {
                 break;
@@ -391,12 +547,15 @@ impl Lz77Compressor {
             // Compare strings
             let length = self.match_length(data, match_pos, pos);
 
-            if length > best_length {
+            if length >= min_match_length
+                && !(length == 3 && distance > 8192)
+                && length > best_length
+            {
                 best_length = length;
                 best_distance = distance;
 
                 // Early exit if we found max length.
-                if length >= MAX_MATCH_LENGTH {
+                if length >= MAX_MATCH_LENGTH || best_length >= nice_length {
                     break;
                 }
             }
@@ -406,8 +565,74 @@ impl Lz77Compressor {
             chain_remaining -= 1;
         }
 
-        if best_length >= MIN_MATCH_LENGTH {
+        // Only return a match if it meets the minimum length requirement.
+        // best_distance is only updated when we find a valid match, so if
+        // best_length >= min_match_length, best_distance is guaranteed to be valid (> 0).
+        if best_length >= min_match_length {
             Some((best_length, best_distance))
+        } else {
+            None
+        }
+    }
+
+    /// Fast HT-style matchfinder for level 1 (2-entry buckets, shallow search).
+    fn find_best_match_ht(
+        &mut self,
+        data: &[u8],
+        pos: usize,
+        nice_length: usize,
+        min_match_length: usize,
+    ) -> Option<(usize, usize)> {
+        if pos + MIN_MATCH_LENGTH > data.len() {
+            return None;
+        }
+
+        let hash = hash4_ht(data, pos);
+        let bucket = &mut self.ht_buckets[hash];
+        let cand0 = bucket[0];
+        let cand1 = bucket[1];
+
+        // Insert current position at head of bucket
+        bucket[1] = cand0;
+        bucket[0] = pos as i32;
+
+        let mut best_len = min_match_length.saturating_sub(1);
+        let mut best_dist = 0usize;
+
+        for &cand in [cand0, cand1].iter() {
+            if cand < 0 {
+                continue;
+            }
+            let match_pos = cand as usize;
+            let distance = pos - match_pos;
+            if distance == 0 || distance > MAX_DISTANCE || match_pos + 3 > data.len() {
+                continue;
+            }
+            let a = &data[pos..pos + 3];
+            let b = &data[match_pos..match_pos + 3];
+            if a != b {
+                continue;
+            }
+            let len = self
+                .match_length(data, match_pos, pos)
+                .min(MAX_MATCH_LENGTH);
+            if len < min_match_length || (len == 3 && distance > 8192) {
+                continue;
+            }
+            if len > best_len {
+                best_len = len;
+                best_dist = distance;
+                if best_len >= nice_length {
+                    break;
+                }
+            }
+        }
+
+        // Only return a match if it meets the minimum length requirement.
+        // best_dist is only updated when we find a valid match, so if
+        // best_len >= min_match_length, best_dist is guaranteed to be valid (> 0).
+        if best_len >= min_match_length {
+            Some((best_len, best_dist))
         } else {
             None
         }
@@ -468,6 +693,10 @@ impl Lz77Compressor {
             return;
         }
 
+        // Update 3-byte singleton hash
+        let h3 = hash3(data, pos);
+        self.head3[h3] = pos as i32;
+
         let hash = hash4(data, pos);
         self.prev[pos % MAX_DISTANCE] = self.head[hash];
         self.head[hash] = pos as i32;
@@ -489,14 +718,41 @@ impl Lz77Compressor {
             return (sublen, 0);
         }
 
+        // Cheap length-3 singleton hash probe
+        let hash3 = hash3(data, pos);
+        let cand3 = self.head3[hash3];
+        if cand3 >= 0 {
+            let match_pos = cand3 as usize;
+            let distance = pos - match_pos;
+            if distance == 0 {
+                // Skip self-reference
+            } else if distance <= MAX_DISTANCE && match_pos + 3 <= data.len() {
+                let a = &data[pos..pos + 3];
+                let b = &data[match_pos..match_pos + 3];
+                if a == b {
+                    sublen[3] = distance as u16;
+                    max_length = 3;
+                }
+            }
+        }
+
         let hash = hash4(data, pos);
         let mut chain_pos = self.head[hash];
         let max_distance = pos.min(MAX_DISTANCE);
-        let mut chain_remaining = self.max_chain_length;
+        let mut chain_remaining = self
+            .config
+            .max_chain_length
+            .min(self.config.max_search_depth);
 
         while chain_pos >= 0 && chain_remaining > 0 {
             let match_pos = chain_pos as usize;
             let distance = pos - match_pos;
+
+            if distance == 0 {
+                chain_pos = self.prev[match_pos % MAX_DISTANCE];
+                chain_remaining -= 1;
+                continue;
+            }
 
             if distance > max_distance {
                 break;
@@ -504,7 +760,7 @@ impl Lz77Compressor {
 
             let length = self.match_length(data, match_pos, pos);
 
-            if length >= MIN_MATCH_LENGTH {
+            if length >= MIN_MATCH_LENGTH && !(length == 3 && distance > 8192) {
                 // For each length from MIN_MATCH_LENGTH to length, if we haven't
                 // seen a match of that length yet OR this distance is shorter,
                 // record it. Shorter distances are better for compression.
@@ -547,6 +803,7 @@ impl Lz77Compressor {
 
         // Reset hash tables
         self.head.fill(-1);
+        self.head3.fill(-1);
         self.prev.fill(-1);
 
         // costs[i] = minimum cost to encode bytes 0..i
@@ -563,9 +820,6 @@ impl Lz77Compressor {
             if costs[i] >= f32::MAX {
                 continue;
             }
-
-            // Update hash for this position
-            self.update_hash(data, i);
 
             // Try emitting a literal
             let lit_cost = costs[i] + cost_model.literal_cost(data[i]);
@@ -593,6 +847,9 @@ impl Lz77Compressor {
                     dist_array[end_pos] = dist;
                 }
             }
+
+            // Insert this position into hash tables after using prior history.
+            self.update_hash(data, i);
         }
 
         // Backward pass: reconstruct optimal token sequence
@@ -639,6 +896,12 @@ impl Lz77Compressor {
                 // Literal
                 tokens.push(Token::Literal(data[data_pos]));
             } else {
+                // Defensive: distance must be at least 1; otherwise treat as literal.
+                if dist == 0 {
+                    tokens.push(Token::Literal(data[data_pos]));
+                    data_pos += len;
+                    continue;
+                }
                 // Match
                 tokens.push(Token::Match {
                     length: len as u16,
@@ -863,6 +1126,83 @@ impl Default for Lz77Compressor {
     }
 }
 
+impl Lz77Compressor {
+    fn config_for_level(level: u8) -> LevelConfig {
+        match level {
+            1 => LevelConfig {
+                max_chain_length: 4,
+                max_search_depth: 4,
+                nice_length: 32,
+                lazy: LazyKind::None,
+                use_ht: true,
+            },
+            2 => LevelConfig {
+                max_chain_length: 8,
+                max_search_depth: 6,
+                nice_length: 10,
+                lazy: LazyKind::None,
+                use_ht: false,
+            },
+            3 => LevelConfig {
+                max_chain_length: 16,
+                max_search_depth: 12,
+                nice_length: 14,
+                lazy: LazyKind::None,
+                use_ht: false,
+            },
+            4 => LevelConfig {
+                max_chain_length: 32,
+                max_search_depth: 16,
+                nice_length: 30,
+                lazy: LazyKind::None,
+                use_ht: false,
+            },
+            5 => LevelConfig {
+                max_chain_length: 64,
+                max_search_depth: 16,
+                nice_length: 30,
+                lazy: LazyKind::Lazy,
+                use_ht: false,
+            },
+            6 => LevelConfig {
+                max_chain_length: 128,
+                max_search_depth: 35,
+                nice_length: 65,
+                lazy: LazyKind::Lazy,
+                use_ht: false,
+            },
+            7 => LevelConfig {
+                max_chain_length: 256,
+                max_search_depth: 100,
+                nice_length: 130,
+                lazy: LazyKind::Lazy,
+                use_ht: false,
+            },
+            8 => LevelConfig {
+                max_chain_length: 1024,
+                max_search_depth: 300,
+                nice_length: MAX_MATCH_LENGTH,
+                lazy: LazyKind::Lazy2,
+                use_ht: false,
+            },
+            9 => LevelConfig {
+                max_chain_length: 4096,
+                max_search_depth: 600,
+                nice_length: MAX_MATCH_LENGTH,
+                lazy: LazyKind::Lazy2,
+                use_ht: false,
+            },
+            _ => LevelConfig {
+                max_chain_length: 4096,
+                max_search_depth: 600,
+                nice_length: MAX_MATCH_LENGTH,
+                lazy: LazyKind::Lazy2,
+                use_ht: false,
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1082,10 +1422,164 @@ mod tests {
     }
 
     #[test]
+    fn test_find_best_match_no_zero_distance() {
+        // Regression test: find_best_match should never return distance=0
+        // This bug manifests when min_match_length > MIN_MATCH_LENGTH and no match is found.
+        // The best_length would be initialized to min_match_length - 1 (e.g., 3) while
+        // best_distance stays at 0, causing an invalid (3, 0) match to be returned.
+        let mut compressor = Lz77Compressor::new(6);
+
+        // Create high-entropy data to trigger min_match_length > 3
+        let mut unique_data: Vec<u8> = (0..=255).collect();
+        unique_data.extend_from_slice(b"xyz"); // Short unrepeated sequence at end
+
+        let result = compressor.compress(&unique_data);
+
+        // Verify no zero-distance matches in result
+        for token in &result {
+            if let Token::Match { distance, .. } = token {
+                assert!(*distance > 0, "Found invalid match with distance 0");
+            }
+        }
+    }
+
+    #[test]
+    fn test_find_best_match_returns_none_for_no_match() {
+        // Direct test of find_best_match with min_match_length > MIN_MATCH_LENGTH
+        let compressor = Lz77Compressor::new(6);
+
+        // Data with no possible matches (all unique bytes, too short for matches)
+        let data: Vec<u8> = (0..10).collect();
+
+        // With min_match_length = 4, best_length is initialized to 3
+        // If no match is found, it should return None, not Some((3, 0))
+        let result = compressor.find_best_match(&data, 5, 128, 65, 4);
+
+        // Should be None since there's no valid match
+        assert!(
+            result.is_none() || result.unwrap().1 > 0,
+            "find_best_match returned invalid match with distance 0: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_find_best_match_respects_min_match_length() {
+        // Regression test: find_best_match should never return a match shorter than
+        // min_match_length, and should never return a zero distance.
+        let mut compressor = Lz77Compressor::new(6);
+
+        // Create data where the only possible match is exactly 4 bytes.
+        // "abcdXYZWabcdPQRS" - "abcd" appears at position 0 and 8, but
+        // the bytes after differ, limiting match to 4 bytes.
+        let data = b"abcdXYZWabcdPQRS";
+
+        // Reset hash tables
+        compressor.head.fill(-1);
+        compressor.head3.fill(-1);
+        compressor.prev.fill(-1);
+
+        // Insert the first occurrence into hash tables (positions 0-7)
+        for i in 0..8 {
+            compressor.update_hash(data, i);
+        }
+
+        // At position 8, we should find a 4-byte match (abcd).
+        // With min_match_length = 5, we should get None (not Some((4, 0)))
+        let result = compressor.find_best_match(data, 8, 100, 258, 5);
+        assert!(
+            result.is_none(),
+            "find_best_match returned {:?} when no match >= min_match_length exists",
+            result
+        );
+
+        // With min_match_length = 4, we should get a valid match
+        let result = compressor.find_best_match(data, 8, 100, 258, 4);
+        assert!(result.is_some(), "Expected a match with min_match_length=4");
+        let (len, dist) = result.unwrap();
+        assert!(len >= 4, "Match length should be >= min_match_length");
+        assert!(dist > 0, "Match distance must be > 0");
+        assert_eq!(dist, 8, "Distance should be 8 (back to position 0)");
+    }
+
+    #[test]
+    fn test_find_best_match_ht_respects_min_match_length() {
+        // Same regression test for the HT-style matchfinder
+        let mut compressor = Lz77Compressor::new(1); // Level 1 uses HT
+
+        // Same test data: only a 4-byte match is possible
+        let data = b"abcdXYZWabcdPQRS";
+
+        // Reset HT buckets
+        for bucket in &mut compressor.ht_buckets {
+            *bucket = [-1; HT_BUCKET_SIZE];
+        }
+
+        // Insert first occurrence at position 0
+        let hash = hash4_ht(data, 0);
+        compressor.ht_buckets[hash][0] = 0;
+
+        // At position 8, with min_match_length = 5, we should get None
+        let result = compressor.find_best_match_ht(data, 8, 258, 5);
+        assert!(
+            result.is_none(),
+            "find_best_match_ht returned {:?} when no match >= min_match_length exists",
+            result
+        );
+
+        // With min_match_length = 4, we should get a valid match
+        let result = compressor.find_best_match_ht(data, 8, 258, 4);
+        assert!(result.is_some(), "Expected a match with min_match_length=4");
+        let (len, dist) = result.unwrap();
+        assert!(len >= 4, "Match length should be >= min_match_length");
+        assert!(dist > 0, "Match distance must be > 0");
+        assert_eq!(dist, 8, "Distance should be 8 (back to position 0)");
+    }
+
+    #[test]
+    fn test_find_best_match_never_returns_zero_distance() {
+        // Additional regression test: verify that matches always have valid distances.
+        // This specifically tests the edge case where min_match_length > MIN_MATCH_LENGTH.
+        let mut compressor = Lz77Compressor::new(6);
+
+        // Data with no repeating patterns - should return None for any min_match_length
+        let data = b"abcdefghijklmnop";
+
+        compressor.head.fill(-1);
+        compressor.head3.fill(-1);
+        compressor.prev.fill(-1);
+
+        // Insert early positions
+        for i in 0..8 {
+            compressor.update_hash(data, i);
+        }
+
+        // No matches should be found
+        for min_len in 3..=6 {
+            let result = compressor.find_best_match(data, 8, 100, 258, min_len);
+            if let Some((len, dist)) = result {
+                assert!(
+                    dist > 0,
+                    "find_best_match returned zero distance: len={}, dist={}, min_len={}",
+                    len,
+                    dist,
+                    min_len
+                );
+                assert!(
+                    len >= min_len,
+                    "find_best_match returned length {} < min_match_length {}",
+                    len,
+                    min_len
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_lz77_default() {
         let compressor = Lz77Compressor::default();
         // Default level is 6
-        assert_eq!(compressor.max_chain_length, 128);
+        assert_eq!(compressor.config.max_chain_length, 128);
     }
 
     #[test]
@@ -1168,10 +1662,10 @@ mod tests {
     fn test_lz77_level_clamping() {
         // Test that level is clamped to valid range
         let compressor = Lz77Compressor::new(0); // Below minimum
-        assert!(compressor.max_chain_length > 0);
+        assert!(compressor.config.max_chain_length > 0);
 
         let compressor = Lz77Compressor::new(100); // Above maximum
-        assert!(compressor.max_chain_length > 0);
+        assert!(compressor.config.max_chain_length > 0);
     }
 
     #[test]
@@ -1443,5 +1937,61 @@ mod tests {
         let tokens = compressor.compress(&data);
         let reconstructed = reconstruct_from_tokens(&tokens);
         assert_eq!(reconstructed, data);
+    }
+}
+
+#[cfg(test)]
+mod trace_backwards_tests {
+    use super::*;
+
+    #[test]
+    fn test_trace_backwards_zero_distance_match_multibyte() {
+        let compressor = Lz77Compressor::new(6);
+
+        // Create DP arrays representing:
+        // - Token 1: length=5 ending at position 5 (covers bytes 0-4), distance=0 (invalid match)
+        // - Token 2: length=2 ending at position 7 (covers bytes 5-6), distance=0 (invalid match)
+        // Total: 7 bytes of input data
+        //
+        // The DP arrays are indexed by end position (0 to n inclusive).
+        // length_array[i] = length of token ending at position i
+        // dist_array[i] = distance for that token (0 for literals or invalid matches)
+        let length_array = vec![0u16, 0, 0, 0, 0, 5, 0, 2];
+        let dist_array = vec![0u16, 0, 0, 0, 0, 0, 0, 0];
+
+        let data = b"abcdefg"; // 7 bytes
+
+        let tokens = compressor.trace_backwards(&length_array, &dist_array, data);
+
+        // With the bug:
+        // - Token (5, 0): emits literal 'a', data_pos += 1 (should be += 5)
+        // - Token (2, 0): emits literal 'b', data_pos += 1 (should be += 2)
+        // Result: 2 tokens producing 2 bytes
+        //
+        // Without the bug:
+        // - Token (5, 0): emits literal 'a', data_pos += 5
+        // - Token (2, 0): emits literal 'f', data_pos += 2
+        // Result: 2 tokens producing 2 bytes, but from correct positions
+
+        // The bug causes data_pos to be incorrect, so subsequent literals read wrong bytes.
+        // With bug: tokens are [Literal('a'), Literal('b')]
+        // Without bug: tokens are [Literal('a'), Literal('f')]
+
+        assert_eq!(tokens.len(), 2, "Should produce 2 tokens");
+
+        // Verify the second token reads from the correct position (byte 5 = 'f', not byte 1 = 'b')
+        match tokens[1] {
+            Token::Literal(b) => {
+                assert_eq!(
+                    b, b'f',
+                    "Second literal should be 'f' (byte at position 5), got '{}'. \
+                     This indicates data_pos was not advanced correctly.",
+                    b as char
+                );
+            }
+            Token::Match { .. } => {
+                panic!("Expected literal, got match");
+            }
+        }
     }
 }
