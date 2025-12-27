@@ -16,19 +16,57 @@ A single uncompressed photo would be 24 megabytes! At that size:
 
 Image compression solves this problem. The same 4K photo compressed as JPEG might be just 2-4 MB, or as a high-quality PNG around 8-12 MB. That's a 6-12x reduction!
 
+## The Origins of Compression
+
+Compression is a simple idea that goes _incredibly_ deep.
+
+Back in the 1840s, it was expensive to use a telegraph, so a fine gentleman named Samuel Morse came up with, you guessed it, Morse code. If you gave shorter codes to the most common letters, you could save some money! "E" is the most frequent in English, so it gets a single dot. "Q" is dash-dash-dot-dash.
+
+This was clever engineering, but nobody knew how good compression could theoretically get. It wasn't until 1948 that Claude Shannon answered both questions in a paper called "A Mathematical Theory of Communication."
+
+### Shannon's Big Idea: Entropy
+
+Shannon asked a deceptively simple question: _How much information is actually in a message?_
+
+His answer was **entropy** — a number that tells you the theoretical minimum bits needed to encode something. For English text, it's about 1.0-1.5 bits per character (not 8!). For a fair coin flip, it's exactly 1 bit. For a biased coin that lands heads 99% of the time? Just 0.08 bits — because it's so predictable.
+
+**You cannot compress below entropy without losing information.** Shannon proved this mathematically. It's a law of the universe, like the speed of light. No algorithm, no matter how clever, can beat it.
+
+### From Theory to Practice
+
+After Shannon, getting to today took decades:
+
+**1952: Huffman Coding** — David Huffman, as a _grad student_, invented optimal prefix codes. His algorithm assigns shorter codes to common symbols and longer codes to rare ones, approaching Shannon's limit. This is still used in JPEG and DEFLATE today.
+
+**1977: LZ77** — Lempel and Ziv realized that repetition is everywhere. Instead of encoding "the cat sat on the mat" character by character, why not say "copy 4 bytes from 20 positions back"? This dictionary-based approach handles patterns that entropy coding alone can't see.
+
+**1987: DEFLATE** — Phil Katz combined LZ77 with Huffman coding for his PKZIP format. This hybrid approach is still the backbone of PNG, ZIP, and gzip almost 40 years later.
+
+### The Leap to Images
+
+Text compression is one-dimensional — just a stream of characters. Images are two-dimensional grids of pixels, and that changes everything.
+
+A 1920×1080 photo has over 2 million pixels. Uncompressed at 24 bits per pixel, that's 6 MB. But images have structure that text doesn't:
+
+1. **Spatial redundancy** — neighboring pixels are usually similar. The sky doesn't change color every pixel.
+
+2. **Perceptual redundancy** — your eyes can't see everything. High-frequency detail? Subtle color differences? Your brain glosses right over them.
+
+PNG exploits the first type. Before compression, it runs "filters" that transform each row based on its neighbors. A smooth gradient might become a row of nearly identical values — perfect for DEFLATE.
+
+JPEG exploits both. It converts pixels to frequency space (DCT), then _throws away_ the frequencies you can't see anyway. This is lossy compression — you're trading information for size. But the information you're losing? You'd never notice it was there.
+
+### The Surprising Connection
+
+Here's what's remarkable: Shannon's entropy formula from 1948 is still the benchmark we measure against today. When we say "DEFLATE achieves 2.5 bits per byte on this text," we're comparing to Shannon's theoretical limit.
+
+And when JPEG decides which frequencies to discard, it's making a calculated bet about human perception — trading bits of _mathematical_ information for bits of _perceptual_ information. Shannon gave us the math. Decades of research gave us the insight into what humans actually need to see.
+
+Every image you've ever loaded on the web is built on this foundation: Morse's intuition about frequent letters, Shannon's proof of fundamental limits, and 70+ years of researchers figuring out how to get as close to those limits as possible.
+
 ## Compression Is Everywhere
 
-The ideas behind image compression aren't new, and they aren't limited to images. Compression has been around far longer than computers.
-
-### A Brief History
-
-In the 1840s, Samuel Morse faced a problem: telegraph time was expensive. His solution? Assign shorter codes to common letters. The letter "E" (the most frequent in English) is a single dot, while "Q" is dash-dash-dot-dash. This is the same principle behind Huffman coding — common symbols get shorter codes.
-
-A century later, Claude Shannon formalized these intuitions in his 1948 paper "A Mathematical Theory of Communication," establishing the theoretical limits of compression that still guide algorithm design today.
-
-### Beyond Images
-
-The techniques you'll learn in this documentation power far more than just PNG and JPEG:
+The techniques in this library power far more than just PNG and JPEG:
 
 | Domain            | Technologies                         | Techniques Used                             |
 | ----------------- | ------------------------------------ | ------------------------------------------- |
@@ -157,38 +195,17 @@ Human vision has specific limitations:
 
 JPEG exploits all of these!
 
-## The Information Theory Foundation
+## Shannon's Source Coding Theorem
 
-In 1948, Claude Shannon published "A Mathematical Theory of Communication" which laid the theoretical foundation for all data compression.
-
-### Entropy: The Limit of Compression
-
-**Entropy** measures the average amount of information per symbol. It sets the theoretical minimum bits needed to represent data.
-
-For a source with symbols appearing with probabilities p₁, p₂, ..., pₙ:
-
-```text
-H = -Σ pᵢ × log₂(pᵢ)
-```
-
-**Example**: A coin flip
-
-- Fair coin (50/50): H = -0.5×log₂(0.5) - 0.5×log₂(0.5) = 1 bit
-- Biased coin (90/10): H = -0.9×log₂(0.9) - 0.1×log₂(0.1) ≈ 0.47 bits
-
-A biased coin has lower entropy — it's more predictable, so it can be compressed more!
-
-### Shannon's Source Coding Theorem
+As we saw earlier, Shannon proved that entropy sets the fundamental limit. His theorem states it precisely:
 
 > _The average number of bits needed to represent symbols from a source cannot be less than the entropy of that source._
 
-This means:
+This has profound implications for image compression:
 
-- **Lossless compression can never beat the entropy limit**
-- If we want to go smaller, we must use lossy compression
-- Algorithms that approach the entropy limit are "optimal"
-
-Huffman coding achieves optimality (to the nearest bit) for symbol-by-symbol encoding.
+- **Lossless compression can never beat the entropy limit** — PNG can only get so small
+- **To go smaller, you must lose information** — this is what JPEG does
+- **Algorithms that approach the entropy limit are "optimal"** — Huffman coding achieves this for symbol-by-symbol encoding
 
 ## The pixo Pipeline
 
@@ -225,21 +242,6 @@ This library implements two complete encoding pipelines:
                    │             │    │  Encode     │    │  RLE        │
                    └─────────────┘    └─────────────┘    └─────────────┘
 ```
-
-## Historical Context
-
-Understanding the history helps appreciate why these algorithms exist:
-
-| Year | Milestone                                                             |
-| ---- | --------------------------------------------------------------------- |
-| 1948 | Shannon publishes information theory — establishes theoretical limits |
-| 1952 | Huffman develops optimal prefix codes (as a term paper!)              |
-| 1977 | Lempel & Ziv publish LZ77 — dictionary compression                    |
-| 1987 | DEFLATE combines LZ77 + Huffman — used in gzip, PNG, ZIP              |
-| 1992 | JPEG standard published — lossy compression for photos                |
-| 1996 | PNG standard published — lossless alternative to GIF                  |
-
-The algorithms in this library represent 70+ years of computer science research, refined into elegant, practical implementations.
 
 ## Key Takeaways
 
