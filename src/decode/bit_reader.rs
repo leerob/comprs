@@ -158,9 +158,14 @@ impl<'a> MsbBitReader<'a> {
                 // Stuffed byte, consume the 0x00
                 self.pos += 1;
             } else if (0xD0..=0xD7).contains(&next) {
-                // Restart marker (RST0-RST7) - skip it entirely and continue
-                // These markers reset the DC predictor but contain no data
+                // Restart marker (RST0-RST7) - skip it entirely and continue.
+                // These markers reset the DC predictor but contain no data.
+                // IMPORTANT: Clear the bit buffer because the bitstream is padded
+                // with 1-bits to byte boundary before restart markers, and decoding
+                // resumes byte-aligned after the marker.
                 self.pos += 1;
+                self.bit_buf = 0;
+                self.bits_in_buf = 0;
                 return self.next_byte();
             } else {
                 // Other marker - indicates end of entropy-coded data
@@ -449,5 +454,47 @@ mod tests {
         reader.consume(0); // Previously caused 1 << 32 overflow
                            // Buffer should still have all 32 bits intact
         assert_eq!(reader.peek_bits(8).unwrap(), 0x12);
+    }
+
+    #[test]
+    fn test_msb_reader_restart_marker_clears_bit_buffer() {
+        // Simulate JPEG restart marker scenario:
+        // - Read some bits (leaving residual bits in buffer)
+        // - Encounter restart marker (0xFF 0xD0)
+        // - Verify bit buffer is cleared and next byte is read fresh
+        //
+        // Data: 0xAB (partial read), 0xFF 0xD0 (RST0 marker), 0xCD (fresh data)
+        // Before fix: residual bits from 0xAB would corrupt reading of 0xCD
+        let data = [0xAB, 0xFF, 0xD0, 0xCD];
+        let mut reader = MsbBitReader::new(&data);
+
+        // Read 4 bits from first byte (0xAB = 0b10101011)
+        // This leaves 4 bits (0b1011) in the buffer
+        assert_eq!(reader.read_bits(4).unwrap(), 0b1010);
+
+        // Now read 8 bits - this will:
+        // 1. Try to get more bits via ensure()
+        // 2. Call next_byte() which sees 0xFF 0xD0 (restart marker)
+        // 3. With the fix: clears bit buffer, returns 0xCD
+        // 4. Without fix: would have stale bits corrupting the result
+        let next_byte = reader.read_bits(8).unwrap();
+
+        // After restart marker, bit buffer should be cleared and we get 0xCD fresh
+        assert_eq!(next_byte, 0xCD);
+    }
+
+    #[test]
+    fn test_msb_reader_restart_marker_mid_byte() {
+        // Test that restart marker properly resets even with full byte in buffer
+        // Data: 0x12, 0x34, 0xFF, 0xD1 (RST1), 0xAB
+        let data = [0x12, 0x34, 0xFF, 0xD1, 0xAB];
+        let mut reader = MsbBitReader::new(&data);
+
+        // Read 16 bits (consumes 0x12 and 0x34)
+        assert_eq!(reader.read_bits(16).unwrap(), 0x1234);
+
+        // Next read will hit the restart marker
+        // Should get 0xAB with no residual bits
+        assert_eq!(reader.read_bits(8).unwrap(), 0xAB);
     }
 }
