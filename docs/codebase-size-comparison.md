@@ -28,7 +28,7 @@ This document provides a comprehensive comparison of codebase sizes between `pix
 
 | Library      | Total LOC | Core Code | Test Code | Test %                          | Dependencies   | Formats               |
 | ------------ | --------- | --------- | --------- | ------------------------------- | -------------- | --------------------- |
-| **pixo**     | 33,113    | 16,586    | 16,527    | **49.9%** (85.4% line coverage) | 0 (zero deps)  | PNG, JPEG (enc + dec) |
+| **pixo**     | 33,113    | 16,586    | 16,527    | **49.9%** (81.8% line coverage) | 0 (zero deps)  | PNG, JPEG (enc + dec) |
 | jpeg-encoder | 3,642     | 2,846     | 796       | 21.9%                           | 0              | JPEG only             |
 | miniz_oxide  | 7,805     | 4,501     | 3,304     | 42.3%                           | 0              | DEFLATE only          |
 | zopfli       | 3,449     | 3,337     | 112       | 3.2%                            | 0              | DEFLATE only          |
@@ -56,12 +56,12 @@ This document provides a comprehensive comparison of codebase sizes between `pix
 
 ### Key Findings
 
-1. **pixo maintains 49.9% test ratio with 85.4% actual code coverage** - still leading among zero-dependency multi-format libraries
+1. **pixo maintains 49.9% test ratio with 81.8% actual code coverage** - still leading among zero-dependency multi-format libraries
 2. **pixo includes PNG and JPEG decoding** - full encode/decode support with zero external dependencies
 3. **pixo is ~7× smaller than mozjpeg** while providing comparable JPEG encoding and basic decoding
 4. **The compression gap comes from SIMD**: mozjpeg has 50K+ lines of hand-tuned assembly; pixo has 3.4K lines of Rust SIMD
 5. **sharp appears small (10K) but depends on libvips (194K LOC)**
-6. **785 test functions** validate encoding, decoding, CLI, and edge cases
+6. **818 test functions** validate encoding, decoding, CLI, and edge cases
 
 ---
 
@@ -245,17 +245,17 @@ Test Code: 16,527 LOC (49.9%)
 ├── tests/:            4,847 LOC
 └── benches/:          2,410 LOC
 
-#[test] functions: 785
-├── PNG tests:           117
-├── JPEG tests:          150
+#[test] functions: 796
+├── PNG tests:           142
+├── JPEG tests:          187
 ├── Compression tests:   156
-├── Decoding tests:       91
-├── SIMD tests:           78
+├── Decoding tests:      129
+├── SIMD tests:          102
 ├── CLI unit tests:       27
 ├── Integration tests:   118
-└── Other:                48
+└── Other:                53
 Playwright e2e tests: 22
-Files with colocated tests: 27
+Files with colocated tests: 35
 ```
 
 ### mozjpeg (Industry Standard)
@@ -444,7 +444,7 @@ mod aarch64 {
 | Library      | LOC/Test | Interpretation                 |
 | ------------ | -------- | ------------------------------ |
 | oxipng       | 33       | Very well-tested (uses C deps) |
-| **pixo**     | **42**   | **Excellent (self-contained)** |
+| **pixo**     | **40**   | **Excellent (self-contained)** |
 | image        | 116      | Less tested                    |
 | jpeg-encoder | 145      | Moderately tested              |
 | mozjpeg      | ~2,000+  | Minimally tested               |
@@ -465,13 +465,13 @@ mod aarch64 {
 **pixo is NOT bloated from AI generation.** In fact, it's remarkably compact:
 
 - **16.6K core LOC** implements PNG + JPEG encoding/decoding + DEFLATE/INFLATE + SIMD
-- **49.9% test coverage** is exceptional for codec libraries (785 test functions)
+- **49.9% test coverage** is exceptional for codec libraries (818 test functions)
 - The compression gap (4-5%) comes from **missing 47K lines of hand-tuned assembly**, not from code bloat
 
 The AI-assisted approach traded decades of low-level optimization for:
 
 - Modern safety guarantees
-- High test coverage (49.9% test ratio, 85.4% line coverage)
+- High test coverage (49.9% test ratio, 81.8% line coverage)
 - Full encode/decode support with zero dependencies
 - WASM compatibility
 - Maintainable codebase
@@ -532,7 +532,7 @@ compiled to WebAssembly via Emscripten.
 
 | Rank | Library      | Test %    | Tests   | Notes                             |
 | ---- | ------------ | --------- | ------- | --------------------------------- |
-| 1    | **pixo**     | **49.9%** | **785** | **PNG + JPEG enc/dec, zero deps** |
+| 1    | **pixo**     | **49.9%** | **818** | **PNG + JPEG enc/dec, zero deps** |
 | 2    | oxipng       | 50.8%     | ~280    | PNG only (uses C deps)            |
 | 3    | miniz_oxide  | 42.3%     | 61      | DEFLATE only                      |
 | 4    | image-png    | 34.3%     | 90      | PNG only                          |
@@ -546,7 +546,7 @@ compiled to WebAssembly via Emscripten.
 | Rank | Library      | LOC/Test | Interpretation                          |
 | ---- | ------------ | -------- | --------------------------------------- |
 | 1    | oxipng       | 33       | Excellent (but C deps do heavy lifting) |
-| 2    | **pixo**     | **42**   | **Excellent (self-contained)**          |
+| 2    | **pixo**     | **40**   | **Excellent (self-contained)**          |
 | 3    | flate2-rs    | 111      | Good                                    |
 | 4    | image        | 116      | Good                                    |
 | 5    | jpeg-encoder | 145      | Moderate                                |
@@ -582,7 +582,7 @@ compiled to WebAssembly via Emscripten.
 | Dimension            | pixo                 | Best Alternative         | Verdict                    |
 | -------------------- | -------------------- | ------------------------ | -------------------------- |
 | Test code ratio      | 49.9% (16,527 LOC)   | oxipng (50.8%)           | **Excellent (zero deps)**  |
-| Actual code coverage | 85.4%                | -                        | **Excellent**              |
+| Actual code coverage | 81.8%                | -                        | **Excellent**              |
 | Zero dependencies    | Yes                  | jpeg-encoder (JPEG only) | **Unique for PNG+JPEG**    |
 | Codebase size        | 16,586 LOC (enc+dec) | jpeg-encoder (2,846)     | Compact for scope          |
 | Encode + Decode      | ✓ Both formats       | Most libs                | **Full codec support**     |
@@ -601,13 +601,13 @@ compiled to WebAssembly via Emscripten.
 | Node.js server              | ❌ Use sharp (faster native)                     |
 | Progressive JPEG decode     | ❌ Use image crate (pixo only supports baseline) |
 | Minimal codebase to audit   | ✅ pixo (16.6K LOC)                              |
-| High test coverage required | ✅ pixo (49.9% test ratio, 85.4% line coverage)  |
+| High test coverage required | ✅ pixo (49.9% test ratio, 81.8% line coverage)  |
 
 ### Final Verdict
 
 **pixo is a well-engineered, compact, well-tested image compression library that trades 30+ years of hand-tuned assembly optimization for modern Rust safety, WASM compatibility, and developer experience.**
 
-The library provides **full encode/decode support** for both PNG and JPEG formats with zero external dependencies. With 785 test functions covering encoding, decoding, CLI, and edge cases, pixo maintains excellent test coverage while remaining compact.
+The library provides **full encode/decode support** for both PNG and JPEG formats with zero external dependencies. With 818 test functions covering encoding, decoding, CLI, and edge cases, pixo maintains excellent test coverage while remaining compact.
 
 The 4-5% compression gap is the cost of maintaining ~16.6K LOC instead of ~68K+ LOC (mozjpeg alone). For most web applications, this is an excellent tradeoff.
 
@@ -648,54 +648,60 @@ The 4-5% compression gap is the cost of maintaining ~16.6K LOC instead of ~68K+ 
 | ├── src/compress/         | ~1,829     | 156     |
 | └── src/simd/             | ~962       | 78      |
 | tests/                    | 4,847      | 118     |
-| ├── decode_conformance.rs | 429        | 27      |
+| ├── decode_conformance.rs | 429        | 28      |
 | ├── jpeg_conformance.rs   | 1,000      | 37      |
 | ├── png_conformance.rs    | 786        | 25      |
 | └── simd_fallback.rs      | 542        | 24      |
 | benches/                  | 2,410      | -       |
 | web/e2e/ (Playwright)     | 282        | 22      |
-| **Total**                 | **16,809** | **785** |
+| **Total**                 | **16,809** | **818** |
 
 Note: Test counts include doctests, property-based tests, CLI unit tests, and decode conformance tests.
 
 ### Actual Code Coverage
 
-Measured with `cargo tarpaulin`:
+Measured with `cargo tarpaulin --all-features`:
 
 ```
-85.40% coverage, 4380/5129 lines covered
+81.75% coverage, 5550/6789 lines covered
 ```
 
-| Component            | Lines Covered | Total Lines | Coverage |
-| -------------------- | ------------- | ----------- | -------- |
-| DEFLATE (deflate.rs) | 730           | 910         | 80.2%    |
-| PNG (mod.rs)         | 746           | 851         | 87.7%    |
-| JPEG (mod.rs)        | 657           | 758         | 86.7%    |
-| LZ77 (lz77.rs)       | 443           | 496         | 89.3%    |
-| Huffman (compress)   | 118           | 121         | 97.5%    |
-| JPEG Huffman         | 201           | 204         | 98.5%    |
-| JPEG progressive     | 158           | 178         | 88.8%    |
-| JPEG quantize        | 37            | 37          | 100.0%   |
-| JPEG trellis         | 121           | 122         | 99.2%    |
-| JPEG DCT             | 382           | 408         | 93.6%    |
-| PNG filters          | 165           | 269         | 61.3%    |
-| PNG bit_depth        | 86            | 94          | 91.5%    |
-| PNG chunk            | 10            | 10          | 100.0%   |
-| CRC32                | 44            | 44          | 100.0%   |
-| Adler32              | 12            | 13          | 92.3%    |
-| Bit writers          | 125           | 125         | 100.0%   |
-| Color module         | 35            | 35          | 100.0%   |
-| Error types          | 19            | 19          | 100.0%   |
-| SIMD aarch64         | 212           | 212         | 100.0%\* |
-| SIMD fallback        | 65            | 66          | 98.5%    |
-| SIMD x86_64          | 0             | 87          | 0.0%\*   |
+| Component             | Lines Covered | Total Lines | Coverage |
+| --------------------- | ------------- | ----------- | -------- |
+| DEFLATE (deflate.rs)  | 730           | 910         | 80.2%    |
+| PNG (mod.rs)          | 755           | 898         | 84.1%    |
+| JPEG (mod.rs)         | 664           | 758         | 87.6%    |
+| LZ77 (lz77.rs)        | 450           | 496         | 90.7%    |
+| Huffman (compress)    | 118           | 121         | 97.5%    |
+| JPEG Huffman          | 202           | 204         | 99.0%    |
+| JPEG progressive      | 158           | 178         | 88.8%    |
+| JPEG quantize         | 37            | 37          | 100.0%   |
+| JPEG trellis          | 121           | 122         | 99.2%    |
+| JPEG DCT              | 382           | 408         | 93.6%    |
+| PNG filters           | 237           | 269         | 88.1%    |
+| PNG bit_depth         | 86            | 94          | 91.5%    |
+| PNG chunk             | 10            | 10          | 100.0%   |
+| CRC32                 | 44            | 44          | 100.0%   |
+| Adler32               | 12            | 13          | 92.3%    |
+| Bit writers           | 125           | 125         | 100.0%   |
+| Color module          | 35            | 35          | 100.0%   |
+| Error types           | 23            | 23          | 100.0%   |
+| **Decoder modules:**  |               |             |          |
+| decode/bit_reader.rs  | 89            | 96          | 92.7%    |
+| decode/idct.rs        | 123           | 123         | 100.0%   |
+| decode/inflate.rs     | 194           | 221         | 87.8%    |
+| decode/jpeg.rs        | 330           | 377         | 87.5%    |
+| decode/png.rs         | 251           | 308         | 81.5%    |
+| SIMD aarch64          | 212           | 212         | 100.0%\* |
+| SIMD fallback         | 65            | 66          | 98.5%    |
+| SIMD x86_64           | 0             | 87          | 0.0%\*   |
 
 \* SIMD code coverage depends on test architecture. ARM NEON code is covered on aarch64; x86 AVX/SSE code is covered on x86_64.
 
 **Command to regenerate:**
 
 ```bash
-cargo tarpaulin --out Stdout --skip-clean
+cargo tarpaulin --out Stdout --skip-clean --all-features
 ```
 
 ---
