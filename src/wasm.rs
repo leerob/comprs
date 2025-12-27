@@ -1,7 +1,7 @@
 //! WebAssembly bindings for pixo.
 //!
-//! This module provides a minimal WASM API for encoding PNG and JPEG images.
-//! Only 3 functions are exported to keep the binary size small (~214 KB).
+//! This module provides a minimal WASM API for encoding PNG and JPEG images,
+//! as well as image resizing. Functions exported to keep the binary size small.
 //!
 //! # Building
 //!
@@ -21,7 +21,7 @@
 //! # Example (JavaScript)
 //!
 //! ```javascript
-//! import init, { encodePng, encodeJpeg, bytesPerPixel } from 'pixo';
+//! import init, { encodePng, encodeJpeg, resizeImage, bytesPerPixel } from 'pixo';
 //!
 //! await init();
 //!
@@ -29,12 +29,15 @@
 //! const ctx = canvas.getContext('2d');
 //! const imageData = ctx.getImageData(0, 0, width, height);
 //!
+//! // Resize image to half size using Lanczos3 (RGBA=3, algorithm=2)
+//! const resized = resizeImage(imageData.data, width, height, width/2, height/2, 3, 2);
+//!
 //! // Encode as PNG (RGBA=3, preset=1 balanced, lossy=true for smaller files)
-//! const pngBytes = encodePng(imageData.data, width, height, 3, 1, true);
+//! const pngBytes = encodePng(resized, width/2, height/2, 3, 1, true);
 //!
 //! // Encode as JPEG (RGB=2, quality=85, preset=1 balanced, subsampling=true)
-//! const rgb = stripAlpha(imageData.data);
-//! const jpegBytes = encodeJpeg(rgb, width, height, 2, 85, 1, true);
+//! const rgb = stripAlpha(resized);
+//! const jpegBytes = encodeJpeg(rgb, width/2, height/2, 2, 85, 1, true);
 //! ```
 
 // Use talc allocator for WASM - smaller binary and proper memory management.
@@ -47,6 +50,7 @@ use wasm_bindgen::prelude::*;
 use crate::color::ColorType;
 use crate::jpeg::{self, JpegOptions, Subsampling};
 use crate::png::{self, PngOptions};
+use crate::resize::{self, ResizeAlgorithm};
 
 /// Convert a u8 color type code to ColorType enum.
 fn color_type_from_u8(value: u8) -> Result<ColorType, JsError> {
@@ -146,6 +150,51 @@ pub fn bytes_per_pixel(color_type: u8) -> Result<u8, JsError> {
     Ok(color.bytes_per_pixel() as u8)
 }
 
+/// Convert algorithm number to ResizeAlgorithm enum.
+fn resize_algorithm_from_u8(value: u8) -> Result<ResizeAlgorithm, JsError> {
+    match value {
+        0 => Ok(ResizeAlgorithm::Nearest),
+        1 => Ok(ResizeAlgorithm::Bilinear),
+        2 => Ok(ResizeAlgorithm::Lanczos3),
+        _ => Err(JsError::new(&format!(
+            "Invalid resize algorithm: {value}. Expected 0 (Nearest), 1 (Bilinear), or 2 (Lanczos3)",
+        ))),
+    }
+}
+
+/// Resize an image to new dimensions.
+///
+/// # Arguments
+///
+/// * `data` - Raw pixel data as Uint8Array (row-major order)
+/// * `src_width` - Source image width in pixels
+/// * `src_height` - Source image height in pixels
+/// * `dst_width` - Destination image width in pixels
+/// * `dst_height` - Destination image height in pixels
+/// * `color_type` - Color type: 0=Gray, 1=GrayAlpha, 2=Rgb, 3=Rgba
+/// * `algorithm` - Resize algorithm: 0=Nearest, 1=Bilinear, 2=Lanczos3
+///
+/// # Returns
+///
+/// Resized pixel data as Uint8Array with the same color type.
+#[wasm_bindgen(js_name = "resizeImage")]
+pub fn resize_image(
+    data: &[u8],
+    src_width: u32,
+    src_height: u32,
+    dst_width: u32,
+    dst_height: u32,
+    color_type: u8,
+    algorithm: u8,
+) -> Result<Vec<u8>, JsError> {
+    let color = color_type_from_u8(color_type)?;
+    let algo = resize_algorithm_from_u8(algorithm)?;
+    resize::resize(
+        data, src_width, src_height, dst_width, dst_height, color, algo,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))
+}
+
 // Tests for the WASM module.
 // Note: Tests that involve JsError can only run on wasm32 targets.
 // For native testing, we test the underlying encoding functions directly
@@ -201,5 +250,29 @@ mod tests {
         assert_eq!(bytes_per_pixel(2).unwrap(), 3);
         assert_eq!(bytes_per_pixel(3).unwrap(), 4);
         assert!(bytes_per_pixel(99).is_err());
+    }
+
+    #[test]
+    fn test_resize_image_basic() {
+        let pixels = vec![255u8; 4 * 4 * 4]; // 4x4 RGBA
+                                             // resize_image(data, src_w, src_h, dst_w, dst_h, color_type, algorithm)
+        let result = resize_image(&pixels, 4, 4, 2, 2, 3, 1); // RGBA, Bilinear
+        assert!(result.is_ok());
+        let resized = result.unwrap();
+        assert_eq!(resized.len(), 2 * 2 * 4);
+    }
+
+    #[test]
+    fn test_resize_image_invalid_color_type() {
+        let pixels = vec![255u8; 4 * 4 * 4];
+        let result = resize_image(&pixels, 4, 4, 2, 2, 99, 1);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_resize_image_invalid_algorithm() {
+        let pixels = vec![255u8; 4 * 4 * 4];
+        let result = resize_image(&pixels, 4, 4, 2, 2, 3, 99);
+        assert!(result.is_err());
     }
 }

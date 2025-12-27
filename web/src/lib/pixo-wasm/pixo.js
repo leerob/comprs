@@ -193,6 +193,52 @@ export function encodePng(data, width, height, color_type, preset, lossy) {
     }
 }
 
+/**
+ * Resize an image to new dimensions.
+ *
+ * # Arguments
+ *
+ * * `data` - Raw pixel data as Uint8Array (row-major order)
+ * * `src_width` - Source image width in pixels
+ * * `src_height` - Source image height in pixels
+ * * `dst_width` - Destination image width in pixels
+ * * `dst_height` - Destination image height in pixels
+ * * `color_type` - Color type: 0=Gray, 1=GrayAlpha, 2=Rgb, 3=Rgba
+ * * `algorithm` - Resize algorithm: 0=Nearest, 1=Bilinear, 2=Lanczos3
+ *
+ * # Returns
+ *
+ * Resized pixel data as Uint8Array with the same color type.
+ * @param {Uint8Array} data
+ * @param {number} src_width
+ * @param {number} src_height
+ * @param {number} dst_width
+ * @param {number} dst_height
+ * @param {number} color_type
+ * @param {number} algorithm
+ * @returns {Uint8Array}
+ */
+export function resizeImage(data, src_width, src_height, dst_width, dst_height, color_type, algorithm) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.resizeImage(retptr, ptr0, len0, src_width, src_height, dst_width, dst_height, color_type, algorithm);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        var r3 = getDataViewMemory0().getInt32(retptr + 4 * 3, true);
+        if (r3) {
+            throw takeObject(r2);
+        }
+        var v2 = getArrayU8FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export2(r0, r1 * 1, 1);
+        return v2;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
 const EXPECTED_RESPONSE_TYPES = new Set(['basic', 'cors', 'default']);
 
 async function __wbg_load(module, imports) {

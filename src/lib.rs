@@ -66,6 +66,22 @@
 //! # }
 //! ```
 //!
+//! ### Image resizing
+//!
+//! ```rust
+//! use pixo::{resize, ColorType, ResizeAlgorithm};
+//!
+//! # fn main() -> pixo::Result<()> {
+//! // 4x4 RGBA image -> 2x2 using Lanczos3 (highest quality)
+//! let pixels = vec![128u8; 4 * 4 * 4];
+//! let resized = resize::resize(
+//!     &pixels, 4, 4, 2, 2, ColorType::Rgba, ResizeAlgorithm::Lanczos3
+//! )?;
+//! assert_eq!(resized.len(), 2 * 2 * 4);
+//! # Ok(())
+//! # }
+//! ```
+//!
 //! ### Buffer reuse
 //!
 //! ```rust
@@ -136,6 +152,7 @@ pub mod decode;
 pub mod error;
 pub mod jpeg;
 pub mod png;
+pub mod resize;
 
 #[cfg(feature = "simd")]
 #[cfg_attr(docsrs, doc(cfg(feature = "simd")))]
@@ -147,6 +164,7 @@ pub mod wasm;
 
 pub use color::ColorType;
 pub use error::{Error, Result};
+pub use resize::ResizeAlgorithm;
 
 /// High-level and conceptual guides rendered inside rustdoc.
 ///
