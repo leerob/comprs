@@ -72,10 +72,36 @@ function findWasmOpt() {
 	return null;
 }
 
+// Find the correct cargo/rustc binaries. Prefer rustup-managed versions over Homebrew
+// because Homebrew Rust doesn't have wasm32-unknown-unknown target installed.
+function findRustupBinaries() {
+	const home = os.homedir();
+	const rustupCargo = join(home, '.cargo', 'bin', 'cargo');
+	const rustupRustc = join(home, '.cargo', 'bin', 'rustc');
+
+	// Check if rustup versions exist
+	if (existsSync(rustupCargo) && existsSync(rustupRustc)) {
+		return { cargo: rustupCargo, rustc: rustupRustc };
+	}
+
+	// Fall back to PATH (will fail if only Homebrew Rust is installed)
+	return { cargo: 'cargo', rustc: null };
+}
+
 try {
+	const { cargo, rustc } = findRustupBinaries();
+
 	console.log('[wasm:build] Building Rust crate (wasm32-unknown-unknown, release)...');
+
+	// Set RUSTC to rustup's rustc to avoid "can't find crate for core" error
+	// when Homebrew Rust is also installed
+	const env = { ...process.env };
+	if (rustc) {
+		env.RUSTC = rustc;
+	}
+
 	execFileSync(
-		'cargo',
+		cargo,
 		[
 			'build',
 			'--target',
@@ -85,7 +111,7 @@ try {
 			'--features',
 			'wasm,simd',
 		],
-		{ cwd: workspaceRoot, stdio: 'inherit' }
+		{ cwd: workspaceRoot, stdio: 'inherit', env }
 	);
 
 	const bindgen = findWasmBindgenBinary();

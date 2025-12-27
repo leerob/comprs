@@ -10,6 +10,7 @@ use std::time::Instant;
 
 use clap::{Parser, ValueEnum};
 
+use pixo::decode::{decode_jpeg as pixo_decode_jpeg, decode_png as pixo_decode_png};
 use pixo::jpeg::{JpegOptions, Subsampling};
 use pixo::png::{FilterStrategy, PngOptions};
 use pixo::ColorType;
@@ -217,53 +218,27 @@ fn detect_format(path: &PathBuf) -> Result<&'static str, Box<dyn std::error::Err
 }
 
 fn decode_png(path: &PathBuf) -> Result<DecodedImage, Box<dyn std::error::Error>> {
-    let file = File::open(path)?;
-    let decoder = png::Decoder::new(file);
-    let mut reader = decoder.read_info()?;
-
-    let mut pixels = vec![0u8; reader.output_buffer_size()];
-    let info = reader.next_frame(&mut pixels)?;
-    pixels.truncate(info.buffer_size());
-
-    let color_type = match info.color_type {
-        png::ColorType::Grayscale => ColorType::Gray,
-        png::ColorType::GrayscaleAlpha => ColorType::GrayAlpha,
-        png::ColorType::Rgb => ColorType::Rgb,
-        png::ColorType::Rgba => ColorType::Rgba,
-        png::ColorType::Indexed => {
-            return Err("Indexed PNG not supported. Convert to RGB first.".into())
-        }
-    };
+    let data = fs::read(path)?;
+    let img = pixo_decode_png(&data)?;
 
     Ok(DecodedImage {
-        width: info.width,
-        height: info.height,
-        pixels,
-        color_type,
+        width: img.width,
+        height: img.height,
+        pixels: img.pixels,
+        color_type: img.color_type,
         input_format: "PNG",
     })
 }
 
 fn decode_jpeg(path: &PathBuf) -> Result<DecodedImage, Box<dyn std::error::Error>> {
-    let file = File::open(path)?;
-    let mut decoder = jpeg_decoder::Decoder::new(BufReader::new(file));
-    let pixels = decoder.decode()?;
-    let info = decoder.info().ok_or("Failed to get JPEG info")?;
-
-    let color_type = match info.pixel_format {
-        jpeg_decoder::PixelFormat::L8 => ColorType::Gray,
-        jpeg_decoder::PixelFormat::L16 => return Err("16-bit grayscale JPEG not supported.".into()),
-        jpeg_decoder::PixelFormat::RGB24 => ColorType::Rgb,
-        jpeg_decoder::PixelFormat::CMYK32 => {
-            return Err("CMYK JPEG not supported. Convert to RGB first.".into())
-        }
-    };
+    let data = fs::read(path)?;
+    let img = pixo_decode_jpeg(&data)?;
 
     Ok(DecodedImage {
-        width: info.width as u32,
-        height: info.height as u32,
-        pixels,
-        color_type,
+        width: img.width,
+        height: img.height,
+        pixels: img.pixels,
+        color_type: img.color_type,
         input_format: "JPEG",
     })
 }
@@ -418,51 +393,25 @@ fn load_image_from_bytes(data: Vec<u8>) -> Result<DecodedImage, Box<dyn std::err
 }
 
 fn decode_png_from_bytes(data: Vec<u8>) -> Result<DecodedImage, Box<dyn std::error::Error>> {
-    let decoder = png::Decoder::new(Cursor::new(data));
-    let mut reader = decoder.read_info()?;
-
-    let mut pixels = vec![0u8; reader.output_buffer_size()];
-    let info = reader.next_frame(&mut pixels)?;
-    pixels.truncate(info.buffer_size());
-
-    let color_type = match info.color_type {
-        png::ColorType::Grayscale => ColorType::Gray,
-        png::ColorType::GrayscaleAlpha => ColorType::GrayAlpha,
-        png::ColorType::Rgb => ColorType::Rgb,
-        png::ColorType::Rgba => ColorType::Rgba,
-        png::ColorType::Indexed => {
-            return Err("Indexed PNG not supported. Convert to RGB first.".into())
-        }
-    };
+    let img = pixo_decode_png(&data)?;
 
     Ok(DecodedImage {
-        width: info.width,
-        height: info.height,
-        pixels,
-        color_type,
+        width: img.width,
+        height: img.height,
+        pixels: img.pixels,
+        color_type: img.color_type,
         input_format: "PNG",
     })
 }
 
 fn decode_jpeg_from_bytes(data: Vec<u8>) -> Result<DecodedImage, Box<dyn std::error::Error>> {
-    let mut decoder = jpeg_decoder::Decoder::new(Cursor::new(data));
-    let pixels = decoder.decode()?;
-    let info = decoder.info().ok_or("Failed to get JPEG info")?;
-
-    let color_type = match info.pixel_format {
-        jpeg_decoder::PixelFormat::L8 => ColorType::Gray,
-        jpeg_decoder::PixelFormat::L16 => return Err("16-bit grayscale JPEG not supported.".into()),
-        jpeg_decoder::PixelFormat::RGB24 => ColorType::Rgb,
-        jpeg_decoder::PixelFormat::CMYK32 => {
-            return Err("CMYK JPEG not supported. Convert to RGB first.".into())
-        }
-    };
+    let img = pixo_decode_jpeg(&data)?;
 
     Ok(DecodedImage {
-        width: info.width as u32,
-        height: info.height as u32,
-        pixels,
-        color_type,
+        width: img.width,
+        height: img.height,
+        pixels: img.pixels,
+        color_type: img.color_type,
         input_format: "JPEG",
     })
 }

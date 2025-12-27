@@ -88,6 +88,16 @@ let png = png::encode_with_options(&pixels, width, height, ColorType::Rgb, &opts
 - `Auto`: Apply quantization when beneficial (moderate color count)
 - `Force`: Always quantize RGB/RGBA images
 
+## Building WASM for Benchmarks
+
+The benchmark summary displays WASM binary size. To regenerate the optimized WASM binary:
+
+```bash
+node web/scripts/build-wasm.mjs
+```
+
+This script handles rustup/Homebrew detection, wasm-bindgen, and wasm-opt automatically.
+
 ## Benchmark Results
 
 Results are saved to `target/criterion/` with HTML reports:

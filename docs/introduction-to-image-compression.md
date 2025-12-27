@@ -16,6 +16,49 @@ A single uncompressed photo would be 24 megabytes! At that size:
 
 Image compression solves this problem. The same 4K photo compressed as JPEG might be just 2-4 MB, or as a high-quality PNG around 8-12 MB. That's a 6-12x reduction!
 
+## Compression Is Everywhere
+
+The ideas behind image compression aren't new, and they aren't limited to images. Compression has been around far longer than computers.
+
+### A Brief History
+
+In the 1840s, Samuel Morse faced a problem: telegraph time was expensive. His solution? Assign shorter codes to common letters. The letter "E" (the most frequent in English) is a single dot, while "Q" is dash-dash-dot-dash. This is the same principle behind Huffman coding — common symbols get shorter codes.
+
+A century later, Claude Shannon formalized these intuitions in his 1948 paper "A Mathematical Theory of Communication," establishing the theoretical limits of compression that still guide algorithm design today.
+
+### Beyond Images
+
+The techniques you'll learn in this documentation power far more than just PNG and JPEG:
+
+| Domain            | Technologies                         | Techniques Used                             |
+| ----------------- | ------------------------------------ | ------------------------------------------- |
+| Web               | gzip, Brotli, zstd                   | LZ77 + Huffman (same as PNG!)               |
+| Network protocols | HTTP/2 HPACK, Protocol Buffers, gRPC | Dictionary coding, variable-length integers |
+| Audio             | MP3, AAC, Opus                       | Transform coding + quantization (like JPEG) |
+| Video             | H.264, H.265, AV1                    | Block transforms + motion prediction        |
+| Databases         | Column stores, Parquet               | Dictionary + run-length encoding            |
+| File systems      | ZFS, NTFS, Btrfs                     | Transparent LZ4/zstd compression            |
+
+Notice the pattern: **the same core ideas appear everywhere**. LZ77 dictionary compression from 1977 lives inside your web browser (gzip), your file system, and PNG images. Transform coding from JPEG's DCT powers every video call you've ever made.
+
+### Codecs: The Complete Picture
+
+A **codec** (coder-decoder) is the complete system for encoding and decoding data. Every encoding algorithm needs a corresponding decoder:
+
+```text
+┌─────────────┐         compressed         ┌─────────────┐
+│   Encoder   │ ──────────────────────────▶│   Decoder   │
+│  (compress) │          data              │(decompress) │
+└─────────────┘                            └─────────────┘
+      ▲                                           │
+      │         original data                     │
+      └───────────────────────────────────────────┘
+                    (lossless: identical)
+                    (lossy: approximation)
+```
+
+See [Decoding](./decoding.md) for the decoder perspective.
+
 ## The Two Fundamental Approaches
 
 All image compression falls into two categories:

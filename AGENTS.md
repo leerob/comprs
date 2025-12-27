@@ -9,6 +9,14 @@ cargo fmt && cargo clippy           # Format and lint (run before committing)
 cargo bench --bench comparison      # Compare against alternatives
 ```
 
+### Building WASM
+
+```bash
+node web/scripts/build-wasm.mjs    # Build + optimize WASM
+```
+
+This script handles rustup/Homebrew detection, wasm-bindgen, and wasm-opt automatically.
+
 ## Architecture
 
 - **`src/png/`** - PNG encoder (filters, palette quantization, bit depth reduction)

@@ -29,6 +29,7 @@ This documentation is designed to be accessible to developers who may not be fam
 |----------|-------------|
 | [`PNG Encoding`](crate::guides::png_encoding) | Lossless image compression with predictive filtering |
 | [`JPEG Encoding`](crate::guides::jpeg_encoding) | Lossy compression pipeline overview |
+| [`Decoding`](crate::guides::decoding) | The decoder side of the codec: PNG and JPEG pipelines |
 | [`Discrete Cosine Transform (DCT)`](crate::guides::dct) | The mathematical heart of JPEG compression |
 | [`JPEG Quantization`](crate::guides::quantization) | How JPEG achieves its dramatic compression ratios |
 
@@ -53,8 +54,9 @@ If you're new to image compression, we recommend reading the documents in this o
 7. **[`Discrete Cosine Transform`](crate::guides::dct)** - Mathematical foundations for JPEG
 8. **[`JPEG Quantization`](crate::guides::quantization)** - Controlled information loss
 9. **[`JPEG Encoding`](crate::guides::jpeg_encoding)** - Complete lossy pipeline
-10. **[`Performance Optimization`](crate::guides::performance_optimization)** - Making it all fast
-11. **[`Compression Evolution`](crate::guides::compression_evolution)** - History and advanced techniques
+10. **[`Decoding`](crate::guides::decoding)** - The other half of the codec
+11. **[`Performance Optimization`](crate::guides::performance_optimization)** - Making it all fast
+12. **[`Compression Evolution`](crate::guides::compression_evolution)** - History and advanced techniques
 
 ## 🔧 Implementation Details
 
@@ -78,6 +80,8 @@ This library implements algorithms defined in these standards:
 ## 💡 Philosophy
 
 > *"The best way to understand compression is to understand that all data has patterns, and compression is simply the art of describing those patterns more efficiently."*
+
+A complete compression system is a **codec** (coder + decoder). While this library focuses on encoding, understanding both halves deepens your grasp of how compression works. The techniques you learn here — entropy coding, dictionary compression, transform coding — transfer directly to audio, video, network protocols, and beyond.
 
 Every algorithm in this library exploits some form of redundancy:
 

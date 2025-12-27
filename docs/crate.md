@@ -101,7 +101,7 @@ Note: JPEG only supports `Gray` and `Rgb` color types.
 - `simd` _(default)_ — Enable SIMD optimizations with runtime feature detection
 - `parallel` _(default)_ — Enable parallel processing with rayon
 - `wasm` — Build WebAssembly bindings (adds `wasm-bindgen`, `talc`)
-- `cli` — Build the command-line interface (adds `clap`, `png`, `jpeg-decoder`)
+- `cli` — Build the command-line interface (adds `clap`)
 
 ## PNG Presets
 

@@ -41,20 +41,19 @@ default = ["simd", "parallel"]
 simd = []
 parallel = ["rayon"]
 timing = []
-cli = ["clap", "png", "jpeg-decoder"]
+cli = ["clap"]
 wasm = ["wasm-bindgen", "talc"]
 
 [dependencies]
 rayon = { version = "1.10", optional = true }
 clap = { version = "4.5", features = ["derive"], optional = true }
-png = { version = "0.17", optional = true }
-jpeg-decoder = { version = "0.3", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 talc = { version = "4", optional = true, default-features = false, features = ["lock_api"] }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
-image = "0.24.9"
+image = "0.25"
+png = "0.17"
 rand = "0.8"
 reqwest = { version = "=0.11.14", default-features = false, features = ["blocking", "rustls-tls"] }
 sha2 = "0.10"
@@ -62,7 +61,6 @@ proptest = "1.5"
 flate2 = "1.0"
 url = { version = "=2.4.1", default-features = true }
 imagequant = "4"
-jpeg-decoder = "0.3"
 jpeg-encoder = { version = "0.6", features = ["simd"] }
 lodepng = "3"
 libdeflater = "1"

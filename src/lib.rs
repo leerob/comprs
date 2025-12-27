@@ -130,6 +130,9 @@
 pub mod bits;
 pub mod color;
 pub mod compress;
+#[cfg(feature = "cli")]
+#[cfg_attr(docsrs, doc(cfg(feature = "cli")))]
+pub mod decode;
 pub mod error;
 pub mod jpeg;
 pub mod png;

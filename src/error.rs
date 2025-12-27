@@ -41,6 +41,10 @@ pub enum Error {
     CompressionError(String),
     /// Invalid restart interval parameter (must be 1-65535).
     InvalidRestartInterval(u16),
+    /// Decode error: malformed or corrupt data.
+    InvalidDecode(String),
+    /// Unsupported feature during decode (valid data, but not implemented).
+    UnsupportedDecode(String),
 }
 
 impl fmt::Display for Error {
@@ -75,6 +79,12 @@ impl fmt::Display for Error {
                     f,
                     "Invalid restart interval {interval}: must be 1-65535 (or None to disable)"
                 )
+            }
+            Error::InvalidDecode(msg) => {
+                write!(f, "Decode error: {msg}")
+            }
+            Error::UnsupportedDecode(msg) => {
+                write!(f, "Unsupported: {msg}")
             }
         }
     }
@@ -155,6 +165,22 @@ mod tests {
         let msg = format!("{err}");
         assert!(msg.contains("0"));
         assert!(msg.contains("1-65535"));
+    }
+
+    #[test]
+    fn test_error_display_invalid_decode() {
+        let err = Error::InvalidDecode("truncated stream".to_string());
+        let msg = format!("{err}");
+        assert!(msg.contains("Decode error"));
+        assert!(msg.contains("truncated stream"));
+    }
+
+    #[test]
+    fn test_error_display_unsupported_decode() {
+        let err = Error::UnsupportedDecode("progressive JPEG".to_string());
+        let msg = format!("{err}");
+        assert!(msg.contains("Unsupported"));
+        assert!(msg.contains("progressive JPEG"));
     }
 
     #[test]
