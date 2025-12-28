@@ -51,14 +51,14 @@ fuzz_target!(|input: PngInput| {
     // Clamp compression level
     let compression_level = (input.compression_level % 9).max(1);
 
-    // Build options
-    let options = pixo::png::PngOptions {
-        compression_level,
-        ..Default::default()
-    };
+    // Build options with new builder pattern
+    let options = pixo::png::PngOptions::builder(width, height)
+        .color_type(color_type)
+        .compression_level(compression_level)
+        .build();
 
     // Try to encode - should not panic
-    let result = pixo::png::encode_with_options(pixel_data, width, height, color_type, &options);
+    let result = pixo::png::encode(pixel_data, &options);
 
     // If encoding succeeded, verify basic structure
     if let Ok(encoded) = result {

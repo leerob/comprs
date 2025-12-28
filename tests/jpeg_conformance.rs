@@ -10,6 +10,7 @@
 )]
 
 use image::GenericImageView;
+use pixo::jpeg::JpegOptions;
 use pixo::{jpeg, ColorType};
 use proptest::prelude::*;
 use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -18,11 +19,59 @@ use support::jpeg_corpus::read_jpeg_corpus;
 use support::kodak::read_kodak_decoded_subset;
 use support::synthetic;
 
+fn encode_jpeg(data: &[u8], width: u32, height: u32, quality: u8) -> pixo::Result<Vec<u8>> {
+    let options = JpegOptions::builder(width, height)
+        .color_type(ColorType::Rgb)
+        .quality(quality)
+        .build();
+    jpeg::encode(data, &options)
+}
+
+fn encode_jpeg_with_color(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    quality: u8,
+    color_type: ColorType,
+) -> pixo::Result<Vec<u8>> {
+    let options = JpegOptions::builder(width, height)
+        .color_type(color_type)
+        .quality(quality)
+        .build();
+    jpeg::encode(data, &options)
+}
+
+fn encode_jpeg_with_options(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    color_type: ColorType,
+    options: &JpegOptions,
+) -> pixo::Result<Vec<u8>> {
+    let mut opts = *options;
+    opts.width = width;
+    opts.height = height;
+    opts.color_type = color_type;
+    jpeg::encode(data, &opts)
+}
+
+fn test_jpeg_fast(width: u32, height: u32, quality: u8) -> JpegOptions {
+    JpegOptions::fast(width, height, quality)
+}
+
+fn test_jpeg_balanced(width: u32, height: u32, quality: u8) -> JpegOptions {
+    JpegOptions::balanced(width, height, quality)
+}
+
+fn test_jpeg_max(width: u32, height: u32, quality: u8) -> JpegOptions {
+    JpegOptions::max(width, height, quality)
+}
+
 /// Test that JPEG output has correct markers.
 #[test]
 fn test_jpeg_markers() {
     let pixels = vec![128u8; 8 * 8 * 3];
-    let result = jpeg::encode(&pixels, 8, 8, 85).unwrap();
+    let result = encode_jpeg(&pixels, 8, 8, 85).unwrap();
 
     // SOI marker
     assert_eq!(&result[0..2], &[0xFF, 0xD8]);
@@ -35,7 +84,7 @@ fn test_jpeg_markers() {
 #[test]
 fn test_app0_marker() {
     let pixels = vec![128u8; 8 * 8 * 3];
-    let result = jpeg::encode(&pixels, 8, 8, 85).unwrap();
+    let result = encode_jpeg(&pixels, 8, 8, 85).unwrap();
 
     // APP0 should be right after SOI
     assert_eq!(&result[2..4], &[0xFF, 0xE0]);
@@ -52,7 +101,7 @@ fn test_quality_levels() {
     let sizes: Vec<(u8, usize)> = [10, 25, 50, 75, 90, 100]
         .iter()
         .map(|&q| {
-            let result = jpeg::encode(&pixels, 64, 64, q).unwrap();
+            let result = encode_jpeg(&pixels, 64, 64, q).unwrap();
             (q, result.len())
         })
         .collect();
@@ -81,10 +130,10 @@ fn test_jpeg_restart_interval_decodes_with_external_decoder() {
     let mut rgb = vec![0u8; (width * height * 3) as usize];
     rng.fill(rgb.as_mut_slice());
 
-    let mut opts = jpeg::JpegOptions::fast(85);
+    let mut opts = test_jpeg_fast(width, height, 85);
     opts.restart_interval = Some(2); // restart every 2 MCUs
 
-    let jpeg_bytes = jpeg::encode_with_options(&rgb, width, height, ColorType::Rgb, &opts).unwrap();
+    let jpeg_bytes = jpeg::encode(&rgb, &opts).unwrap();
 
     let reader = image::ImageReader::new(Cursor::new(jpeg_bytes))
         .with_guessed_format()
@@ -111,16 +160,15 @@ fn test_jpeg_progressive_decodes_with_external_decoder() {
     let mut rgb = vec![0u8; (width * height * 3) as usize];
     rng.fill(rgb.as_mut_slice());
 
-    let opts = jpeg::JpegOptions {
-        quality: 85,
-        subsampling: jpeg::Subsampling::S444,
-        restart_interval: None,
-        optimize_huffman: true,
-        progressive: true,
-        trellis_quant: false,
-    };
+    let opts = JpegOptions::builder(width, height)
+        .color_type(ColorType::Rgb)
+        .quality(85)
+        .subsampling(jpeg::Subsampling::S444)
+        .optimize_huffman(true)
+        .progressive(true)
+        .build();
 
-    let jpeg_bytes = jpeg::encode_with_options(&rgb, width, height, ColorType::Rgb, &opts).unwrap();
+    let jpeg_bytes = jpeg::encode(&rgb, &opts).unwrap();
 
     let reader = image::ImageReader::new(Cursor::new(jpeg_bytes))
         .with_guessed_format()
@@ -143,15 +191,8 @@ fn test_jpeg_progressive_and_baseline_markers() {
     let rgb = vec![128u8; width * height * 3];
 
     // Baseline
-    let baseline_opts = jpeg::JpegOptions::fast(80);
-    let baseline = jpeg::encode_with_options(
-        &rgb,
-        width as u32,
-        height as u32,
-        ColorType::Rgb,
-        &baseline_opts,
-    )
-    .unwrap();
+    let baseline_opts = test_jpeg_fast(width as u32, height as u32, 80);
+    let baseline = jpeg::encode(&rgb, &baseline_opts).unwrap();
     assert!(
         baseline.windows(2).any(|w| w == [0xFF, 0xC0]),
         "baseline SOF0 missing"
@@ -162,15 +203,8 @@ fn test_jpeg_progressive_and_baseline_markers() {
     );
 
     // Progressive
-    let progressive_opts = jpeg::JpegOptions::max(80);
-    let progressive = jpeg::encode_with_options(
-        &rgb,
-        width as u32,
-        height as u32,
-        ColorType::Rgb,
-        &progressive_opts,
-    )
-    .unwrap();
+    let progressive_opts = test_jpeg_max(width as u32, height as u32, 80);
+    let progressive = jpeg::encode(&rgb, &progressive_opts).unwrap();
     assert!(
         progressive.windows(2).any(|w| w == [0xFF, 0xC2]),
         "progressive SOF2 missing"
@@ -191,7 +225,7 @@ fn test_various_sizes() {
 
     for (width, height) in sizes {
         let pixels = vec![128u8; (width * height * 3) as usize];
-        let result = jpeg::encode(&pixels, width, height, 85);
+        let result = encode_jpeg(&pixels, width, height, 85);
 
         assert!(result.is_ok(), "Failed for size {}x{}", width, height);
 
@@ -217,7 +251,7 @@ fn test_various_sizes() {
 #[test]
 fn test_grayscale() {
     let pixels = vec![128u8; 32 * 32];
-    let result = jpeg::encode_with_color(&pixels, 32, 32, 85, ColorType::Gray).unwrap();
+    let result = encode_jpeg_with_color(&pixels, 32, 32, 85, ColorType::Gray).unwrap();
 
     // Should have proper markers
     assert_eq!(&result[0..2], &[0xFF, 0xD8]);
@@ -225,7 +259,7 @@ fn test_grayscale() {
 
     // Should be smaller than RGB (1 component vs 3)
     let rgb_pixels = vec![128u8; 32 * 32 * 3];
-    let rgb_result = jpeg::encode(&rgb_pixels, 32, 32, 85).unwrap();
+    let rgb_result = encode_jpeg(&rgb_pixels, 32, 32, 85).unwrap();
     assert!(result.len() < rgb_result.len());
 }
 
@@ -234,30 +268,30 @@ fn test_grayscale() {
 fn test_error_handling() {
     // Invalid quality
     let pixels = vec![0u8; 8 * 8 * 3];
-    assert!(jpeg::encode(&pixels, 8, 8, 0).is_err());
-    assert!(jpeg::encode(&pixels, 8, 8, 101).is_err());
+    assert!(encode_jpeg(&pixels, 8, 8, 0).is_err());
+    assert!(encode_jpeg(&pixels, 8, 8, 101).is_err());
 
     // Invalid dimensions
-    assert!(jpeg::encode(&pixels, 0, 8, 85).is_err());
-    assert!(jpeg::encode(&pixels, 8, 0, 85).is_err());
+    assert!(encode_jpeg(&pixels, 0, 8, 85).is_err());
+    assert!(encode_jpeg(&pixels, 8, 0, 85).is_err());
 
     // Wrong data length
-    assert!(jpeg::encode(&[0, 0], 8, 8, 85).is_err());
+    assert!(encode_jpeg(&[0, 0], 8, 8, 85).is_err());
 }
 
 #[test]
 fn test_invalid_restart_interval() {
     let pixels = vec![128u8; 8 * 8 * 3];
-    let mut opts = jpeg::JpegOptions::fast(85);
+    let mut opts = test_jpeg_fast(8, 8, 85);
     opts.restart_interval = Some(0);
-    let result = jpeg::encode_with_options(&pixels, 8, 8, ColorType::Rgb, &opts);
+    let result = jpeg::encode(&pixels, &opts);
     assert!(result.is_err());
 }
 
 #[test]
 fn test_unsupported_color_type_rejected() {
     let pixels = vec![0u8; 4 * 4 * 4]; // RGBA data
-    let result = jpeg::encode_with_color(&pixels, 4, 4, 85, ColorType::Rgba);
+    let result = encode_jpeg_with_color(&pixels, 4, 4, 85, ColorType::Rgba);
     assert!(result.is_err());
 }
 
@@ -267,7 +301,7 @@ fn test_image_too_large() {
     let width = 65_536;
     let height = 1;
     let pixels = vec![0u8; (width as usize * height as usize * 3) as usize];
-    let err = jpeg::encode(&pixels, width, height, 85).unwrap_err();
+    let err = encode_jpeg(&pixels, width, height, 85).unwrap_err();
     assert!(matches!(err, pixo::Error::ImageTooLarge { .. }));
 }
 
@@ -282,15 +316,15 @@ fn test_jpeg_rejects_zero_dimensions() {
 
     for ct in &color_types {
         // Zero width
-        let err = jpeg::encode_with_color(&[0u8; 100], 0, 10, 85, *ct);
+        let err = encode_jpeg_with_color(&[0u8; 100], 0, 10, 85, *ct);
         assert!(err.is_err(), "Should reject zero width for {:?}", ct);
 
         // Zero height
-        let err = jpeg::encode_with_color(&[0u8; 100], 10, 0, 85, *ct);
+        let err = encode_jpeg_with_color(&[0u8; 100], 10, 0, 85, *ct);
         assert!(err.is_err(), "Should reject zero height for {:?}", ct);
 
         // Both zero
-        let err = jpeg::encode_with_color(&[], 0, 0, 85, *ct);
+        let err = encode_jpeg_with_color(&[], 0, 0, 85, *ct);
         assert!(err.is_err(), "Should reject zero dimensions for {:?}", ct);
     }
 }
@@ -301,11 +335,11 @@ fn test_jpeg_quality_edge_values() {
     let pixels = vec![128u8; 8 * 8 * 3];
 
     // Quality 1 should work (minimum)
-    let result = jpeg::encode(&pixels, 8, 8, 1);
+    let result = encode_jpeg(&pixels, 8, 8, 1);
     assert!(result.is_ok(), "Quality 1 should be valid");
 
     // Quality 100 should work (maximum)
-    let result = jpeg::encode(&pixels, 8, 8, 100);
+    let result = encode_jpeg(&pixels, 8, 8, 100);
     assert!(result.is_ok(), "Quality 100 should be valid");
 }
 
@@ -328,7 +362,7 @@ proptest! {
         rng.fill(pixels.as_mut_slice());
 
         // Should always succeed with valid parameters
-        let encoded = jpeg::encode_with_color(&pixels, width, height, quality, color_type)
+        let encoded = encode_jpeg_with_color(&pixels, width, height, quality, color_type)
             .expect("encoding should succeed");
 
         // Should produce valid JPEG markers
@@ -356,18 +390,19 @@ proptest! {
             jpeg::Subsampling::S444
         };
 
-        let options = jpeg::JpegOptions::builder()
+        let mut rng = StdRng::seed_from_u64(seed);
+        let mut pixels = vec![0u8; (width * height * 3) as usize];
+        rng.fill(pixels.as_mut_slice());
+
+        let options = JpegOptions::builder(width, height)
+            .color_type(ColorType::Rgb)
             .quality(quality)
             .subsampling(subsampling)
             .optimize_huffman(optimize_huffman)
             .restart_interval(restart)
             .build();
 
-        let mut rng = StdRng::seed_from_u64(seed);
-        let mut pixels = vec![0u8; (width * height * 3) as usize];
-        rng.fill(pixels.as_mut_slice());
-
-        let encoded = jpeg::encode_with_options(&pixels, width, height, ColorType::Rgb, &options)
+        let encoded = encode_jpeg_with_options(&pixels, width, height, ColorType::Rgb, &options)
             .expect("encoding should succeed");
 
         // Verify JPEG markers
@@ -385,8 +420,8 @@ proptest! {
 fn test_deterministic() {
     let pixels = vec![100u8; 16 * 16 * 3];
 
-    let result1 = jpeg::encode(&pixels, 16, 16, 85).unwrap();
-    let result2 = jpeg::encode(&pixels, 16, 16, 85).unwrap();
+    let result1 = encode_jpeg(&pixels, 16, 16, 85).unwrap();
+    let result2 = encode_jpeg(&pixels, 16, 16, 85).unwrap();
 
     assert_eq!(result1, result2);
 }
@@ -396,7 +431,7 @@ fn test_deterministic() {
 fn test_pattern_compression() {
     // Solid color (should compress very well)
     let solid = vec![128u8; 64 * 64 * 3];
-    let solid_result = jpeg::encode(&solid, 64, 64, 85).unwrap();
+    let solid_result = encode_jpeg(&solid, 64, 64, 85).unwrap();
 
     // Gradient (compresses reasonably)
     let mut gradient = Vec::with_capacity(64 * 64 * 3);
@@ -407,7 +442,7 @@ fn test_pattern_compression() {
             gradient.push((((x + y) * 2) % 256) as u8);
         }
     }
-    let gradient_result = jpeg::encode(&gradient, 64, 64, 85).unwrap();
+    let gradient_result = encode_jpeg(&gradient, 64, 64, 85).unwrap();
 
     // Random-ish (compresses poorly)
     let mut noisy = Vec::with_capacity(64 * 64 * 3);
@@ -416,7 +451,7 @@ fn test_pattern_compression() {
         seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
         noisy.push((seed >> 16) as u8);
     }
-    let noisy_result = jpeg::encode(&noisy, 64, 64, 85).unwrap();
+    let noisy_result = encode_jpeg(&noisy, 64, 64, 85).unwrap();
 
     // Solid should be smallest, noisy should be largest
     assert!(solid_result.len() < gradient_result.len());
@@ -431,7 +466,7 @@ fn test_jpeg_decode_via_image() {
     for i in 0..rgb.len() {
         rgb[i] = (i as u8).wrapping_mul(31);
     }
-    let jpeg_rgb = jpeg::encode(&rgb, 8, 8, 85).unwrap();
+    let jpeg_rgb = encode_jpeg(&rgb, 8, 8, 85).unwrap();
     let decoded_rgb = image::load_from_memory(&jpeg_rgb).expect("decode rgb");
     assert_eq!(decoded_rgb.width(), 8);
     assert_eq!(decoded_rgb.height(), 8);
@@ -440,7 +475,7 @@ fn test_jpeg_decode_via_image() {
     let mut rng = StdRng::seed_from_u64(1337);
     let mut gray = vec![0u8; 7 * 5];
     rng.fill(gray.as_mut_slice());
-    let jpeg_gray = jpeg::encode_with_color(&gray, 7, 5, 75, ColorType::Gray).unwrap();
+    let jpeg_gray = encode_jpeg_with_color(&gray, 7, 5, 75, ColorType::Gray).unwrap();
     let decoded_gray = image::load_from_memory(&jpeg_gray).expect("decode gray");
     assert_eq!(decoded_gray.width(), 7);
     assert_eq!(decoded_gray.height(), 5);
@@ -458,7 +493,7 @@ fn test_jpeg_decode_random_small() {
         let mut rgb = vec![0u8; w * h * 3];
         rng.fill(rgb.as_mut_slice());
         for &q in &qualities {
-            let jpeg_rgb = jpeg::encode(&rgb, w as u32, h as u32, q).unwrap();
+            let jpeg_rgb = encode_jpeg(&rgb, w as u32, h as u32, q).unwrap();
             let decoded = image::load_from_memory(&jpeg_rgb).expect("decode rgb");
             assert_eq!(decoded.width(), w as u32);
             assert_eq!(decoded.height(), h as u32);
@@ -469,7 +504,7 @@ fn test_jpeg_decode_random_small() {
         rng.fill(gray.as_mut_slice());
         for &q in &qualities {
             let jpeg_gray =
-                jpeg::encode_with_color(&gray, w as u32, h as u32, q, ColorType::Gray).unwrap();
+                encode_jpeg_with_color(&gray, w as u32, h as u32, q, ColorType::Gray).unwrap();
             let decoded = image::load_from_memory(&jpeg_gray).expect("decode gray");
             assert_eq!(decoded.width(), w as u32);
             assert_eq!(decoded.height(), h as u32);
@@ -486,14 +521,14 @@ fn test_jpeg_subsampling_420() {
     let mut rgb = vec![0u8; (width * height * 3) as usize];
     rng.fill(rgb.as_mut_slice());
 
-    let opts_444 = jpeg::JpegOptions::fast(75);
-    let mut opts_420 = jpeg::JpegOptions::fast(75);
+    let opts_444 = test_jpeg_fast(width, height, 75);
+    let mut opts_420 = test_jpeg_fast(width, height, 75);
     opts_420.subsampling = jpeg::Subsampling::S420;
 
     let jpeg_444 =
-        jpeg::encode_with_options(&rgb, width, height, ColorType::Rgb, &opts_444).unwrap();
+        encode_jpeg_with_options(&rgb, width, height, ColorType::Rgb, &opts_444).unwrap();
     let jpeg_420 =
-        jpeg::encode_with_options(&rgb, width, height, ColorType::Rgb, &opts_420).unwrap();
+        encode_jpeg_with_options(&rgb, width, height, ColorType::Rgb, &opts_420).unwrap();
 
     // 4:2:0 should not be larger than 4:4:4 for the same image/quality.
     assert!(jpeg_420.len() <= jpeg_444.len());
@@ -512,10 +547,10 @@ fn test_jpeg_restart_interval_marker_and_decode() {
     let mut rgb = vec![0u8; (width * height * 3) as usize];
     rng.fill(rgb.as_mut_slice());
 
-    let mut opts = jpeg::JpegOptions::fast(80);
+    let mut opts = test_jpeg_fast(width, height, 80);
     opts.restart_interval = Some(4);
 
-    let jpeg_bytes = jpeg::encode_with_options(&rgb, width, height, ColorType::Rgb, &opts).unwrap();
+    let jpeg_bytes = encode_jpeg_with_options(&rgb, width, height, ColorType::Rgb, &opts).unwrap();
 
     // Ensure DRI marker (0xFFDD) exists
     let mut found_dri = false;
@@ -541,11 +576,11 @@ fn test_jpeg_marker_structure_with_restart() {
     let mut rgb = vec![0u8; (width * height * 3) as usize];
     rng.fill(rgb.as_mut_slice());
 
-    let mut opts = jpeg::JpegOptions::fast(85);
+    let mut opts = test_jpeg_fast(width, height, 85);
     opts.subsampling = jpeg::Subsampling::S420;
     opts.restart_interval = Some(4);
 
-    let jpeg_bytes = jpeg::encode_with_options(&rgb, width, height, ColorType::Rgb, &opts).unwrap();
+    let jpeg_bytes = encode_jpeg_with_options(&rgb, width, height, ColorType::Rgb, &opts).unwrap();
 
     assert!(jpeg_bytes.starts_with(&[0xFF, 0xD8]), "missing SOI");
     assert!(jpeg_bytes.ends_with(&[0xFF, 0xD9]), "missing EOI");
@@ -614,9 +649,9 @@ fn test_jpeg_no_restart_marker_without_interval() {
     let mut rgb = vec![0u8; (width * height * 3) as usize];
     rng.fill(rgb.as_mut_slice());
 
-    let opts = jpeg::JpegOptions::fast(80);
+    let opts = test_jpeg_fast(width, height, 80);
 
-    let jpeg_bytes = jpeg::encode_with_options(&rgb, width, height, ColorType::Rgb, &opts).unwrap();
+    let jpeg_bytes = encode_jpeg_with_options(&rgb, width, height, ColorType::Rgb, &opts).unwrap();
 
     assert!(
         !jpeg_bytes.windows(2).any(|w| w == [0xFF, 0xDD]),
@@ -638,10 +673,10 @@ fn test_jpeg_no_trailing_restart_marker_when_divisible() {
     let mut rgb = vec![0u8; (width * height * 3) as usize];
     rng.fill(rgb.as_mut_slice());
 
-    let mut opts = jpeg::JpegOptions::fast(85);
+    let mut opts = test_jpeg_fast(width, height, 85);
     opts.restart_interval = Some(4); // Exactly matches total MCU count
 
-    let jpeg_bytes = jpeg::encode_with_options(&rgb, width, height, ColorType::Rgb, &opts).unwrap();
+    let jpeg_bytes = encode_jpeg_with_options(&rgb, width, height, ColorType::Rgb, &opts).unwrap();
 
     // Verify EOI is present
     assert!(jpeg_bytes.ends_with(&[0xFF, 0xD9]), "missing EOI");
@@ -675,11 +710,11 @@ fn test_jpeg_no_trailing_restart_marker_420_divisible() {
     let mut rgb = vec![0u8; (width * height * 3) as usize];
     rng.fill(rgb.as_mut_slice());
 
-    let mut opts = jpeg::JpegOptions::fast(85);
+    let mut opts = test_jpeg_fast(width, height, 85);
     opts.subsampling = jpeg::Subsampling::S420;
     opts.restart_interval = Some(2); // 4 MCUs / 2 = exactly 2 intervals
 
-    let jpeg_bytes = jpeg::encode_with_options(&rgb, width, height, ColorType::Rgb, &opts).unwrap();
+    let jpeg_bytes = encode_jpeg_with_options(&rgb, width, height, ColorType::Rgb, &opts).unwrap();
 
     assert!(jpeg_bytes.ends_with(&[0xFF, 0xD9]), "missing EOI");
 
@@ -739,12 +774,12 @@ proptest! {
     fn prop_jpeg_decode_randomized_options(
         (w, h, quality, color_type, subsampling, restart_interval, data) in jpeg_case_strategy()
     ) {
-        let mut opts = jpeg::JpegOptions::fast(quality);
+        let mut opts = JpegOptions::fast(w, h, quality);
+        opts.color_type = color_type;
         opts.subsampling = subsampling;
         opts.restart_interval = restart_interval;
 
-        let encoded =
-            jpeg::encode_with_options(&data, w, h, color_type, &opts).unwrap();
+        let encoded = jpeg::encode(&data, &opts).unwrap();
 
         if restart_interval.is_some() {
             prop_assert!(encoded.windows(2).any(|w| w == [0xFF, 0xDD]));
@@ -769,7 +804,7 @@ fn test_jpeg_corpus_reencode_decode() {
         let rgb = img.to_rgb8();
         let (w, h) = img.dimensions();
 
-        let encoded = jpeg::encode(rgb.as_raw(), w, h, 85).expect("encode jpeg");
+        let encoded = encode_jpeg(rgb.as_raw(), w, h, 85).expect("encode jpeg");
         let decoded = image::load_from_memory(&encoded).expect("decode encoded");
         assert_eq!(
             decoded.dimensions(),
@@ -793,13 +828,13 @@ fn test_jpeg_optimize_huffman_structured_image() {
         }
     }
 
-    let base_opts = jpeg::JpegOptions::fast(85);
-    let opt_opts = jpeg::JpegOptions::balanced(85);
+    let base_opts = test_jpeg_fast(width, height, 85);
+    let opt_opts = test_jpeg_balanced(width, height, 85);
 
     let default_bytes =
-        jpeg::encode_with_options(&rgb, width, height, ColorType::Rgb, &base_opts).unwrap();
+        encode_jpeg_with_options(&rgb, width, height, ColorType::Rgb, &base_opts).unwrap();
     let optimized_bytes =
-        jpeg::encode_with_options(&rgb, width, height, ColorType::Rgb, &opt_opts).unwrap();
+        encode_jpeg_with_options(&rgb, width, height, ColorType::Rgb, &opt_opts).unwrap();
 
     assert!(
         optimized_bytes.len() <= default_bytes.len(),
@@ -818,7 +853,7 @@ fn test_jpeg_optimize_huffman_structured_image() {
 #[test]
 fn test_dqt_present() {
     let pixels = vec![128u8; 8 * 8 * 3];
-    let result = jpeg::encode(&pixels, 8, 8, 85).unwrap();
+    let result = encode_jpeg(&pixels, 8, 8, 85).unwrap();
 
     // Look for DQT marker (0xFFDB)
     let mut found_dqt = false;
@@ -835,7 +870,7 @@ fn test_dqt_present() {
 #[test]
 fn test_sof0_present() {
     let pixels = vec![128u8; 8 * 8 * 3];
-    let result = jpeg::encode(&pixels, 8, 8, 85).unwrap();
+    let result = encode_jpeg(&pixels, 8, 8, 85).unwrap();
 
     // Look for SOF0 marker (0xFFC0)
     let mut found_sof0 = false;
@@ -852,7 +887,7 @@ fn test_sof0_present() {
 #[test]
 fn test_dht_present() {
     let pixels = vec![128u8; 8 * 8 * 3];
-    let result = jpeg::encode(&pixels, 8, 8, 85).unwrap();
+    let result = encode_jpeg(&pixels, 8, 8, 85).unwrap();
 
     // Count DHT markers (0xFFC4) - should have 4 (DC lum, DC chrom, AC lum, AC chrom)
     let mut dht_count = 0;
@@ -868,7 +903,7 @@ fn test_dht_present() {
 #[test]
 fn test_sos_present() {
     let pixels = vec![128u8; 8 * 8 * 3];
-    let result = jpeg::encode(&pixels, 8, 8, 85).unwrap();
+    let result = encode_jpeg(&pixels, 8, 8, 85).unwrap();
 
     // Look for SOS marker (0xFFDA)
     let mut found_sos = false;
@@ -887,7 +922,7 @@ fn test_jpeg_synthetic_patterns() {
     let test_suite = synthetic::generate_minimal_test_suite();
 
     for (name, w, h, pixels) in test_suite {
-        let encoded = jpeg::encode(&pixels, w, h, 85)
+        let encoded = encode_jpeg(&pixels, w, h, 85)
             .unwrap_or_else(|e| panic!("Failed to encode {name}: {e}"));
 
         // Verify valid JPEG markers
@@ -916,7 +951,7 @@ fn test_jpeg_edge_case_dimensions() {
         }
 
         let pixels = synthetic::gradient_rgb(w, h);
-        let encoded = jpeg::encode(&pixels, w, h, 85)
+        let encoded = encode_jpeg(&pixels, w, h, 85)
             .unwrap_or_else(|e| panic!("Failed to encode {name} ({w}x{h}): {e}"));
 
         let decoded = image::load_from_memory(&encoded)
@@ -936,8 +971,8 @@ fn test_jpeg_kodak_subset() {
 
     for (name, w, h, pixels) in images {
         // Encode with balanced settings
-        let opts = jpeg::JpegOptions::balanced(85);
-        let encoded = jpeg::encode_with_options(&pixels, w, h, ColorType::Rgb, &opts)
+        let opts = test_jpeg_balanced(w, h, 85);
+        let encoded = encode_jpeg_with_options(&pixels, w, h, ColorType::Rgb, &opts)
             .unwrap_or_else(|e| panic!("Failed to encode Kodak {name}: {e}"));
 
         // Verify valid JPEG
@@ -968,14 +1003,14 @@ fn test_jpeg_presets_on_gradient() {
 
     // Test fast and balanced presets (max uses progressive which may have decoder compatibility issues)
     let presets = [
-        ("fast", jpeg::JpegOptions::fast(85)),
-        ("balanced", jpeg::JpegOptions::balanced(85)),
+        ("fast", test_jpeg_fast(w, h, 85)),
+        ("balanced", test_jpeg_balanced(w, h, 85)),
     ];
 
     let mut sizes = Vec::new();
 
     for (name, opts) in presets {
-        let encoded = jpeg::encode_with_options(&pixels, w, h, ColorType::Rgb, &opts)
+        let encoded = encode_jpeg_with_options(&pixels, w, h, ColorType::Rgb, &opts)
             .unwrap_or_else(|e| panic!("Failed to encode with {name} preset: {e}"));
 
         // Verify decode

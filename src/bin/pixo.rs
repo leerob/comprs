@@ -642,7 +642,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut output_data = Vec::new();
     match format {
         OutputFormat::Png => {
-            let mut builder = PngOptions::builder()
+            let mut builder = PngOptions::builder(width, height)
+                .color_type(color_type)
                 .compression_level(args.compression)
                 .filter_strategy(args.filter.to_strategy())
                 .optimize_alpha(args.png_optimize_alpha)
@@ -684,17 +685,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
 
-            pixo::png::encode_into(
-                &mut output_data,
-                &pixels,
-                width,
-                height,
-                color_type,
-                &options,
-            )?
+            pixo::png::encode_into(&mut output_data, &pixels, &options)?
         }
         OutputFormat::Jpeg | OutputFormat::Jpg => {
-            let options = JpegOptions::builder()
+            let options = JpegOptions::builder(width, height)
+                .color_type(color_type)
                 .quality(args.quality)
                 .subsampling(args.subsampling.into())
                 .restart_interval(if args.jpeg_restart_interval == 0 {
@@ -715,14 +710,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     options.optimize_huffman
                 );
             }
-            pixo::jpeg::encode_with_options_into(
-                &mut output_data,
-                &pixels,
-                width,
-                height,
-                color_type,
-                &options,
-            )?
+            pixo::jpeg::encode_into(&mut output_data, &pixels, &options)?
         }
     };
     let encode_time = encode_start.elapsed();

@@ -8,6 +8,22 @@ use crate::bits::BitWriterMsb;
 use crate::jpeg::huffman::HuffmanTables;
 use crate::jpeg::quantize::zigzag_reorder;
 
+/// Parameters for encoding a single AC scan in progressive JPEG.
+///
+/// Groups spectral selection and successive approximation parameters
+/// to reduce function argument counts.
+#[derive(Debug, Clone, Copy)]
+pub struct ScanParams {
+    /// Start of spectral selection (0-63)
+    pub ss: u8,
+    /// End of spectral selection (0-63)
+    pub se: u8,
+    /// Successive approximation low bit position
+    pub al: u8,
+    /// Whether this is a luminance (Y) or chrominance (Cb/Cr) scan
+    pub is_luminance: bool,
+}
+
 /// Specification for a single scan in progressive JPEG.
 #[derive(Debug, Clone)]
 pub struct ScanSpec {
@@ -122,23 +138,19 @@ pub fn encode_dc_refine(writer: &mut BitWriterMsb, dc_coef: i16, al: u8) {
 }
 
 /// Encode AC coefficients for first progressive scan.
-#[allow(clippy::too_many_arguments)]
 pub fn encode_ac_first(
     writer: &mut BitWriterMsb,
     block: &[i16; 64],
-    ss: u8,
-    se: u8,
-    al: u8,
+    scan: &ScanParams,
     eob_run: &mut u16,
     tables: &HuffmanTables,
-    is_luminance: bool,
 ) {
     let zigzag = zigzag_reorder(block);
 
     // Find last non-zero coefficient in range [ss, se]
-    let mut k = se as usize;
-    while k >= ss as usize && (zigzag[k] >> al) == 0 {
-        if k == ss as usize {
+    let mut k = scan.se as usize;
+    while k >= scan.ss as usize && (zigzag[k] >> scan.al) == 0 {
+        if k == scan.ss as usize {
             break;
         }
         k -= 1;
@@ -146,26 +158,26 @@ pub fn encode_ac_first(
 
     // If all zeros, accumulate EOB run
     let last_nonzero = k;
-    let all_zero = last_nonzero == ss as usize && (zigzag[ss as usize] >> al) == 0;
+    let all_zero = last_nonzero == scan.ss as usize && (zigzag[scan.ss as usize] >> scan.al) == 0;
 
     if all_zero {
         *eob_run += 1;
         // Flush if EOB run reaches maximum
         if *eob_run == 0x7FFF {
-            flush_eob_run(writer, eob_run, tables, is_luminance);
+            flush_eob_run(writer, eob_run, tables, scan.is_luminance);
         }
         return;
     }
 
     // Flush pending EOB run before encoding non-zero block
     if *eob_run > 0 {
-        flush_eob_run(writer, eob_run, tables, is_luminance);
+        flush_eob_run(writer, eob_run, tables, scan.is_luminance);
     }
 
     // Encode coefficients
     let mut zero_run = 0u8;
-    for k in (ss as usize)..=(last_nonzero) {
-        let coef = zigzag[k] >> al;
+    for k in (scan.ss as usize)..=(last_nonzero) {
+        let coef = zigzag[k] >> scan.al;
 
         if coef == 0 {
             zero_run += 1;
@@ -174,7 +186,7 @@ pub fn encode_ac_first(
 
         // Emit ZRL codes for runs of 16+ zeros
         while zero_run >= 16 {
-            let zrl_code = get_ac_code(tables, 0xF0, is_luminance);
+            let zrl_code = get_ac_code(tables, 0xF0, scan.is_luminance);
             writer.write_bits(zrl_code.0 as u32, zrl_code.1);
             zero_run -= 16;
         }
@@ -182,7 +194,7 @@ pub fn encode_ac_first(
         // Emit (run, size) code and value
         let ac_cat = category(coef);
         let rs = (zero_run << 4) | ac_cat;
-        let ac_code = get_ac_code(tables, rs, is_luminance);
+        let ac_code = get_ac_code(tables, rs, scan.is_luminance);
         writer.write_bits(ac_code.0 as u32, ac_code.1);
 
         let (val_bits, val_len) = encode_value(coef);
@@ -192,21 +204,17 @@ pub fn encode_ac_first(
     }
 
     // If we ended before se, start an EOB run
-    if last_nonzero < se as usize {
+    if last_nonzero < scan.se as usize {
         *eob_run = 1;
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn encode_ac_refine(
     writer: &mut BitWriterMsb,
     block: &[i16; 64],
-    ss: u8,
-    se: u8,
-    al: u8,
+    scan: &ScanParams,
     eob_run: &mut u16,
     tables: &HuffmanTables,
-    is_luminance: bool,
 ) {
     let zigzag = zigzag_reorder(block);
 
@@ -216,35 +224,35 @@ pub fn encode_ac_refine(
     let mut pending_eob = false;
 
     // Find end of band
-    let mut end = se as usize;
-    while end > ss as usize {
+    let mut end = scan.se as usize;
+    while end > scan.ss as usize {
         let coef = zigzag[end];
-        if coef.abs() > (1 << al) {
+        if coef.abs() > (1 << scan.al) {
             break;
         }
-        if (coef.unsigned_abs() >> al) & 1 != 0 {
+        if (coef.unsigned_abs() >> scan.al) & 1 != 0 {
             break;
         }
         end -= 1;
     }
 
-    for k in (ss as usize)..=(se as usize) {
+    for k in (scan.ss as usize)..=(scan.se as usize) {
         let coef = zigzag[k];
         let abs_coef = coef.unsigned_abs();
 
-        if abs_coef > (1 << al) {
+        if abs_coef > (1 << scan.al) {
             // Previously non-zero: emit correction bit later
-            correction_bits.push(((abs_coef >> al) & 1) as u8);
-        } else if (abs_coef >> al) & 1 != 0 {
+            correction_bits.push(((abs_coef >> scan.al) & 1) as u8);
+        } else if (abs_coef >> scan.al) & 1 != 0 {
             // Newly significant coefficient
             if *eob_run > 0 {
-                flush_eob_run(writer, eob_run, tables, is_luminance);
+                flush_eob_run(writer, eob_run, tables, scan.is_luminance);
             }
 
             // Emit zero run and new coefficient
             while zero_run >= 16 {
                 // ZRL with correction bits
-                let zrl_code = get_ac_code(tables, 0xF0, is_luminance);
+                let zrl_code = get_ac_code(tables, 0xF0, scan.is_luminance);
                 writer.write_bits(zrl_code.0 as u32, zrl_code.1);
                 // Output pending correction bits
                 for &bit in &correction_bits {
@@ -256,7 +264,7 @@ pub fn encode_ac_refine(
 
             // (run, 1) code
             let rs = (zero_run << 4) | 1;
-            let ac_code = get_ac_code(tables, rs, is_luminance);
+            let ac_code = get_ac_code(tables, rs, scan.is_luminance);
             writer.write_bits(ac_code.0 as u32, ac_code.1);
 
             // Sign bit
@@ -283,7 +291,7 @@ pub fn encode_ac_refine(
     if pending_eob {
         *eob_run += 1;
         if *eob_run == 0x7FFF {
-            flush_eob_run(writer, eob_run, tables, is_luminance);
+            flush_eob_run(writer, eob_run, tables, scan.is_luminance);
         }
     }
 
@@ -556,8 +564,14 @@ mod tests {
         let mut writer = BitWriterMsb::new();
         let block = [0i16; 64];
         let mut eob_run = 0u16;
+        let scan = ScanParams {
+            ss: 1,
+            se: 63,
+            al: 0,
+            is_luminance: true,
+        };
 
-        encode_ac_first(&mut writer, &block, 1, 63, 0, &mut eob_run, &tables, true);
+        encode_ac_first(&mut writer, &block, &scan, &mut eob_run, &tables);
 
         // All zeros should just accumulate EOB run
         assert_eq!(eob_run, 1);
@@ -572,8 +586,14 @@ mod tests {
         block[1] = 10;
         block[8] = 5;
         let mut eob_run = 0u16;
+        let scan = ScanParams {
+            ss: 1,
+            se: 63,
+            al: 0,
+            is_luminance: true,
+        };
 
-        encode_ac_first(&mut writer, &block, 1, 63, 0, &mut eob_run, &tables, true);
+        encode_ac_first(&mut writer, &block, &scan, &mut eob_run, &tables);
 
         // Should have encoded the coefficients
         assert!(!writer.is_empty() || eob_run > 0);
@@ -586,9 +606,14 @@ mod tests {
         let mut block = [0i16; 64];
         block[1] = 8; // Will be shifted by al
         let mut eob_run = 0u16;
-        let al = 2;
+        let scan = ScanParams {
+            ss: 1,
+            se: 10,
+            al: 2,
+            is_luminance: true,
+        };
 
-        encode_ac_first(&mut writer, &block, 1, 10, al, &mut eob_run, &tables, true);
+        encode_ac_first(&mut writer, &block, &scan, &mut eob_run, &tables);
         // With al=2, 8 >> 2 = 2, which should be encoded
         assert!(!writer.is_empty() || eob_run > 0);
     }
@@ -631,12 +656,18 @@ mod tests {
     fn test_eob_run_max() {
         let tables = HuffmanTables::new();
         let block = [0i16; 64];
+        let scan = ScanParams {
+            ss: 1,
+            se: 63,
+            al: 0,
+            is_luminance: true,
+        };
 
         // Accumulate many EOB runs to test near-max behavior
         let mut eob_run = 0u16;
         for _ in 0..100 {
             let mut writer = BitWriterMsb::new();
-            encode_ac_first(&mut writer, &block, 1, 63, 0, &mut eob_run, &tables, true);
+            encode_ac_first(&mut writer, &block, &scan, &mut eob_run, &tables);
         }
         // EOB run should have accumulated
         assert!(eob_run > 0);
@@ -765,8 +796,14 @@ mod tests {
         // Set up a block with previously non-zero coefficient (> 1 << al)
         block[1] = 10; // In zigzag position
         let mut eob_run = 0u16;
+        let scan = ScanParams {
+            ss: 1,
+            se: 10,
+            al: 0,
+            is_luminance: true,
+        };
 
-        encode_ac_refine(&mut writer, &block, 1, 10, 0, &mut eob_run, &tables, true);
+        encode_ac_refine(&mut writer, &block, &scan, &mut eob_run, &tables);
         // Should produce some output or EOB run
         assert!(!writer.is_empty() || eob_run > 0);
     }
@@ -784,8 +821,14 @@ mod tests {
         // Set a non-zero coefficient at the end after many zeros
         block[32] = 100; // After more than 16 zeros
         let mut eob_run = 0u16;
+        let scan = ScanParams {
+            ss: 1,
+            se: 63,
+            al: 0,
+            is_luminance: true,
+        };
 
-        encode_ac_first(&mut writer, &block, 1, 63, 0, &mut eob_run, &tables, true);
+        encode_ac_first(&mut writer, &block, &scan, &mut eob_run, &tables);
 
         // Should have written something (ZRL codes + coefficient)
         assert!(!writer.is_empty());
@@ -800,8 +843,14 @@ mod tests {
         // Put non-zero coefficient at position 48 (zigzag), after 47 zeros
         block[48] = 50;
         let mut eob_run = 0u16;
+        let scan = ScanParams {
+            ss: 1,
+            se: 63,
+            al: 0,
+            is_luminance: true,
+        };
 
-        encode_ac_first(&mut writer, &block, 1, 63, 0, &mut eob_run, &tables, true);
+        encode_ac_first(&mut writer, &block, &scan, &mut eob_run, &tables);
 
         // Should have written ZRL codes
         assert!(!writer.is_empty());
@@ -817,8 +866,14 @@ mod tests {
         block[1] = 8; // Will appear in refinement
         block[48] = 8; // After long zero run
         let mut eob_run = 0u16;
+        let scan = ScanParams {
+            ss: 1,
+            se: 63,
+            al: 2,
+            is_luminance: true,
+        };
 
-        encode_ac_refine(&mut writer, &block, 1, 63, 2, &mut eob_run, &tables, true);
+        encode_ac_refine(&mut writer, &block, &scan, &mut eob_run, &tables);
 
         // Should produce output (either data or EOB)
         assert!(!writer.is_empty() || eob_run > 0);
@@ -833,6 +888,12 @@ mod tests {
         // Test that EOB runs accumulate correctly and flush at max
         let tables = HuffmanTables::new();
         let block = [0i16; 64]; // All zeros = EOB
+        let scan = ScanParams {
+            ss: 1,
+            se: 63,
+            al: 0,
+            is_luminance: true,
+        };
 
         let mut eob_run = 0u16;
         let mut total_writes = 0;
@@ -840,7 +901,7 @@ mod tests {
         // Accumulate many EOB runs
         for _ in 0..0x8000 {
             let mut writer = BitWriterMsb::new();
-            encode_ac_first(&mut writer, &block, 1, 63, 0, &mut eob_run, &tables, true);
+            encode_ac_first(&mut writer, &block, &scan, &mut eob_run, &tables);
             if !writer.is_empty() {
                 total_writes += 1;
             }

@@ -484,7 +484,7 @@ fn encode_with_imagequant(pixels: &[u8], width: u32, height: u32) -> Option<(usi
     let alpha: Vec<u8> = palette.iter().map(|c| c.a).collect();
 
     // Use pixo to encode the indexed PNG
-    let mut opts = png::PngOptions::balanced();
+    let mut opts = png::PngOptions::balanced(width, height);
     opts.quantization.mode = QuantizationMode::Off; // Already quantized
 
     let png_data = png::encode_indexed_with_options(
@@ -523,15 +523,9 @@ fn bench_png_all_presets(c: &mut Criterion) {
             &gradient,
             |b, pixels| {
                 b.iter(|| {
-                    png::encode_into(
-                        &mut png_buf,
-                        black_box(pixels),
-                        *size,
-                        *size,
-                        ColorType::Rgb,
-                        &png::PngOptions::fast(),
-                    )
-                    .unwrap()
+                    let mut opts = png::PngOptions::fast(*size, *size);
+                    opts.color_type = ColorType::Rgb;
+                    png::encode_into(&mut png_buf, black_box(pixels), &opts).unwrap()
                 });
             },
         );
@@ -542,15 +536,9 @@ fn bench_png_all_presets(c: &mut Criterion) {
             &gradient,
             |b, pixels| {
                 b.iter(|| {
-                    png::encode_into(
-                        &mut png_buf,
-                        black_box(pixels),
-                        *size,
-                        *size,
-                        ColorType::Rgb,
-                        &png::PngOptions::balanced(),
-                    )
-                    .unwrap()
+                    let mut opts = png::PngOptions::balanced(*size, *size);
+                    opts.color_type = ColorType::Rgb;
+                    png::encode_into(&mut png_buf, black_box(pixels), &opts).unwrap()
                 });
             },
         );
@@ -621,21 +609,16 @@ fn bench_png_lossy_comparison(c: &mut Criterion) {
             &gradient,
             |b, pixels| {
                 b.iter(|| {
-                    png::encode_into(
-                        &mut png_buf,
-                        black_box(pixels),
-                        *size,
-                        *size,
-                        ColorType::Rgb,
-                        &png::PngOptions::balanced(),
-                    )
-                    .unwrap()
+                    let mut opts = png::PngOptions::balanced(*size, *size);
+                    opts.color_type = ColorType::Rgb;
+                    png::encode_into(&mut png_buf, black_box(pixels), &opts).unwrap()
                 });
             },
         );
 
         // pixo lossy with auto quantization
-        let mut lossy_opts = png::PngOptions::balanced();
+        let mut lossy_opts = png::PngOptions::balanced(*size, *size);
+        lossy_opts.color_type = ColorType::Rgb;
         lossy_opts.quantization = QuantizationOptions {
             mode: QuantizationMode::Auto,
             max_colors: 256,
@@ -645,22 +628,13 @@ fn bench_png_lossy_comparison(c: &mut Criterion) {
             BenchmarkId::new("pixo_lossy_auto", format!("{size}x{size}")),
             &gradient,
             |b, pixels| {
-                b.iter(|| {
-                    png::encode_into(
-                        &mut png_buf,
-                        black_box(pixels),
-                        *size,
-                        *size,
-                        ColorType::Rgb,
-                        &lossy_opts,
-                    )
-                    .unwrap()
-                });
+                b.iter(|| png::encode_into(&mut png_buf, black_box(pixels), &lossy_opts).unwrap());
             },
         );
 
         // pixo lossy with forced quantization
-        let mut force_opts = png::PngOptions::balanced();
+        let mut force_opts = png::PngOptions::balanced(*size, *size);
+        force_opts.color_type = ColorType::Rgb;
         force_opts.quantization = QuantizationOptions {
             mode: QuantizationMode::Force,
             max_colors: 256,
@@ -670,17 +644,7 @@ fn bench_png_lossy_comparison(c: &mut Criterion) {
             BenchmarkId::new("pixo_lossy_force", format!("{size}x{size}")),
             &gradient,
             |b, pixels| {
-                b.iter(|| {
-                    png::encode_into(
-                        &mut png_buf,
-                        black_box(pixels),
-                        *size,
-                        *size,
-                        ColorType::Rgb,
-                        &force_opts,
-                    )
-                    .unwrap()
-                });
+                b.iter(|| png::encode_into(&mut png_buf, black_box(pixels), &force_opts).unwrap());
             },
         );
 
@@ -719,15 +683,8 @@ fn bench_jpeg_all_presets(c: &mut Criterion) {
             &gradient,
             |b, pixels| {
                 b.iter(|| {
-                    jpeg::encode_with_options_into(
-                        &mut jpeg_buf,
-                        black_box(pixels),
-                        *size,
-                        *size,
-                        ColorType::Rgb,
-                        &jpeg::JpegOptions::fast(85),
-                    )
-                    .unwrap()
+                    let opts = jpeg::JpegOptions::fast(*size, *size, 85);
+                    jpeg::encode_into(&mut jpeg_buf, black_box(pixels), &opts).unwrap()
                 });
             },
         );
@@ -738,15 +695,8 @@ fn bench_jpeg_all_presets(c: &mut Criterion) {
             &gradient,
             |b, pixels| {
                 b.iter(|| {
-                    jpeg::encode_with_options_into(
-                        &mut jpeg_buf,
-                        black_box(pixels),
-                        *size,
-                        *size,
-                        ColorType::Rgb,
-                        &jpeg::JpegOptions::balanced(85),
-                    )
-                    .unwrap()
+                    let opts = jpeg::JpegOptions::balanced(*size, *size, 85);
+                    jpeg::encode_into(&mut jpeg_buf, black_box(pixels), &opts).unwrap()
                 });
             },
         );
@@ -757,15 +707,8 @@ fn bench_jpeg_all_presets(c: &mut Criterion) {
             &gradient,
             |b, pixels| {
                 b.iter(|| {
-                    jpeg::encode_with_options_into(
-                        &mut jpeg_buf,
-                        black_box(pixels),
-                        *size,
-                        *size,
-                        ColorType::Rgb,
-                        &jpeg::JpegOptions::max(85),
-                    )
-                    .unwrap()
+                    let opts = jpeg::JpegOptions::max(*size, *size, 85);
+                    jpeg::encode_into(&mut jpeg_buf, black_box(pixels), &opts).unwrap()
                 });
             },
         );
@@ -933,23 +876,14 @@ fn bench_png_equivalent_settings(c: &mut Criterion) {
         let mut buf = Vec::new();
 
         // pixo at level 6 with Adaptive filter
-        let pixo_opts = png::PngOptions::builder()
+        let pixo_opts = png::PngOptions::builder(512, 512)
+            .color_type(ColorType::Rgb)
             .compression_level(6)
             .filter_strategy(png::FilterStrategy::Adaptive)
             .build();
 
         group.bench_with_input(BenchmarkId::new("pixo_lvl6", name), pixels, |b, pixels| {
-            b.iter(|| {
-                png::encode_into(
-                    &mut buf,
-                    black_box(pixels),
-                    512,
-                    512,
-                    ColorType::Rgb,
-                    &pixo_opts,
-                )
-                .unwrap()
-            });
+            b.iter(|| png::encode_into(&mut buf, black_box(pixels), &pixo_opts).unwrap());
         });
 
         // image crate with default settings (uses flate2 level 6)
@@ -981,7 +915,8 @@ fn bench_png_equivalent_settings(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(pixel_bytes));
 
         let mut buf = Vec::new();
-        let pixo_opts = png::PngOptions::builder()
+        let pixo_opts = png::PngOptions::builder(img.width, img.height)
+            .color_type(ColorType::Rgb)
             .compression_level(6)
             .filter_strategy(png::FilterStrategy::Adaptive)
             .build();
@@ -990,17 +925,7 @@ fn bench_png_equivalent_settings(c: &mut Criterion) {
             BenchmarkId::new("pixo_lvl6", &img.name),
             &img.pixels,
             |b, pixels| {
-                b.iter(|| {
-                    png::encode_into(
-                        &mut buf,
-                        black_box(pixels),
-                        img.width,
-                        img.height,
-                        ColorType::Rgb,
-                        &pixo_opts,
-                    )
-                    .unwrap()
-                });
+                b.iter(|| png::encode_into(&mut buf, black_box(pixels), &pixo_opts).unwrap());
             },
         );
 
@@ -1064,6 +989,9 @@ fn bench_jpeg_equivalent_settings(c: &mut Criterion) {
 
         // pixo at Q85, 4:2:0, baseline (non-progressive)
         let pixo_opts = jpeg::JpegOptions {
+            width: *width,
+            height: *height,
+            color_type: ColorType::Rgb,
             quality: 85,
             subsampling: jpeg::Subsampling::S420, // 4:2:0
             restart_interval: None,
@@ -1073,17 +1001,7 @@ fn bench_jpeg_equivalent_settings(c: &mut Criterion) {
         };
 
         group.bench_with_input(BenchmarkId::new("pixo_q85", name), *pixels, |b, pixels| {
-            b.iter(|| {
-                jpeg::encode_with_options_into(
-                    &mut buf,
-                    black_box(pixels),
-                    *width,
-                    *height,
-                    ColorType::Rgb,
-                    &pixo_opts,
-                )
-                .unwrap()
-            });
+            b.iter(|| jpeg::encode_into(&mut buf, black_box(pixels), &pixo_opts).unwrap());
         });
 
         // image crate with quality 85
@@ -1138,6 +1056,9 @@ fn bench_jpeg_equivalent_settings(c: &mut Criterion) {
 
         let mut buf = Vec::new();
         let pixo_opts = jpeg::JpegOptions {
+            width: img.width,
+            height: img.height,
+            color_type: ColorType::Rgb,
             quality: 85,
             subsampling: jpeg::Subsampling::S420,
             restart_interval: None,
@@ -1150,17 +1071,7 @@ fn bench_jpeg_equivalent_settings(c: &mut Criterion) {
             BenchmarkId::new("pixo_q85", &img.name),
             &img.pixels,
             |b, pixels| {
-                b.iter(|| {
-                    jpeg::encode_with_options_into(
-                        &mut buf,
-                        black_box(pixels),
-                        img.width,
-                        img.height,
-                        ColorType::Rgb,
-                        &pixo_opts,
-                    )
-                    .unwrap()
-                });
+                b.iter(|| jpeg::encode_into(&mut buf, black_box(pixels), &pixo_opts).unwrap());
             },
         );
 
@@ -1229,15 +1140,9 @@ fn bench_png_best_effort(c: &mut Criterion) {
         &gradient,
         |b, pixels| {
             b.iter(|| {
-                png::encode_into(
-                    &mut buf,
-                    black_box(pixels),
-                    512,
-                    512,
-                    ColorType::Rgb,
-                    &png::PngOptions::balanced(),
-                )
-                .unwrap()
+                let mut opts = png::PngOptions::balanced(512, 512);
+                opts.color_type = ColorType::Rgb;
+                png::encode_into(&mut buf, black_box(pixels), &opts).unwrap()
             });
         },
     );
@@ -1249,15 +1154,9 @@ fn bench_png_best_effort(c: &mut Criterion) {
         &gradient,
         |b, pixels| {
             b.iter(|| {
-                png::encode_into(
-                    &mut buf,
-                    black_box(pixels),
-                    512,
-                    512,
-                    ColorType::Rgb,
-                    &png::PngOptions::max(),
-                )
-                .unwrap()
+                let mut opts = png::PngOptions::max(512, 512);
+                opts.color_type = ColorType::Rgb;
+                png::encode_into(&mut buf, black_box(pixels), &opts).unwrap()
             });
         },
     );
@@ -1309,15 +1208,8 @@ fn bench_jpeg_best_effort(c: &mut Criterion) {
         &gradient,
         |b, pixels| {
             b.iter(|| {
-                jpeg::encode_with_options_into(
-                    &mut buf,
-                    black_box(pixels),
-                    512,
-                    512,
-                    ColorType::Rgb,
-                    &jpeg::JpegOptions::max(85),
-                )
-                .unwrap()
+                let opts = jpeg::JpegOptions::max(512, 512, 85);
+                jpeg::encode_into(&mut buf, black_box(pixels), &opts).unwrap()
             });
         },
     );
@@ -1328,15 +1220,8 @@ fn bench_jpeg_best_effort(c: &mut Criterion) {
         &gradient,
         |b, pixels| {
             b.iter(|| {
-                jpeg::encode_with_options_into(
-                    &mut buf,
-                    black_box(pixels),
-                    512,
-                    512,
-                    ColorType::Rgb,
-                    &jpeg::JpegOptions::balanced(85),
-                )
-                .unwrap()
+                let opts = jpeg::JpegOptions::balanced(512, 512, 85);
+                jpeg::encode_into(&mut buf, black_box(pixels), &opts).unwrap()
             });
         },
     );
@@ -1467,7 +1352,8 @@ fn print_summary_report() {
     let gradient = generate_gradient_image(512, 512);
 
     // pixo Fast
-    let (fast_size, fast_time) = measure_png_encode(&gradient, 512, 512, &png::PngOptions::fast());
+    let fast_opts = png::PngOptions::fast(512, 512);
+    let (fast_size, fast_time) = measure_png_encode(&gradient, &fast_opts);
     println!(
         "│ {:<18} │ {:>11} │ {:>11} │ {:<45} │",
         "pixo Fast",
@@ -1477,8 +1363,8 @@ fn print_summary_report() {
     );
 
     // pixo Balanced
-    let (balanced_size, balanced_time) =
-        measure_png_encode(&gradient, 512, 512, &png::PngOptions::balanced());
+    let balanced_opts = png::PngOptions::balanced(512, 512);
+    let (balanced_size, balanced_time) = measure_png_encode(&gradient, &balanced_opts);
     println!(
         "│ {:<18} │ {:>11} │ {:>11} │ {:<45} │",
         "pixo Balanced",
@@ -1490,15 +1376,9 @@ fn print_summary_report() {
     // pixo Max (single iteration - too slow for multiple)
     let max_start = Instant::now();
     let mut max_buf = Vec::new();
-    png::encode_into(
-        &mut max_buf,
-        &gradient,
-        512,
-        512,
-        ColorType::Rgb,
-        &png::PngOptions::max(),
-    )
-    .unwrap();
+    let mut max_opts = png::PngOptions::max(512, 512);
+    max_opts.color_type = ColorType::Rgb;
+    png::encode_into(&mut max_buf, &gradient, &max_opts).unwrap();
     let max_time = max_start.elapsed();
     println!(
         "│ {:<18} │ {:>11} │ {:>11} │ {:<45} │",
@@ -1555,13 +1435,14 @@ fn print_summary_report() {
     );
 
     // pixo lossy with forced quantization
-    let mut lossy_opts = png::PngOptions::balanced();
+    let mut lossy_opts = png::PngOptions::balanced(512, 512);
+    lossy_opts.color_type = ColorType::Rgb;
     lossy_opts.quantization = QuantizationOptions {
         mode: QuantizationMode::Force,
         max_colors: 256,
         dithering: false,
     };
-    let (lossy_size, lossy_time) = measure_png_encode(&gradient, 512, 512, &lossy_opts);
+    let (lossy_size, lossy_time) = measure_png_encode(&gradient, &lossy_opts);
     let lossy_savings = (1.0 - lossy_size as f64 / balanced_size as f64) * 100.0;
     println!(
         "│ {:<18} │ {:>11} │ {:>11} │ {:<45} │",
@@ -1671,8 +1552,8 @@ fn print_summary_report() {
     println!("├────────────────────┼─────────────┼─────────────┼───────────────────────────────────────────────┤");
 
     // pixo Fast
-    let (fast_size, fast_time) =
-        measure_jpeg_encode(&gradient, 512, 512, &jpeg::JpegOptions::fast(85));
+    let fast_jpeg_opts = jpeg::JpegOptions::fast(512, 512, 85);
+    let (fast_size, fast_time) = measure_jpeg_encode(&gradient, &fast_jpeg_opts);
     println!(
         "│ {:<18} │ {:>11} │ {:>11} │ {:<45} │",
         "pixo Fast",
@@ -1682,8 +1563,8 @@ fn print_summary_report() {
     );
 
     // pixo Balanced
-    let (balanced_size, balanced_time) =
-        measure_jpeg_encode(&gradient, 512, 512, &jpeg::JpegOptions::balanced(85));
+    let balanced_jpeg_opts = jpeg::JpegOptions::balanced(512, 512, 85);
+    let (balanced_size, balanced_time) = measure_jpeg_encode(&gradient, &balanced_jpeg_opts);
     println!(
         "│ {:<18} │ {:>11} │ {:>11} │ {:<45} │",
         "pixo Balanced",
@@ -1693,8 +1574,8 @@ fn print_summary_report() {
     );
 
     // pixo Max
-    let (max_size, max_time) =
-        measure_jpeg_encode(&gradient, 512, 512, &jpeg::JpegOptions::max(85));
+    let max_jpeg_opts = jpeg::JpegOptions::max(512, 512, 85);
+    let (max_size, max_time) = measure_jpeg_encode(&gradient, &max_jpeg_opts);
     println!(
         "│ {:<18} │ {:>11} │ {:>11} │ {:<45} │",
         "pixo Max",
@@ -1817,7 +1698,8 @@ fn compare_real_image_lossy(
     let pixels = rgba.as_raw();
 
     // pixo lossy
-    let mut lossy_opts = png::PngOptions::balanced();
+    let mut lossy_opts = png::PngOptions::balanced(width, height);
+    lossy_opts.color_type = ColorType::Rgba;
     lossy_opts.quantization = QuantizationOptions {
         mode: QuantizationMode::Force,
         max_colors: 256,
@@ -1826,19 +1708,12 @@ fn compare_real_image_lossy(
 
     let start = Instant::now();
     let mut lossy_buf = Vec::new();
-    png::encode_into(
-        &mut lossy_buf,
-        pixels,
-        width,
-        height,
-        ColorType::Rgba,
-        &lossy_opts,
-    )
-    .ok()?;
+    png::encode_into(&mut lossy_buf, pixels, &lossy_opts).ok()?;
     let pixo_time = start.elapsed();
 
     // pngquant - first encode lossless for input
-    let lossless = png::encode(pixels, width, height, ColorType::Rgba).ok()?;
+    let lossless_opts = png::PngOptions::balanced(width, height);
+    let lossless = png::encode(pixels, &lossless_opts).ok()?;
     let input_path = tmp_dir.join("real_pq_input.png");
     let output_path = tmp_dir.join("real_pq_output.png");
     fs::write(&input_path, &lossless).ok()?;
@@ -1867,50 +1742,38 @@ fn compare_real_image_lossy(
     Some((lossy_buf.len(), pixo_time, pq_size, pq_time))
 }
 
-fn measure_png_encode(
-    pixels: &[u8],
-    width: u32,
-    height: u32,
-    opts: &png::PngOptions,
-) -> (usize, Duration) {
+fn measure_png_encode(pixels: &[u8], opts: &png::PngOptions) -> (usize, Duration) {
     let mut buf = Vec::new();
 
     // Warm up
     for _ in 0..3 {
-        png::encode_into(&mut buf, pixels, width, height, ColorType::Rgb, opts).unwrap();
+        png::encode_into(&mut buf, pixels, opts).unwrap();
     }
 
     // Measure
     let start = Instant::now();
     let iterations = 10;
     for _ in 0..iterations {
-        png::encode_into(&mut buf, pixels, width, height, ColorType::Rgb, opts).unwrap();
+        png::encode_into(&mut buf, pixels, opts).unwrap();
     }
     let duration = start.elapsed() / iterations;
 
     (buf.len(), duration)
 }
 
-fn measure_jpeg_encode(
-    pixels: &[u8],
-    width: u32,
-    height: u32,
-    opts: &jpeg::JpegOptions,
-) -> (usize, Duration) {
+fn measure_jpeg_encode(pixels: &[u8], opts: &jpeg::JpegOptions) -> (usize, Duration) {
     let mut buf = Vec::new();
 
     // Warm up
     for _ in 0..3 {
-        jpeg::encode_with_options_into(&mut buf, pixels, width, height, ColorType::Rgb, opts)
-            .unwrap();
+        jpeg::encode_into(&mut buf, pixels, opts).unwrap();
     }
 
     // Measure
     let start = Instant::now();
     let iterations = 10;
     for _ in 0..iterations {
-        jpeg::encode_with_options_into(&mut buf, pixels, width, height, ColorType::Rgb, opts)
-            .unwrap();
+        jpeg::encode_into(&mut buf, pixels, opts).unwrap();
     }
     let duration = start.elapsed() / iterations;
 
@@ -2063,15 +1926,9 @@ fn bench_kodak_suite(c: &mut Criterion) {
             pixels,
             |b, pixels| {
                 b.iter(|| {
-                    png::encode_into(
-                        &mut buf,
-                        black_box(pixels),
-                        *w,
-                        *h,
-                        ColorType::Rgb,
-                        &png::PngOptions::balanced(),
-                    )
-                    .unwrap()
+                    let mut opts = png::PngOptions::balanced(*w, *h);
+                    opts.color_type = ColorType::Rgb;
+                    png::encode_into(&mut buf, black_box(pixels), &opts).unwrap()
                 });
             },
         );
@@ -2082,15 +1939,8 @@ fn bench_kodak_suite(c: &mut Criterion) {
             pixels,
             |b, pixels| {
                 b.iter(|| {
-                    jpeg::encode_with_options_into(
-                        &mut buf,
-                        black_box(pixels),
-                        *w,
-                        *h,
-                        ColorType::Rgb,
-                        &jpeg::JpegOptions::balanced(85),
-                    )
-                    .unwrap()
+                    let opts = jpeg::JpegOptions::balanced(*w, *h, 85);
+                    jpeg::encode_into(&mut buf, black_box(pixels), &opts).unwrap()
                 });
             },
         );

@@ -7,6 +7,7 @@
 
 use image::GenericImageView;
 use pixo::compress::crc32::crc32;
+use pixo::png::PngOptions;
 use pixo::{png, ColorType, Error};
 use proptest::prelude::*;
 use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -15,11 +16,37 @@ use support::kodak::read_kodak_decoded_subset;
 use support::pngsuite::read_pngsuite;
 use support::synthetic;
 
+fn encode_png(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    color_type: ColorType,
+) -> pixo::Result<Vec<u8>> {
+    let options = PngOptions::builder(width, height)
+        .color_type(color_type)
+        .build();
+    png::encode(data, &options)
+}
+
+fn encode_png_with_options(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    color_type: ColorType,
+    options: &PngOptions,
+) -> pixo::Result<Vec<u8>> {
+    let mut opts = options.clone();
+    opts.width = width;
+    opts.height = height;
+    opts.color_type = color_type;
+    png::encode(data, &opts)
+}
+
 /// Test that PNG output has correct header.
 #[test]
 fn test_png_signature() {
     let pixels = vec![255, 0, 0]; // 1x1 red pixel
-    let result = png::encode(&pixels, 1, 1, ColorType::Rgb).unwrap();
+    let result = encode_png(&pixels, 1, 1, ColorType::Rgb).unwrap();
 
     // PNG signature
     assert_eq!(
@@ -32,7 +59,7 @@ fn test_png_signature() {
 #[test]
 fn test_ihdr_chunk() {
     let pixels = vec![0u8; 100 * 100 * 3]; // 100x100 RGB
-    let result = png::encode(&pixels, 100, 100, ColorType::Rgb).unwrap();
+    let result = encode_png(&pixels, 100, 100, ColorType::Rgb).unwrap();
 
     // IHDR should be right after signature
     // Length (4 bytes) + "IHDR" (4 bytes) + data (13 bytes) + CRC (4 bytes)
@@ -69,7 +96,7 @@ fn test_ihdr_chunk() {
 #[test]
 fn test_iend_chunk() {
     let pixels = vec![128u8; 10 * 10 * 3];
-    let result = png::encode(&pixels, 10, 10, ColorType::Rgb).unwrap();
+    let result = encode_png(&pixels, 10, 10, ColorType::Rgb).unwrap();
 
     // IEND chunk should be at the end
     // It's 12 bytes: length (4) + type (4) + CRC (4)
@@ -93,22 +120,22 @@ fn test_iend_chunk() {
 fn test_color_types() {
     // Grayscale
     let gray = vec![128u8; 4 * 4];
-    let result = png::encode(&gray, 4, 4, ColorType::Gray).unwrap();
+    let result = encode_png(&gray, 4, 4, ColorType::Gray).unwrap();
     assert_eq!(result[25], 0); // Color type 0
 
     // Grayscale + Alpha
     let gray_alpha = vec![128u8; 4 * 4 * 2];
-    let result = png::encode(&gray_alpha, 4, 4, ColorType::GrayAlpha).unwrap();
+    let result = encode_png(&gray_alpha, 4, 4, ColorType::GrayAlpha).unwrap();
     assert_eq!(result[25], 4); // Color type 4
 
     // RGB
     let rgb = vec![128u8; 4 * 4 * 3];
-    let result = png::encode(&rgb, 4, 4, ColorType::Rgb).unwrap();
+    let result = encode_png(&rgb, 4, 4, ColorType::Rgb).unwrap();
     assert_eq!(result[25], 2); // Color type 2
 
     // RGBA
     let rgba = vec![128u8; 4 * 4 * 4];
-    let result = png::encode(&rgba, 4, 4, ColorType::Rgba).unwrap();
+    let result = encode_png(&rgba, 4, 4, ColorType::Rgba).unwrap();
     assert_eq!(result[25], 6); // Color type 6
 }
 
@@ -118,8 +145,8 @@ fn test_different_images() {
     let black = vec![0u8; 8 * 8 * 3];
     let white = vec![255u8; 8 * 8 * 3];
 
-    let black_png = png::encode(&black, 8, 8, ColorType::Rgb).unwrap();
-    let white_png = png::encode(&white, 8, 8, ColorType::Rgb).unwrap();
+    let black_png = encode_png(&black, 8, 8, ColorType::Rgb).unwrap();
+    let white_png = encode_png(&white, 8, 8, ColorType::Rgb).unwrap();
 
     // Should be different
     assert_ne!(black_png, white_png);
@@ -141,7 +168,7 @@ fn test_png_roundtrip_decode_rgb() {
         255, 0, 255, // magenta
     ];
 
-    let encoded = png::encode(&pixels, width, height, ColorType::Rgb).unwrap();
+    let encoded = encode_png(&pixels, width, height, ColorType::Rgb).unwrap();
 
     let decoded = image::load_from_memory(&encoded).expect("decode").to_rgb8();
     assert_eq!(decoded.width(), width);
@@ -167,7 +194,7 @@ fn test_png_roundtrip_random_small() {
             let mut pixels = vec![0u8; (w * h) as usize * bpp];
             rng.fill(pixels.as_mut_slice());
 
-            let encoded = png::encode(&pixels, w as u32, h as u32, ct).expect("encode random png");
+            let encoded = encode_png(&pixels, w as u32, h as u32, ct).expect("encode random png");
             let decoded = image::load_from_memory(&encoded)
                 .expect("decode")
                 .to_rgba8();
@@ -187,7 +214,7 @@ fn test_png_chunk_crc_and_lengths() {
     let mut pixels = vec![0u8; (w * h * 3) as usize];
     rng.fill(pixels.as_mut_slice());
 
-    let encoded = png::encode(&pixels, w, h, ColorType::Rgb).unwrap();
+    let encoded = encode_png(&pixels, w, h, ColorType::Rgb).unwrap();
 
     // PNG signature already validated elsewhere
     let mut offset = 8;
@@ -252,7 +279,7 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(32))]
     #[test]
     fn prop_png_roundtrip_varied_color((w, h, ct, data) in png_image_strategy()) {
-        let encoded = png::encode(&data, w, h, ct).unwrap();
+        let encoded = encode_png(&data, w, h, ct).unwrap();
         let decoded = image::load_from_memory(&encoded).expect("decode");
 
         match ct {
@@ -305,7 +332,7 @@ fn test_pngsuite_encode_and_decode() {
         let (w, h) = img.dimensions();
 
         // Encode through our pipeline (RGBA)
-        let encoded = png::encode(rgba.as_raw(), w, h, ColorType::Rgba).unwrap();
+        let encoded = encode_png(rgba.as_raw(), w, h, ColorType::Rgba).unwrap();
 
         // Decode the encoded PNG to ensure validity
         let decoded = image::load_from_memory(&encoded).expect("decode reencoded");
@@ -337,19 +364,13 @@ fn test_filter_strategies() {
     ];
 
     for strategy in &strategies {
-        let options = PngOptions {
-            filter_strategy: *strategy,
-            compression_level: 6,
-            optimize_alpha: false,
-            reduce_color_type: false,
-            strip_metadata: false,
-            reduce_palette: false,
-            verbose_filter_log: false,
-            optimal_compression: false,
-            quantization: png::QuantizationOptions::default(),
-        };
+        let options = PngOptions::builder(16, 16)
+            .color_type(ColorType::Rgb)
+            .filter_strategy(*strategy)
+            .compression_level(6)
+            .build();
 
-        let result = png::encode_with_options(&pixels, 16, 16, ColorType::Rgb, &options).unwrap();
+        let result = png::encode(&pixels, &options).unwrap();
 
         // All should produce valid PNG files
         assert_eq!(
@@ -374,7 +395,7 @@ fn test_compression_levels() {
             ..Default::default()
         };
 
-        let result = png::encode_with_options(&pixels, 64, 64, ColorType::Rgb, &options).unwrap();
+        let result = encode_png_with_options(&pixels, 64, 64, ColorType::Rgb, &options).unwrap();
         sizes.push((level, result.len()));
     }
 
@@ -389,12 +410,12 @@ fn test_compression_levels() {
 #[test]
 fn test_invalid_input() {
     // Zero dimensions
-    assert!(png::encode(&[0, 0, 0], 0, 1, ColorType::Rgb).is_err());
-    assert!(png::encode(&[0, 0, 0], 1, 0, ColorType::Rgb).is_err());
+    assert!(encode_png(&[0, 0, 0], 0, 1, ColorType::Rgb).is_err());
+    assert!(encode_png(&[0, 0, 0], 1, 0, ColorType::Rgb).is_err());
 
     // Wrong data length
-    assert!(png::encode(&[0, 0], 1, 1, ColorType::Rgb).is_err()); // Too short
-    assert!(png::encode(&[0, 0, 0, 0], 1, 1, ColorType::Rgb).is_err()); // Too long
+    assert!(encode_png(&[0, 0], 1, 1, ColorType::Rgb).is_err()); // Too short
+    assert!(encode_png(&[0, 0, 0, 0], 1, 1, ColorType::Rgb).is_err()); // Too long
 }
 
 #[test]
@@ -404,14 +425,14 @@ fn test_invalid_compression_level() {
         compression_level: 0,
         ..Default::default()
     };
-    let err = png::encode_with_options(&pixels, 4, 4, ColorType::Rgb, &opts).unwrap_err();
+    let err = encode_png_with_options(&pixels, 4, 4, ColorType::Rgb, &opts).unwrap_err();
     assert!(matches!(err, Error::InvalidCompressionLevel(0)));
 
     let opts = png::PngOptions {
         compression_level: 10,
         ..Default::default()
     };
-    let err = png::encode_with_options(&pixels, 4, 4, ColorType::Rgb, &opts).unwrap_err();
+    let err = encode_png_with_options(&pixels, 4, 4, ColorType::Rgb, &opts).unwrap_err();
     assert!(matches!(err, Error::InvalidCompressionLevel(10)));
 }
 
@@ -420,7 +441,7 @@ fn test_invalid_compression_level() {
 fn test_large_image() {
     // 1000x1000 RGB image
     let pixels = vec![100u8; 1000 * 1000 * 3];
-    let result = png::encode(&pixels, 1000, 1000, ColorType::Rgb).unwrap();
+    let result = encode_png(&pixels, 1000, 1000, ColorType::Rgb).unwrap();
 
     // Should produce valid PNG
     assert_eq!(
@@ -442,8 +463,8 @@ fn test_png_deterministic() {
     let mut pixels = vec![0u8; (w * h * 3) as usize];
     rng.fill(pixels.as_mut_slice());
 
-    let a = png::encode(&pixels, w, h, ColorType::Rgb).unwrap();
-    let b = png::encode(&pixels, w, h, ColorType::Rgb).unwrap();
+    let a = encode_png(&pixels, w, h, ColorType::Rgb).unwrap();
+    let b = encode_png(&pixels, w, h, ColorType::Rgb).unwrap();
     assert_eq!(a, b);
 }
 
@@ -452,7 +473,7 @@ fn test_png_deterministic() {
 fn test_png_rejects_image_too_large() {
     let width = (1 << 24) + 1; // just over MAX_DIMENSION
     let height = 1;
-    let err = png::encode(&[], width, height, ColorType::Rgb).unwrap_err();
+    let err = encode_png(&[], width, height, ColorType::Rgb).unwrap_err();
     assert!(matches!(err, Error::ImageTooLarge { .. }));
 }
 
@@ -472,15 +493,15 @@ fn test_png_rejects_zero_dimensions() {
 
     for ct in &color_types {
         // Zero width
-        let err = png::encode(&[0u8; 100], 0, 10, *ct);
+        let err = encode_png(&[0u8; 100], 0, 10, *ct);
         assert!(err.is_err(), "Should reject zero width for {:?}", ct);
 
         // Zero height
-        let err = png::encode(&[0u8; 100], 10, 0, *ct);
+        let err = encode_png(&[0u8; 100], 10, 0, *ct);
         assert!(err.is_err(), "Should reject zero height for {:?}", ct);
 
         // Both zero
-        let err = png::encode(&[], 0, 0, *ct);
+        let err = encode_png(&[], 0, 0, *ct);
         assert!(err.is_err(), "Should reject zero dimensions for {:?}", ct);
     }
 }
@@ -506,7 +527,7 @@ proptest! {
         rng.fill(pixels.as_mut_slice());
 
         // Should always succeed with valid dimensions
-        let encoded = png::encode(&pixels, width, height, color_type)
+        let encoded = encode_png(&pixels, width, height, color_type)
             .expect("encoding should succeed");
 
         // Should produce valid PNG
@@ -539,7 +560,12 @@ proptest! {
             _ => png::FilterStrategy::AdaptiveFast,
         };
 
-        let options = png::PngOptions::builder()
+        let mut rng = StdRng::seed_from_u64(seed);
+        let mut pixels = vec![0u8; (width * height * 4) as usize];
+        rng.fill(pixels.as_mut_slice());
+
+        let options = PngOptions::builder(width, height)
+            .color_type(ColorType::Rgba)
             .compression_level(compression_level)
             .filter_strategy(filter_strategy)
             .optimize_alpha(optimize_alpha)
@@ -547,12 +573,7 @@ proptest! {
             .strip_metadata(strip_metadata)
             .build();
 
-        let mut rng = StdRng::seed_from_u64(seed);
-        let mut pixels = vec![0u8; (width * height * 4) as usize];
-        rng.fill(pixels.as_mut_slice());
-
-        let encoded = png::encode_with_options(&pixels, width, height, ColorType::Rgba, &options)
-            .expect("encoding should succeed");
+        let encoded = png::encode(&pixels, &options).expect("encoding should succeed");
 
         // Verify PNG signature
         prop_assert_eq!(&encoded[0..8], &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
@@ -588,20 +609,13 @@ fn test_png_compression_regression_rocket() {
     let raw_pixels = img.as_raw();
 
     // Test with level 9 adaptive (our best quality setting)
-    let options = png::PngOptions {
-        compression_level: 9,
-        filter_strategy: png::FilterStrategy::Adaptive,
-        optimize_alpha: false,
-        reduce_color_type: false,
-        strip_metadata: false,
-        reduce_palette: false,
-        verbose_filter_log: false,
-        optimal_compression: false,
-        quantization: png::QuantizationOptions::default(),
-    };
+    let options = PngOptions::builder(width, height)
+        .color_type(ColorType::Rgb)
+        .compression_level(9)
+        .filter_strategy(png::FilterStrategy::Adaptive)
+        .build();
 
-    let encoded = png::encode_with_options(raw_pixels, width, height, ColorType::Rgb, &options)
-        .expect("encode");
+    let encoded = png::encode(raw_pixels, &options).expect("encode");
 
     // Verify the output is valid PNG
     let decoded = image::load_from_memory(&encoded).expect("decode our output");
@@ -617,20 +631,12 @@ fn test_png_compression_regression_rocket() {
     );
 
     // Also verify level 6 produces reasonable results
-    let options_l6 = png::PngOptions {
-        compression_level: 6,
-        filter_strategy: png::FilterStrategy::Adaptive,
-        optimize_alpha: false,
-        reduce_color_type: false,
-        strip_metadata: false,
-        reduce_palette: false,
-        verbose_filter_log: false,
-        optimal_compression: false,
-        quantization: png::QuantizationOptions::default(),
-    };
-    let encoded_l6 =
-        png::encode_with_options(raw_pixels, width, height, ColorType::Rgb, &options_l6)
-            .expect("encode l6");
+    let options_l6 = PngOptions::builder(width, height)
+        .color_type(ColorType::Rgb)
+        .compression_level(6)
+        .filter_strategy(png::FilterStrategy::Adaptive)
+        .build();
+    let encoded_l6 = png::encode(raw_pixels, &options_l6).expect("encode l6");
 
     let size_ratio_l6 = encoded_l6.len() as f64 / original_size as f64;
     assert!(
@@ -675,21 +681,13 @@ fn test_png_compression_regression_rocket_rgba() {
     eprintln!("RGBA raw size: {} bytes", rgba_pixels.len());
 
     // Test with level 6 adaptive (what web app uses by default)
-    let options = png::PngOptions {
-        compression_level: 6,
-        filter_strategy: png::FilterStrategy::Adaptive,
-        optimize_alpha: false,
-        reduce_color_type: false,
-        reduce_palette: false,
-        strip_metadata: false,
-        verbose_filter_log: false,
-        optimal_compression: false,
-        quantization: png::QuantizationOptions::default(),
-    };
+    let options = PngOptions::builder(width, height)
+        .color_type(ColorType::Rgba)
+        .compression_level(6)
+        .filter_strategy(png::FilterStrategy::Adaptive)
+        .build();
 
-    let encoded_rgba =
-        png::encode_with_options(rgba_pixels, width, height, ColorType::Rgba, &options)
-            .expect("encode rgba");
+    let encoded_rgba = png::encode(rgba_pixels, &options).expect("encode rgba");
 
     let rgba_ratio = encoded_rgba.len() as f64 / original_size as f64;
     eprintln!(
@@ -716,7 +714,7 @@ fn test_png_synthetic_patterns() {
     let test_suite = synthetic::generate_minimal_test_suite();
 
     for (name, w, h, pixels) in test_suite {
-        let encoded = png::encode(&pixels, w, h, ColorType::Rgb)
+        let encoded = encode_png(&pixels, w, h, ColorType::Rgb)
             .unwrap_or_else(|e| panic!("Failed to encode {name}: {e}"));
 
         // Verify valid PNG
@@ -744,7 +742,7 @@ fn test_png_edge_case_dimensions() {
         }
 
         let pixels = synthetic::gradient_rgb(w, h);
-        let encoded = png::encode(&pixels, w, h, ColorType::Rgb)
+        let encoded = encode_png(&pixels, w, h, ColorType::Rgb)
             .unwrap_or_else(|e| panic!("Failed to encode {name} ({w}x{h}): {e}"));
 
         let decoded = image::load_from_memory(&encoded)
@@ -765,8 +763,10 @@ fn test_png_kodak_subset() {
 
     for (name, w, h, pixels) in images {
         // Encode with balanced settings
-        let options = png::PngOptions::balanced();
-        let encoded = png::encode_with_options(&pixels, w, h, ColorType::Rgb, &options)
+        let options = PngOptions::balanced(w, h);
+        let mut opts = options;
+        opts.color_type = ColorType::Rgb;
+        let encoded = png::encode(&pixels, &opts)
             .unwrap_or_else(|e| panic!("Failed to encode Kodak {name}: {e}"));
 
         // Verify decode roundtrip

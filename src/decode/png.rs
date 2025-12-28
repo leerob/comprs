@@ -752,8 +752,10 @@ mod tests {
     fn test_decode_roundtrip() {
         // Create a simple 2x2 RGB image and encode it
         let pixels = vec![255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0];
-        let encoded =
-            crate::png::encode(&pixels, 2, 2, ColorType::Rgb).expect("encoding should work");
+        let opts = crate::png::PngOptions::builder(2, 2)
+            .color_type(ColorType::Rgb)
+            .build();
+        let encoded = crate::png::encode(&pixels, &opts).expect("encoding should work");
 
         // Decode it
         let decoded = decode_png(&encoded).expect("decoding should work");
@@ -772,8 +774,10 @@ mod tests {
             0, 0, 255, 0, // Blue, transparent
             255, 255, 0, 255, // Yellow, opaque
         ];
-        let encoded =
-            crate::png::encode(&pixels, 2, 2, ColorType::Rgba).expect("encoding should work");
+        let opts = crate::png::PngOptions::builder(2, 2)
+            .color_type(ColorType::Rgba)
+            .build();
+        let encoded = crate::png::encode(&pixels, &opts).expect("encoding should work");
         let decoded = decode_png(&encoded).expect("decoding should work");
 
         assert_eq!(decoded.width, 2);
@@ -785,8 +789,10 @@ mod tests {
     #[test]
     fn test_decode_grayscale_roundtrip() {
         let pixels = vec![0, 64, 128, 255];
-        let encoded =
-            crate::png::encode(&pixels, 2, 2, ColorType::Gray).expect("encoding should work");
+        let opts = crate::png::PngOptions::builder(2, 2)
+            .color_type(ColorType::Gray)
+            .build();
+        let encoded = crate::png::encode(&pixels, &opts).expect("encoding should work");
         let decoded = decode_png(&encoded).expect("decoding should work");
 
         assert_eq!(decoded.width, 2);
@@ -798,8 +804,10 @@ mod tests {
     #[test]
     fn test_decode_gray_alpha_roundtrip() {
         let pixels = vec![0, 255, 128, 128, 255, 0, 64, 192]; // 2x2 gray+alpha
-        let encoded =
-            crate::png::encode(&pixels, 2, 2, ColorType::GrayAlpha).expect("encoding should work");
+        let opts = crate::png::PngOptions::builder(2, 2)
+            .color_type(ColorType::GrayAlpha)
+            .build();
+        let encoded = crate::png::encode(&pixels, &opts).expect("encoding should work");
         let decoded = decode_png(&encoded).expect("decoding should work");
 
         assert_eq!(decoded.width, 2);
@@ -812,8 +820,10 @@ mod tests {
     fn test_decode_larger_image() {
         // 8x8 RGB image
         let pixels: Vec<u8> = (0..8 * 8 * 3).map(|i| (i % 256) as u8).collect();
-        let encoded =
-            crate::png::encode(&pixels, 8, 8, ColorType::Rgb).expect("encoding should work");
+        let opts = crate::png::PngOptions::builder(8, 8)
+            .color_type(ColorType::Rgb)
+            .build();
+        let encoded = crate::png::encode(&pixels, &opts).expect("encoding should work");
         let decoded = decode_png(&encoded).expect("decoding should work");
 
         assert_eq!(decoded.width, 8);
@@ -886,8 +896,10 @@ mod tests {
     fn test_decode_missing_iend() {
         // Create valid PNG but truncate before IEND
         let pixels = vec![255u8, 0, 0];
-        let encoded =
-            crate::png::encode(&pixels, 1, 1, ColorType::Rgb).expect("encoding should work");
+        let opts = crate::png::PngOptions::builder(1, 1)
+            .color_type(ColorType::Rgb)
+            .build();
+        let encoded = crate::png::encode(&pixels, &opts).expect("encoding should work");
 
         // Find and remove IEND chunk (last 12 bytes: 4 length + 4 type + 0 data + 4 CRC)
         let truncated = &encoded[..encoded.len() - 12];

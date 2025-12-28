@@ -28,7 +28,7 @@ This script handles rustup/Homebrew detection, wasm-bindgen, and wasm-opt automa
 
 ### Feature Flags
 
-`simd` (default), `parallel` (default), `cli`, `wasm`, `timing`
+`simd` (default), `parallel` (default), `cli`, `wasm`
 
 ### Presets
 

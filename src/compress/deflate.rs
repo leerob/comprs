@@ -8,8 +8,6 @@ use crate::compress::lz77::{
 };
 use crate::compress::{adler32::adler32, huffman};
 use std::sync::{LazyLock, Mutex};
-use std::time::Duration;
-use std::time::Instant;
 
 /// Length code base values (codes 257-285).
 const LENGTH_BASE: [u16; 29] = [
@@ -33,46 +31,6 @@ const DISTANCE_EXTRA: [u8; 30] = [
     0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13,
     13,
 ];
-
-/// Timing and accounting information for a single DEFLATE encode.
-#[derive(Debug, Clone)]
-#[must_use]
-pub struct DeflateStats {
-    /// Time spent in LZ77 match finding/tokenization.
-    pub lz77_time: Duration,
-    /// Time spent encoding with fixed Huffman codes.
-    pub fixed_huffman_time: Duration,
-    /// Time spent encoding with dynamic Huffman codes.
-    pub dynamic_huffman_time: Duration,
-    /// Time spent choosing the smaller of fixed vs dynamic outputs.
-    pub choose_time: Duration,
-    /// Number of tokens produced by the LZ77 stage.
-    pub token_count: usize,
-    /// Number of literal tokens.
-    pub literal_count: usize,
-    /// Number of match tokens.
-    pub match_count: usize,
-    /// Whether the final stream used dynamic Huffman codes.
-    pub used_dynamic: bool,
-    /// Whether the zlib wrapper selected stored (uncompressed) blocks.
-    pub used_stored_block: bool,
-}
-
-impl Default for DeflateStats {
-    fn default() -> Self {
-        Self {
-            lz77_time: Duration::ZERO,
-            fixed_huffman_time: Duration::ZERO,
-            dynamic_huffman_time: Duration::ZERO,
-            choose_time: Duration::ZERO,
-            token_count: 0,
-            literal_count: 0,
-            match_count: 0,
-            used_dynamic: false,
-            used_stored_block: false,
-        }
-    }
-}
 
 /// Lookup table for length codes: maps length (3-258) to (symbol, extra_bits).
 /// Index is (length - 3), value is (symbol - 257, extra_bits).
@@ -110,6 +68,8 @@ const SMALL_INPUT_BYTES: usize = 1 << 10; // 1 KiB
 const HIGH_ENTROPY_BAIL_BYTES: usize = 4 * 1024;
 /// When input has only literals (no matches) and meets this size, prefer stored blocks immediately.
 const STORED_LITERAL_ONLY_BYTES: usize = 8 * 1024;
+/// Minimum cost improvement (in bits) required to justify block splitting.
+const BLOCK_SPLIT_MIN_IMPROVEMENT_BITS: f64 = 10.0;
 
 /// Global pool of reusable deflaters keyed by compression level.
 /// Mutex-protected to allow reuse across threads while avoiding RefCell/thread-local costs.
@@ -619,8 +579,7 @@ fn find_best_split(tokens: &[Token], start: usize, end: usize) -> Option<(usize,
 
     // Only return if splitting actually helps
     if let Some(split) = best_split {
-        if best_cost < orig_cost - 10.0 {
-            // Require at least 10 bits improvement
+        if best_cost < orig_cost - BLOCK_SPLIT_MIN_IMPROVEMENT_BITS {
             return Some((split, best_cost));
         }
     }
@@ -905,86 +864,6 @@ pub fn deflate_optimal_split_zlib(data: &[u8], iterations: usize, max_blocks: us
     output
 }
 
-/// Compress data using DEFLATE algorithm with packed tokens, returning stats.
-#[cfg(feature = "timing")]
-pub fn deflate_packed_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats) {
-    if data.is_empty() {
-        return (
-            empty_deflate_fixed_block(),
-            DeflateStats {
-                used_dynamic: false,
-                ..Default::default()
-            },
-        );
-    }
-
-    let t0 = Instant::now();
-    let mut lz77 = Lz77Compressor::new(level);
-    let tokens = lz77.compress_packed(data);
-    let lz77_time = t0.elapsed();
-
-    let (literal_count, match_count) = token_counts_packed(&tokens);
-
-    // Literal-only fast path to skip Huffman work for incompressible data.
-    if match_count == 0 && data.len() >= STORED_LITERAL_ONLY_BYTES {
-        let stored = deflate_stored(data);
-        let stats = DeflateStats {
-            lz77_time,
-            fixed_huffman_time: Duration::ZERO,
-            dynamic_huffman_time: Duration::ZERO,
-            choose_time: Duration::ZERO,
-            token_count: tokens.len(),
-            literal_count,
-            match_count,
-            used_dynamic: false,
-            used_stored_block: true,
-        };
-        return (stored, stats);
-    }
-
-    let est_bytes = estimated_deflate_size(data.len(), level);
-
-    let t1 = Instant::now();
-    let fixed = encode_fixed_huffman_packed_with_capacity(&tokens, est_bytes);
-    let fixed_time = t1.elapsed();
-
-    let t2 = Instant::now();
-    let dynamic = encode_dynamic_huffman_packed_with_capacity(&tokens, est_bytes);
-    let dynamic_time = t2.elapsed();
-
-    let choose_start = Instant::now();
-    let use_dynamic = dynamic.len() < fixed.len();
-    let encoded = if use_dynamic { dynamic } else { fixed };
-    let choose_time = choose_start.elapsed();
-
-    let stats = DeflateStats {
-        lz77_time,
-        fixed_huffman_time: fixed_time,
-        dynamic_huffman_time: dynamic_time,
-        choose_time,
-        token_count: tokens.len(),
-        literal_count,
-        match_count,
-        used_dynamic: use_dynamic,
-        used_stored_block: false,
-    };
-
-    (encoded, stats)
-}
-
-fn token_counts_packed(tokens: &[PackedToken]) -> (usize, usize) {
-    let mut literal_count = 0;
-    let mut match_count = 0;
-    for t in tokens {
-        if t.is_literal() {
-            literal_count += 1;
-        } else {
-            match_count += 1;
-        }
-    }
-    (literal_count, match_count)
-}
-
 /// Reusable DEFLATE encoder that minimizes allocations by reusing buffers.
 pub struct Deflater {
     level: u8,
@@ -1158,71 +1037,17 @@ impl Deflater {
     }
 }
 
-/// Compress data using DEFLATE and return encoded bytes plus timing/accounting stats.
-///
-/// This leaves the main `deflate` fast path unchanged; callers opt-in to the
-/// additional instrumentation by using this entrypoint.
-pub fn deflate_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats) {
-    if data.is_empty() {
-        return (
-            empty_deflate_fixed_block(),
-            DeflateStats {
-                used_dynamic: false,
-                ..Default::default()
-            },
-        );
-    }
-
-    // LZ77 tokenization
-    let t0 = Instant::now();
-    let mut lz77 = Lz77Compressor::new(level);
-    let tokens = lz77.compress(data);
-    let lz77_time = t0.elapsed();
-
-    let (literal_count, match_count) = token_counts(&tokens);
-
-    // Fixed Huffman encode
-    let t1 = Instant::now();
-    let est_bytes = estimated_deflate_size(data.len(), level);
-
-    let (encoded, fixed_time, dynamic_time, choose_time, use_dynamic) =
-        if tokens.len() >= DYNAMIC_ONLY_TOKEN_THRESHOLD {
-            // Skip fixed encode for large inputs to avoid double work.
-            let t_dyn_start = Instant::now();
-            let dynamic = encode_dynamic_huffman_with_capacity(&tokens, est_bytes);
-            let dynamic_time = t_dyn_start.elapsed();
-            (dynamic, Duration::ZERO, dynamic_time, Duration::ZERO, true)
+fn token_counts_packed(tokens: &[PackedToken]) -> (usize, usize) {
+    let mut literal_count = 0;
+    let mut match_count = 0;
+    for t in tokens {
+        if t.is_literal() {
+            literal_count += 1;
         } else {
-            let fixed = encode_fixed_huffman_with_capacity(&tokens, est_bytes);
-            let fixed_time = t1.elapsed();
-
-            // Dynamic Huffman encode
-            let t2 = Instant::now();
-            let dynamic = encode_dynamic_huffman_with_capacity(&tokens, est_bytes);
-            let dynamic_time = t2.elapsed();
-
-            // Choose smaller stream
-            let choose_start = Instant::now();
-            let use_dynamic = dynamic.len() < fixed.len();
-            let encoded = if use_dynamic { dynamic } else { fixed };
-            let choose_time = choose_start.elapsed();
-
-            (encoded, fixed_time, dynamic_time, choose_time, use_dynamic)
-        };
-
-    let stats = DeflateStats {
-        lz77_time,
-        fixed_huffman_time: fixed_time,
-        dynamic_huffman_time: dynamic_time,
-        choose_time,
-        token_count: tokens.len(),
-        literal_count,
-        match_count,
-        used_dynamic: use_dynamic,
-        used_stored_block: false,
-    };
-
-    (encoded, stats)
+            match_count += 1;
+        }
+    }
+    (literal_count, match_count)
 }
 
 /// Compress data and wrap it in a zlib container (RFC 1950).
@@ -1252,95 +1077,6 @@ fn deflate_zlib_stored(data: &[u8], level: u8) -> Vec<u8> {
     output.extend_from_slice(&stored_blocks);
     output.extend_from_slice(&adler32(data).to_be_bytes());
     output
-}
-
-pub fn deflate_zlib_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats) {
-    // Empty input mirrors `deflate_zlib`
-    if data.is_empty() {
-        return (
-            empty_zlib(level),
-            DeflateStats {
-                used_stored_block: false,
-                ..Default::default()
-            },
-        );
-    }
-
-    // High-entropy fast path: skip LZ77/Huffman and emit stored blocks directly.
-    if data.len() >= HIGH_ENTROPY_BAIL_BYTES && is_high_entropy_data(data) {
-        let mut output = Vec::with_capacity(data.len() + 16);
-        output.extend_from_slice(&zlib_header(level));
-        let stored_blocks = deflate_stored(data);
-        output.extend_from_slice(&stored_blocks);
-        output.extend_from_slice(&adler32(data).to_be_bytes());
-        let stats = DeflateStats {
-            used_stored_block: true,
-            ..Default::default()
-        };
-        return (output, stats);
-    }
-
-    let (deflated, mut stats) = deflate_with_stats(data, level);
-
-    let use_stored = should_use_stored(data.len(), deflated.len());
-    let mut output = Vec::with_capacity(deflated.len().min(data.len()) + 32);
-    output.extend_from_slice(&zlib_header(level));
-
-    if use_stored {
-        let stored_blocks = deflate_stored(data);
-        output.extend_from_slice(&stored_blocks);
-    } else {
-        output.extend_from_slice(&deflated);
-    }
-
-    output.extend_from_slice(&adler32(data).to_be_bytes());
-
-    stats.used_stored_block = use_stored;
-    (output, stats)
-}
-
-#[cfg(feature = "timing")]
-pub fn deflate_zlib_packed_with_stats(data: &[u8], level: u8) -> (Vec<u8>, DeflateStats) {
-    if data.is_empty() {
-        return (
-            empty_zlib(level),
-            DeflateStats {
-                used_stored_block: false,
-                ..Default::default()
-            },
-        );
-    }
-
-    if data.len() >= HIGH_ENTROPY_BAIL_BYTES && is_high_entropy_data(data) {
-        let mut output = Vec::with_capacity(data.len() + 16);
-        output.extend_from_slice(&zlib_header(level));
-        let stored_blocks = deflate_stored(data);
-        output.extend_from_slice(&stored_blocks);
-        output.extend_from_slice(&adler32(data).to_be_bytes());
-        let stats = DeflateStats {
-            used_stored_block: true,
-            ..Default::default()
-        };
-        return (output, stats);
-    }
-
-    let (deflated, mut stats) = deflate_packed_with_stats(data, level);
-
-    let use_stored = should_use_stored(data.len(), deflated.len());
-    let mut output = Vec::with_capacity(deflated.len().min(data.len()) + 32);
-    output.extend_from_slice(&zlib_header(level));
-
-    if use_stored {
-        let stored_blocks = deflate_stored(data);
-        output.extend_from_slice(&stored_blocks);
-    } else {
-        output.extend_from_slice(&deflated);
-    }
-
-    output.extend_from_slice(&adler32(data).to_be_bytes());
-
-    stats.used_stored_block = use_stored;
-    (output, stats)
 }
 
 fn should_use_stored(data_len: usize, deflated_len: usize) -> bool {
@@ -1728,18 +1464,6 @@ fn last_nonzero(lengths: &[u8]) -> usize {
         .rposition(|&l| l != 0)
         .map(|i| i + 1)
         .unwrap_or(1) // minimum 1 code
-}
-
-fn token_counts(tokens: &[Token]) -> (usize, usize) {
-    let mut literal_count = 0;
-    let mut match_count = 0;
-    for token in tokens {
-        match token {
-            Token::Literal(_) => literal_count += 1,
-            Token::Match { .. } => match_count += 1,
-        }
-    }
-    (literal_count, match_count)
 }
 
 /// Heuristic estimate for compressed size in bytes to pre-allocate writers.

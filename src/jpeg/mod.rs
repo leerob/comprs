@@ -25,7 +25,7 @@ use crate::error::{Error, Result};
 use dct::dct_2d;
 use huffman::{encode_block, HuffmanTables};
 use progressive::{
-    encode_ac_first, encode_dc_refine, get_dc_code, simple_progressive_script, ScanSpec,
+    encode_ac_first, encode_dc_refine, get_dc_code, simple_progressive_script, ScanParams, ScanSpec,
 };
 use quantize::{quantize_block, zigzag_reorder, QuantizationTables};
 
@@ -42,34 +42,52 @@ const SOF2: u16 = 0xFFC2; // Start of Frame (progressive DCT)
 const DHT: u16 = 0xFFC4; // Define Huffman Table
 const SOS: u16 = 0xFFDA; // Start of Scan
 
+/// Internal context for JPEG encoding operations.
+struct EncodeContext<'a> {
+    data: &'a [u8],
+    width: usize,
+    height: usize,
+    color_type: ColorType,
+    subsampling: Subsampling,
+    quant_tables: &'a QuantizationTables,
+    huff_tables: &'a HuffmanTables,
+    use_trellis: bool,
+}
+
+/// A vector of quantized 8x8 DCT coefficient blocks.
+type DctCoefficients = Vec<[i16; 64]>;
+
+/// YCbCr coefficient triplet (Y, Cb, Cr channels).
+type YCbCrCoefficients = (DctCoefficients, DctCoefficients, DctCoefficients);
+
 /// Encode raw pixel data as JPEG.
 ///
 /// # Arguments
-/// * `data` - Raw pixel data (RGB, row-major order)
-/// * `width` - Image width in pixels
-/// * `height` - Image height in pixels
-/// * `quality` - Quality level 1-100 (higher = better quality, larger file)
+///
+/// * `data` - Raw pixel data (row-major order)
+/// * `options` - JPEG encoding options (includes width, height, color type, quality)
 ///
 /// # Returns
+///
 /// Complete JPEG file as bytes.
-pub fn encode(data: &[u8], width: u32, height: u32, quality: u8) -> Result<Vec<u8>> {
-    let options = JpegOptions::fast(quality);
+///
+/// # Example
+///
+/// ```rust
+/// use pixo::jpeg::{encode, JpegOptions};
+/// use pixo::ColorType;
+///
+/// let pixels = vec![255, 0, 0]; // 1x1 RGB red pixel
+/// let options = JpegOptions::builder(1, 1)
+///     .color_type(ColorType::Rgb)
+///     .quality(85)
+///     .build();
+/// let jpeg_bytes = encode(&pixels, &options).unwrap();
+/// ```
+#[must_use = "encoding produces a JPEG file that should be used"]
+pub fn encode(data: &[u8], options: &JpegOptions) -> Result<Vec<u8>> {
     let mut output = Vec::new();
-    encode_with_options_into(&mut output, data, width, height, ColorType::Rgb, &options)?;
-    Ok(output)
-}
-
-/// Encode raw pixel data as JPEG with specified color type.
-pub fn encode_with_color(
-    data: &[u8],
-    width: u32,
-    height: u32,
-    quality: u8,
-    color_type: ColorType,
-) -> Result<Vec<u8>> {
-    let options = JpegOptions::fast(quality);
-    let mut output = Vec::new();
-    encode_with_options_into(&mut output, data, width, height, color_type, &options)?;
+    encode_into(&mut output, data, options)?;
     Ok(output)
 }
 
@@ -83,8 +101,30 @@ pub enum Subsampling {
 }
 
 /// JPEG encoding options.
+///
+/// Use [`JpegOptions::builder(1, 1)`] to create options with a fluent API.
+///
+/// # Example
+///
+/// ```rust
+/// use pixo::jpeg::{encode, JpegOptions};
+/// use pixo::ColorType;
+///
+/// let pixels = vec![255, 0, 0]; // 1x1 RGB red pixel
+/// let options = JpegOptions::builder(1, 1)
+///     .color_type(ColorType::Rgb)
+///     .quality(85)
+///     .build();
+/// let jpeg_bytes = encode(&pixels, &options).unwrap();
+/// ```
 #[derive(Debug, Clone, Copy)]
 pub struct JpegOptions {
+    /// Image width in pixels.
+    pub width: u32,
+    /// Image height in pixels.
+    pub height: u32,
+    /// Color type of the pixel data (Rgb or Gray).
+    pub color_type: ColorType,
     /// Quality level 1-100.
     pub quality: u8,
     /// Subsampling scheme.
@@ -102,6 +142,10 @@ pub struct JpegOptions {
 impl Default for JpegOptions {
     fn default() -> Self {
         Self {
+            // Default dimensions (must be set via builder)
+            width: 0,
+            height: 0,
+            color_type: ColorType::Rgb,
             quality: 75,
             subsampling: Subsampling::S444,
             restart_interval: None,
@@ -114,8 +158,12 @@ impl Default for JpegOptions {
 
 impl JpegOptions {
     /// Preset 0: Fast - standard Huffman, 4:4:4, baseline (fastest encoding).
-    pub fn fast(quality: u8) -> Self {
+    /// Defaults to RGB color type.
+    pub fn fast(width: u32, height: u32, quality: u8) -> Self {
         Self {
+            width,
+            height,
+            color_type: ColorType::Rgb,
             quality,
             subsampling: Subsampling::S444,
             restart_interval: None,
@@ -126,8 +174,12 @@ impl JpegOptions {
     }
 
     /// Preset 1: Balanced - optimized Huffman, 4:4:4, baseline (good balance).
-    pub fn balanced(quality: u8) -> Self {
+    /// Defaults to RGB color type.
+    pub fn balanced(width: u32, height: u32, quality: u8) -> Self {
         Self {
+            width,
+            height,
+            color_type: ColorType::Rgb,
             quality,
             subsampling: Subsampling::S444,
             restart_interval: None,
@@ -139,8 +191,12 @@ impl JpegOptions {
 
     /// Preset 2: Max - all optimizations enabled (maximum compression).
     /// Uses 4:2:0 subsampling, optimized Huffman, progressive encoding, and trellis quantization.
-    pub fn max(quality: u8) -> Self {
+    /// Defaults to RGB color type.
+    pub fn max(width: u32, height: u32, quality: u8) -> Self {
         Self {
+            width,
+            height,
+            color_type: ColorType::Rgb,
             quality,
             subsampling: Subsampling::S420,
             restart_interval: None,
@@ -151,27 +207,49 @@ impl JpegOptions {
     }
 
     /// Create from preset (0=fast, 1=balanced, 2=max).
-    pub fn from_preset(quality: u8, preset: u8) -> Self {
+    pub fn from_preset(width: u32, height: u32, quality: u8, preset: u8) -> Self {
         match preset {
-            0 => Self::fast(quality),
-            2 => Self::max(quality),
-            _ => Self::balanced(quality),
+            0 => Self::fast(width, height, quality),
+            2 => Self::max(width, height, quality),
+            _ => Self::balanced(width, height, quality),
         }
     }
 
     /// Create a builder for [`JpegOptions`].
-    pub fn builder() -> JpegOptionsBuilder {
-        JpegOptionsBuilder::default()
+    ///
+    /// The source dimensions are required; color type defaults to RGB, quality to 75.
+    pub fn builder(width: u32, height: u32) -> JpegOptionsBuilder {
+        JpegOptionsBuilder::new(width, height)
     }
 }
 
-/// Builder for [`JpegOptions`] to reduce boolean argument noise.
-#[derive(Debug, Clone, Default)]
+/// Builder for [`JpegOptions`].
+///
+/// Create with [`JpegOptions::builder(width, height)`] and configure options fluently.
+#[derive(Debug, Clone)]
 pub struct JpegOptionsBuilder {
     options: JpegOptions,
 }
 
 impl JpegOptionsBuilder {
+    /// Create a new builder with image dimensions.
+    pub fn new(width: u32, height: u32) -> Self {
+        Self {
+            options: JpegOptions {
+                width,
+                height,
+                color_type: ColorType::Rgb,
+                ..Default::default()
+            },
+        }
+    }
+
+    /// Set the color type of the pixel data.
+    pub fn color_type(mut self, color_type: ColorType) -> Self {
+        self.options.color_type = color_type;
+        self
+    }
+
     pub fn quality(mut self, quality: u8) -> Self {
         self.options.quality = quality;
         self
@@ -203,61 +281,54 @@ impl JpegOptionsBuilder {
         self
     }
 
-    /// Applies preset while retaining the builder.
+    /// Apply a preset while retaining dimensions, color type, and quality.
     pub fn preset(mut self, preset: u8) -> Self {
-        self.options = JpegOptions::from_preset(self.options.quality, preset);
+        let width = self.options.width;
+        let height = self.options.height;
+        let color_type = self.options.color_type;
+        let quality = self.options.quality;
+        self.options = JpegOptions::from_preset(width, height, quality, preset);
+        self.options.color_type = color_type;
         self
     }
 
+    /// Build the [`JpegOptions`].
     #[must_use]
     pub fn build(self) -> JpegOptions {
         self.options
     }
 }
 
-/// Encode raw pixel data as JPEG with options.
-///
-/// # Arguments
-/// * `data` - Raw pixel data (RGB or Gray, row-major order)
-/// * `width` - Image width in pixels
-/// * `height` - Image height in pixels
-/// * `color_type` - Color type (Rgb or Gray)
-/// * `options` - JPEG encoding options (includes quality)
-///
-/// # Returns
-/// Complete JPEG file as bytes.
-pub fn encode_with_options(
-    data: &[u8],
-    width: u32,
-    height: u32,
-    color_type: ColorType,
-    options: &JpegOptions,
-) -> Result<Vec<u8>> {
-    let mut output = Vec::new();
-    encode_with_options_into(&mut output, data, width, height, color_type, options)?;
-    Ok(output)
-}
-
-/// Encode raw pixel data as JPEG with options into a caller-provided buffer.
+/// Encode raw pixel data as JPEG into a caller-provided buffer.
 ///
 /// The `output` buffer will be cleared and reused, allowing callers to avoid
 /// repeated allocations across multiple encodes.
 ///
 /// # Arguments
+///
 /// * `output` - Buffer to write JPEG data into (will be cleared)
-/// * `data` - Raw pixel data (RGB or Gray, row-major order)
-/// * `width` - Image width in pixels
-/// * `height` - Image height in pixels
-/// * `color_type` - Color type (Rgb or Gray)
-/// * `options` - JPEG encoding options (includes quality)
-pub fn encode_with_options_into(
-    output: &mut Vec<u8>,
-    data: &[u8],
-    width: u32,
-    height: u32,
-    color_type: ColorType,
-    options: &JpegOptions,
-) -> Result<()> {
+/// * `data` - Raw pixel data (row-major order)
+/// * `options` - JPEG encoding options (includes width, height, color type, quality)
+///
+/// # Example
+///
+/// ```rust
+/// use pixo::jpeg::{encode_into, JpegOptions};
+/// use pixo::ColorType;
+///
+/// let pixels = vec![255, 0, 0]; // 1x1 RGB red pixel
+/// let options = JpegOptions::builder(1, 1)
+///     .color_type(ColorType::Rgb)
+///     .quality(85)
+///     .build();
+/// let mut output = Vec::new();
+/// encode_into(&mut output, &pixels, &options).unwrap();
+/// ```
+#[must_use = "this `Result` may indicate an encoding error"]
+pub fn encode_into(output: &mut Vec<u8>, data: &[u8], options: &JpegOptions) -> Result<()> {
+    let width = options.width;
+    let height = options.height;
+    let color_type = options.color_type;
     // Validate quality
     if options.quality == 0 || options.quality > 100 {
         return Err(Error::InvalidQuality(options.quality));
@@ -335,17 +406,17 @@ pub fn encode_with_options_into(
         }
 
         // Encode with progressive scans
-        encode_progressive(
-            output,
+        let ctx = EncodeContext {
             data,
-            width,
-            height,
+            width: width as usize,
+            height: height as usize,
             color_type,
-            options.subsampling,
-            &quant_tables,
-            &huff_tables,
-            options.trellis_quant,
-        );
+            subsampling: options.subsampling,
+            quant_tables: &quant_tables,
+            huff_tables: &huff_tables,
+            use_trellis: options.trellis_quant,
+        };
+        encode_progressive(output, &ctx);
     } else {
         // Baseline JPEG encoding
         write_sof0(output, width, height, color_type, options.subsampling);
@@ -356,17 +427,17 @@ pub fn encode_with_options_into(
 
         // Write scan data
         write_sos(output, color_type);
-        encode_scan(
-            output,
+        let ctx = EncodeContext {
             data,
-            width,
-            height,
+            width: width as usize,
+            height: height as usize,
             color_type,
-            options.restart_interval,
-            options.subsampling,
-            &quant_tables,
-            &huff_tables,
-        );
+            subsampling: options.subsampling,
+            quant_tables: &quant_tables,
+            huff_tables: &huff_tables,
+            use_trellis: options.trellis_quant,
+        };
+        encode_scan(output, &ctx, options.restart_interval);
     }
 
     // Write end marker
@@ -798,30 +869,16 @@ fn category_i16(value: i16) -> u8 {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn encode_progressive(
-    output: &mut Vec<u8>,
-    data: &[u8],
-    width: u32,
-    height: u32,
-    color_type: ColorType,
-    subsampling: Subsampling,
-    quant_tables: &QuantizationTables,
-    huff_tables: &HuffmanTables,
-    use_trellis: bool,
-) {
-    let width = width as usize;
-    let height = height as usize;
-
+fn encode_progressive(output: &mut Vec<u8>, ctx: &EncodeContext) {
     // Step 1: Compute all DCT coefficients and store them
     let (y_coeffs, cb_coeffs, cr_coeffs) = compute_all_coefficients(
-        data,
-        width,
-        height,
-        color_type,
-        subsampling,
-        quant_tables,
-        use_trellis,
+        ctx.data,
+        ctx.width,
+        ctx.height,
+        ctx.color_type,
+        ctx.subsampling,
+        ctx.quant_tables,
+        ctx.use_trellis,
     );
 
     // Step 2: Get progressive scan script
@@ -829,7 +886,7 @@ fn encode_progressive(
 
     // Step 3: Encode each scan
     for scan in &script {
-        write_sos_progressive(output, scan, color_type);
+        write_sos_progressive(output, scan, ctx.color_type);
 
         let mut writer = BitWriterMsb::new();
 
@@ -840,8 +897,8 @@ fn encode_progressive(
                 &y_coeffs,
                 &cb_coeffs,
                 &cr_coeffs,
-                subsampling,
-                huff_tables,
+                ctx.subsampling,
+                ctx.huff_tables,
             );
         } else if scan.is_first_scan() {
             encode_ac_first_scan(
@@ -850,8 +907,8 @@ fn encode_progressive(
                 &y_coeffs,
                 &cb_coeffs,
                 &cr_coeffs,
-                subsampling,
-                huff_tables,
+                ctx.subsampling,
+                ctx.huff_tables,
             );
         } else {
             encode_ac_refine_scan(
@@ -860,8 +917,8 @@ fn encode_progressive(
                 &y_coeffs,
                 &cb_coeffs,
                 &cr_coeffs,
-                subsampling,
-                huff_tables,
+                ctx.subsampling,
+                ctx.huff_tables,
             );
         }
 
@@ -880,7 +937,7 @@ fn compute_all_coefficients(
     subsampling: Subsampling,
     quant_tables: &QuantizationTables,
     use_trellis: bool,
-) -> (Vec<[i16; 64]>, Vec<[i16; 64]>, Vec<[i16; 64]>) {
+) -> YCbCrCoefficients {
     #[cfg(feature = "parallel")]
     {
         compute_all_coefficients_parallel(
@@ -996,7 +1053,7 @@ fn compute_all_coefficients_sequential(
     subsampling: Subsampling,
     quant_tables: &QuantizationTables,
     use_trellis: bool,
-) -> (Vec<[i16; 64]>, Vec<[i16; 64]>, Vec<[i16; 64]>) {
+) -> YCbCrCoefficients {
     match (color_type, subsampling) {
         (ColorType::Gray, _) => {
             let padded_width = (width + 7) & !7;
@@ -1085,7 +1142,7 @@ fn compute_all_coefficients_parallel(
     subsampling: Subsampling,
     quant_tables: &QuantizationTables,
     use_trellis: bool,
-) -> (Vec<[i16; 64]>, Vec<[i16; 64]>, Vec<[i16; 64]>) {
+) -> YCbCrCoefficients {
     use rayon::prelude::*;
 
     match (color_type, subsampling) {
@@ -1098,7 +1155,7 @@ fn compute_all_coefficients_parallel(
                 .flat_map(|y| (0..padded_width).step_by(8).map(move |x| (x, y)))
                 .collect();
 
-            let y_coeffs: Vec<[i16; 64]> = coords
+            let y_coeffs: DctCoefficients = coords
                 .par_iter()
                 .map(|&(block_x, block_y)| {
                     let (y_block, _, _) =
@@ -1291,16 +1348,13 @@ fn encode_ac_first_scan(
         let mut eob_run = 0u16;
 
         for block in coeffs {
-            encode_ac_first(
-                writer,
-                block,
-                scan.ss,
-                scan.se,
-                scan.al,
-                &mut eob_run,
-                huff_tables,
+            let scan_params = ScanParams {
+                ss: scan.ss,
+                se: scan.se,
+                al: scan.al,
                 is_luminance,
-            );
+            };
+            encode_ac_first(writer, block, &scan_params, &mut eob_run, huff_tables);
         }
 
         // Flush any remaining EOB run
@@ -1335,16 +1389,13 @@ fn encode_ac_refine_scan(
         let mut eob_run = 0u16;
 
         for block in coeffs {
-            progressive::encode_ac_refine(
-                writer,
-                block,
-                scan.ss,
-                scan.se,
-                scan.al,
-                &mut eob_run,
-                huff_tables,
+            let scan_params = ScanParams {
+                ss: scan.ss,
+                se: scan.se,
+                al: scan.al,
                 is_luminance,
-            );
+            };
+            progressive::encode_ac_refine(writer, block, &scan_params, &mut eob_run, huff_tables);
         }
 
         // Flush any remaining EOB run
@@ -1354,27 +1405,12 @@ fn encode_ac_refine_scan(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn encode_scan(
-    output: &mut Vec<u8>,
-    data: &[u8],
-    width: u32,
-    height: u32,
-    color_type: ColorType,
-    restart_interval: Option<u16>,
-    subsampling: Subsampling,
-    quant_tables: &QuantizationTables,
-    huff_tables: &HuffmanTables,
-) {
+fn encode_scan(output: &mut Vec<u8>, ctx: &EncodeContext, restart_interval: Option<u16>) {
     let mut writer = BitWriterMsb::new();
 
-    // Convert to YCbCr and process in 8x8 blocks
-    let width = width as usize;
-    let height = height as usize;
-
     // Calculate padded dimensions
-    let (padded_width, padded_height) = match subsampling {
-        Subsampling::S444 | Subsampling::S420 => ((width + 7) & !7, (height + 7) & !7),
+    let (padded_width, padded_height) = match ctx.subsampling {
+        Subsampling::S444 | Subsampling::S420 => ((ctx.width + 7) & !7, (ctx.height + 7) & !7),
     };
 
     // Previous DC values for differential encoding
@@ -1409,16 +1445,23 @@ fn encode_scan(
     };
 
     // Process blocks
-    match (color_type, subsampling) {
+    match (ctx.color_type, ctx.subsampling) {
         (ColorType::Gray, _) => {
             let total_mcus = ((padded_width / 8) * (padded_height / 8)) as u32;
             for block_y in (0..padded_height).step_by(8) {
                 for block_x in (0..padded_width).step_by(8) {
-                    let (y_block, _, _) =
-                        extract_block(data, width, height, block_x, block_y, color_type);
+                    let (y_block, _, _) = extract_block(
+                        ctx.data,
+                        ctx.width,
+                        ctx.height,
+                        block_x,
+                        block_y,
+                        ctx.color_type,
+                    );
                     let y_dct = dct_2d(&y_block);
-                    let y_quant = quantize_block(&y_dct, &quant_tables.luminance_table);
-                    prev_dc_y = encode_block(&mut writer, &y_quant, prev_dc_y, true, huff_tables);
+                    let y_quant = quantize_block(&y_dct, &ctx.quant_tables.luminance_table);
+                    prev_dc_y =
+                        encode_block(&mut writer, &y_quant, prev_dc_y, true, ctx.huff_tables);
                     mcu_count += 1;
                     handle_restart(
                         &mut writer,
@@ -1436,22 +1479,29 @@ fn encode_scan(
             let total_mcus = ((padded_width / 8) * (padded_height / 8)) as u32;
             for block_y in (0..padded_height).step_by(8) {
                 for block_x in (0..padded_width).step_by(8) {
-                    let (y_block, cb_block, cr_block) =
-                        extract_block(data, width, height, block_x, block_y, color_type);
+                    let (y_block, cb_block, cr_block) = extract_block(
+                        ctx.data,
+                        ctx.width,
+                        ctx.height,
+                        block_x,
+                        block_y,
+                        ctx.color_type,
+                    );
 
                     let y_dct = dct_2d(&y_block);
-                    let y_quant = quantize_block(&y_dct, &quant_tables.luminance_table);
-                    prev_dc_y = encode_block(&mut writer, &y_quant, prev_dc_y, true, huff_tables);
+                    let y_quant = quantize_block(&y_dct, &ctx.quant_tables.luminance_table);
+                    prev_dc_y =
+                        encode_block(&mut writer, &y_quant, prev_dc_y, true, ctx.huff_tables);
 
                     let cb_dct = dct_2d(&cb_block);
-                    let cb_quant = quantize_block(&cb_dct, &quant_tables.chrominance_table);
+                    let cb_quant = quantize_block(&cb_dct, &ctx.quant_tables.chrominance_table);
                     prev_dc_cb =
-                        encode_block(&mut writer, &cb_quant, prev_dc_cb, false, huff_tables);
+                        encode_block(&mut writer, &cb_quant, prev_dc_cb, false, ctx.huff_tables);
 
                     let cr_dct = dct_2d(&cr_block);
-                    let cr_quant = quantize_block(&cr_dct, &quant_tables.chrominance_table);
+                    let cr_quant = quantize_block(&cr_dct, &ctx.quant_tables.chrominance_table);
                     prev_dc_cr =
-                        encode_block(&mut writer, &cr_quant, prev_dc_cr, false, huff_tables);
+                        encode_block(&mut writer, &cr_quant, prev_dc_cr, false, ctx.huff_tables);
 
                     mcu_count += 1;
                     handle_restart(
@@ -1467,31 +1517,31 @@ fn encode_scan(
             }
         }
         (_, Subsampling::S420) => {
-            let padded_width_420 = (width + 15) & !15;
-            let padded_height_420 = (height + 15) & !15;
+            let padded_width_420 = (ctx.width + 15) & !15;
+            let padded_height_420 = (ctx.height + 15) & !15;
             let total_mcus = ((padded_width_420 / 16) * (padded_height_420 / 16)) as u32;
 
             for mcu_y in (0..padded_height_420).step_by(16) {
                 for mcu_x in (0..padded_width_420).step_by(16) {
                     let (y_blocks, cb_block, cr_block) =
-                        extract_mcu_420(data, width, height, mcu_x, mcu_y);
+                        extract_mcu_420(ctx.data, ctx.width, ctx.height, mcu_x, mcu_y);
 
                     for y_block in &y_blocks {
                         let y_dct = dct_2d(y_block);
-                        let y_quant = quantize_block(&y_dct, &quant_tables.luminance_table);
+                        let y_quant = quantize_block(&y_dct, &ctx.quant_tables.luminance_table);
                         prev_dc_y =
-                            encode_block(&mut writer, &y_quant, prev_dc_y, true, huff_tables);
+                            encode_block(&mut writer, &y_quant, prev_dc_y, true, ctx.huff_tables);
                     }
 
                     let cb_dct = dct_2d(&cb_block);
-                    let cb_quant = quantize_block(&cb_dct, &quant_tables.chrominance_table);
+                    let cb_quant = quantize_block(&cb_dct, &ctx.quant_tables.chrominance_table);
                     prev_dc_cb =
-                        encode_block(&mut writer, &cb_quant, prev_dc_cb, false, huff_tables);
+                        encode_block(&mut writer, &cb_quant, prev_dc_cb, false, ctx.huff_tables);
 
                     let cr_dct = dct_2d(&cr_block);
-                    let cr_quant = quantize_block(&cr_dct, &quant_tables.chrominance_table);
+                    let cr_quant = quantize_block(&cr_dct, &ctx.quant_tables.chrominance_table);
                     prev_dc_cr =
-                        encode_block(&mut writer, &cr_quant, prev_dc_cr, false, huff_tables);
+                        encode_block(&mut writer, &cr_quant, prev_dc_cr, false, ctx.huff_tables);
 
                     mcu_count += 1;
                     handle_restart(
@@ -1609,10 +1659,62 @@ fn extract_mcu_420(
 mod tests {
     use super::*;
 
+    fn test_encode(data: &[u8], width: u32, height: u32, quality: u8) -> crate::Result<Vec<u8>> {
+        let options = JpegOptions::builder(width, height)
+            .color_type(ColorType::Rgb)
+            .quality(quality)
+            .build();
+        encode(data, &options)
+    }
+
+    fn test_encode_with_color(
+        data: &[u8],
+        width: u32,
+        height: u32,
+        quality: u8,
+        color_type: ColorType,
+    ) -> crate::Result<Vec<u8>> {
+        let options = JpegOptions::builder(width, height)
+            .color_type(color_type)
+            .quality(quality)
+            .build();
+        encode(data, &options)
+    }
+
+    #[allow(dead_code)]
+    fn test_encode_with_options(
+        data: &[u8],
+        width: u32,
+        height: u32,
+        color_type: ColorType,
+        options: &JpegOptions,
+    ) -> crate::Result<Vec<u8>> {
+        let mut opts = *options;
+        opts.width = width;
+        opts.height = height;
+        opts.color_type = color_type;
+        encode(data, &opts)
+    }
+
+    fn test_encode_into(
+        output: &mut Vec<u8>,
+        data: &[u8],
+        width: u32,
+        height: u32,
+        color_type: ColorType,
+        options: &JpegOptions,
+    ) -> crate::Result<()> {
+        let mut opts = *options;
+        opts.width = width;
+        opts.height = height;
+        opts.color_type = color_type;
+        encode_into(output, data, &opts)
+    }
+
     #[test]
     fn test_encode_1x1_rgb() {
         let pixels = vec![255, 0, 0]; // Red pixel
-        let jpeg = encode(&pixels, 1, 1, 85).unwrap();
+        let jpeg = test_encode(&pixels, 1, 1, 85).unwrap();
 
         // Check JPEG markers
         assert_eq!(&jpeg[0..2], &SOI.to_be_bytes());
@@ -1630,7 +1732,7 @@ mod tests {
             }
         }
 
-        let jpeg = encode(&pixels, 8, 8, 85).unwrap();
+        let jpeg = test_encode(&pixels, 8, 8, 85).unwrap();
         assert_eq!(&jpeg[0..2], &SOI.to_be_bytes());
     }
 
@@ -1638,11 +1740,11 @@ mod tests {
     fn test_encode_invalid_quality() {
         let pixels = vec![255, 0, 0];
         assert!(matches!(
-            encode(&pixels, 1, 1, 0),
+            test_encode(&pixels, 1, 1, 0),
             Err(Error::InvalidQuality(0))
         ));
         assert!(matches!(
-            encode(&pixels, 1, 1, 101),
+            test_encode(&pixels, 1, 1, 101),
             Err(Error::InvalidQuality(101))
         ));
     }
@@ -1650,11 +1752,11 @@ mod tests {
     #[test]
     fn test_encode_invalid_restart_interval() {
         let pixels = vec![255, 0, 0];
-        let mut options = JpegOptions::fast(85);
+        let mut options = JpegOptions::fast(1, 1, 85);
         options.restart_interval = Some(0);
         let mut output = Vec::new();
         assert!(matches!(
-            encode_with_options_into(&mut output, &pixels, 1, 1, ColorType::Rgb, &options),
+            test_encode_into(&mut output, &pixels, 1, 1, ColorType::Rgb, &options),
             Err(Error::InvalidRestartInterval(0))
         ));
     }
@@ -1663,7 +1765,7 @@ mod tests {
     fn test_encode_invalid_dimensions() {
         let pixels = vec![255, 0, 0];
         assert!(matches!(
-            encode(&pixels, 0, 1, 85),
+            test_encode(&pixels, 0, 1, 85),
             Err(Error::InvalidDimensions { .. })
         ));
     }
@@ -1671,7 +1773,7 @@ mod tests {
     #[test]
     fn test_encode_grayscale() {
         let pixels = vec![128; 64]; // 8x8 gray
-        let jpeg = encode_with_color(&pixels, 8, 8, 85, ColorType::Gray).unwrap();
+        let jpeg = test_encode_with_color(&pixels, 8, 8, 85, ColorType::Gray).unwrap();
         assert_eq!(&jpeg[0..2], &SOI.to_be_bytes());
     }
 
@@ -1679,15 +1781,15 @@ mod tests {
     fn test_encode_with_options_into_reuses_buffer() {
         let mut output = Vec::with_capacity(256);
         let pixels1 = vec![0u8; 3]; // 1x1 black
-        let opts = JpegOptions::fast(85);
+        let opts = JpegOptions::fast(1, 1, 85);
 
-        encode_with_options_into(&mut output, &pixels1, 1, 1, ColorType::Rgb, &opts).unwrap();
+        test_encode_into(&mut output, &pixels1, 1, 1, ColorType::Rgb, &opts).unwrap();
         let first = output.clone();
         let first_cap = output.capacity();
         assert!(!first.is_empty());
 
         let pixels2 = vec![255u8, 0, 0]; // 1x1 red
-        encode_with_options_into(&mut output, &pixels2, 1, 1, ColorType::Rgb, &opts).unwrap();
+        test_encode_into(&mut output, &pixels2, 1, 1, ColorType::Rgb, &opts).unwrap();
 
         assert_ne!(first, output);
         assert!(output.capacity() >= first_cap);
@@ -1696,7 +1798,7 @@ mod tests {
 
     #[test]
     fn test_jpeg_options_builder_with_preset_override() {
-        let opts = JpegOptions::builder()
+        let opts = JpegOptions::builder(1, 1)
             .preset(2) // max
             .quality(90)
             .subsampling(Subsampling::S444)
@@ -1719,16 +1821,14 @@ mod tests {
     #[test]
     fn test_encode_progressive() {
         let pixels = vec![128u8; 16 * 16 * 3];
-        let opts = JpegOptions {
-            quality: 85,
-            subsampling: Subsampling::S420,
-            optimize_huffman: false,
-            progressive: true,
-            trellis_quant: false,
-            restart_interval: None,
-        };
+        let opts = JpegOptions::builder(16, 16)
+            .color_type(ColorType::Rgb)
+            .quality(85)
+            .subsampling(Subsampling::S420)
+            .progressive(true)
+            .build();
         let mut output = Vec::new();
-        encode_with_options_into(&mut output, &pixels, 16, 16, ColorType::Rgb, &opts).unwrap();
+        encode_into(&mut output, &pixels, &opts).unwrap();
 
         // Should have valid JPEG structure
         assert_eq!(&output[0..2], &SOI.to_be_bytes());
@@ -1738,9 +1838,9 @@ mod tests {
     #[test]
     fn test_encode_progressive_with_trellis() {
         let pixels: Vec<u8> = (0..16 * 16 * 3).map(|i| (i * 7 % 256) as u8).collect();
-        let opts = JpegOptions::max(85);
+        let opts = JpegOptions::max(1, 1, 85);
         let mut output = Vec::new();
-        encode_with_options_into(&mut output, &pixels, 16, 16, ColorType::Rgb, &opts).unwrap();
+        test_encode_into(&mut output, &pixels, 16, 16, ColorType::Rgb, &opts).unwrap();
 
         assert_eq!(&output[0..2], &SOI.to_be_bytes());
     }
@@ -1748,16 +1848,14 @@ mod tests {
     #[test]
     fn test_encode_with_restart_interval() {
         let pixels = vec![100u8; 32 * 32 * 3];
-        let opts = JpegOptions {
-            quality: 80,
-            subsampling: Subsampling::S444,
-            optimize_huffman: false,
-            progressive: false,
-            trellis_quant: false,
-            restart_interval: Some(10),
-        };
+        let opts = JpegOptions::builder(32, 32)
+            .color_type(ColorType::Rgb)
+            .quality(80)
+            .subsampling(Subsampling::S444)
+            .restart_interval(Some(10))
+            .build();
         let mut output = Vec::new();
-        encode_with_options_into(&mut output, &pixels, 32, 32, ColorType::Rgb, &opts).unwrap();
+        encode_into(&mut output, &pixels, &opts).unwrap();
 
         assert_eq!(&output[0..2], &SOI.to_be_bytes());
     }
@@ -1767,16 +1865,13 @@ mod tests {
         let pixels = vec![128u8; 16 * 16 * 3];
 
         for subsampling in [Subsampling::S444, Subsampling::S420] {
-            let opts = JpegOptions {
-                quality: 85,
-                subsampling,
-                optimize_huffman: false,
-                progressive: false,
-                trellis_quant: false,
-                restart_interval: None,
-            };
+            let opts = JpegOptions::builder(16, 16)
+                .color_type(ColorType::Rgb)
+                .quality(85)
+                .subsampling(subsampling)
+                .build();
             let mut output = Vec::new();
-            encode_with_options_into(&mut output, &pixels, 16, 16, ColorType::Rgb, &opts).unwrap();
+            encode_into(&mut output, &pixels, &opts).unwrap();
             assert_eq!(&output[0..2], &SOI.to_be_bytes());
         }
     }
@@ -1784,9 +1879,9 @@ mod tests {
     #[test]
     fn test_encode_with_optimized_huffman() {
         let pixels: Vec<u8> = (0..16 * 16 * 3).map(|i| (i * 13 % 256) as u8).collect();
-        let opts = JpegOptions::balanced(85);
+        let opts = JpegOptions::balanced(1, 1, 85);
         let mut output = Vec::new();
-        encode_with_options_into(&mut output, &pixels, 16, 16, ColorType::Rgb, &opts).unwrap();
+        test_encode_into(&mut output, &pixels, 16, 16, ColorType::Rgb, &opts).unwrap();
 
         assert_eq!(&output[0..2], &SOI.to_be_bytes());
     }
@@ -1794,14 +1889,14 @@ mod tests {
     #[test]
     fn test_encode_rgba_unsupported() {
         let pixels = vec![128u8; 8 * 8 * 4]; // RGBA
-        let result = encode_with_color(&pixels, 8, 8, 85, ColorType::Rgba);
+        let result = test_encode_with_color(&pixels, 8, 8, 85, ColorType::Rgba);
         assert!(matches!(result, Err(Error::UnsupportedColorType)));
     }
 
     #[test]
     fn test_encode_gray_alpha_unsupported() {
         let pixels = vec![128u8; 8 * 8 * 2]; // GrayAlpha
-        let result = encode_with_color(&pixels, 8, 8, 85, ColorType::GrayAlpha);
+        let result = test_encode_with_color(&pixels, 8, 8, 85, ColorType::GrayAlpha);
         assert!(matches!(result, Err(Error::UnsupportedColorType)));
     }
 
@@ -1810,7 +1905,7 @@ mod tests {
         let pixels = vec![128u8; 8 * 8 * 3];
 
         for quality in [1, 25, 50, 75, 100] {
-            let jpeg = encode(&pixels, 8, 8, quality).unwrap();
+            let jpeg = test_encode(&pixels, 8, 8, quality).unwrap();
             assert_eq!(&jpeg[0..2], &SOI.to_be_bytes());
             assert_eq!(&jpeg[jpeg.len() - 2..], &EOI.to_be_bytes());
         }
@@ -1825,7 +1920,7 @@ mod tests {
         for &w in &widths {
             for &h in &heights {
                 let pixels = vec![100u8; (w * h * 3) as usize];
-                let jpeg = encode(&pixels, w, h, 85).unwrap();
+                let jpeg = test_encode(&pixels, w, h, 85).unwrap();
                 assert_eq!(&jpeg[0..2], &SOI.to_be_bytes());
             }
         }
@@ -1833,7 +1928,7 @@ mod tests {
 
     #[test]
     fn test_jpeg_options_fast() {
-        let opts = JpegOptions::fast(75);
+        let opts = JpegOptions::fast(100, 100, 75);
         assert_eq!(opts.quality, 75);
         assert_eq!(opts.subsampling, Subsampling::S444);
         assert!(!opts.optimize_huffman);
@@ -1843,7 +1938,7 @@ mod tests {
 
     #[test]
     fn test_jpeg_options_balanced() {
-        let opts = JpegOptions::balanced(80);
+        let opts = JpegOptions::balanced(100, 100, 80);
         assert_eq!(opts.quality, 80);
         assert_eq!(opts.subsampling, Subsampling::S444);
         assert!(opts.optimize_huffman);
@@ -1853,7 +1948,7 @@ mod tests {
 
     #[test]
     fn test_jpeg_options_max() {
-        let opts = JpegOptions::max(90);
+        let opts = JpegOptions::max(100, 100, 90);
         assert_eq!(opts.quality, 90);
         assert_eq!(opts.subsampling, Subsampling::S420);
         assert!(opts.optimize_huffman);
@@ -1863,23 +1958,23 @@ mod tests {
 
     #[test]
     fn test_jpeg_options_from_preset() {
-        // from_preset(quality, preset)
-        let fast = JpegOptions::from_preset(70, 0);
+        // from_preset(width, height, quality, preset)
+        let fast = JpegOptions::from_preset(100, 100, 70, 0);
         assert_eq!(fast.quality, 70);
         assert!(!fast.progressive);
 
-        let balanced = JpegOptions::from_preset(80, 1);
+        let balanced = JpegOptions::from_preset(100, 100, 80, 1);
         assert_eq!(balanced.quality, 80);
         assert!(balanced.optimize_huffman);
 
-        let max = JpegOptions::from_preset(90, 2);
+        let max = JpegOptions::from_preset(100, 100, 90, 2);
         assert_eq!(max.quality, 90);
         assert!(max.progressive);
     }
 
     #[test]
     fn test_jpeg_options_builder_all_options() {
-        let opts = JpegOptions::builder()
+        let opts = JpegOptions::builder(1, 1)
             .quality(95)
             .subsampling(Subsampling::S444)
             .optimize_huffman(true)
@@ -1901,7 +1996,7 @@ mod tests {
         // Test that very large dimensions are rejected
         let width = (1 << 24) + 1;
         let height = 1;
-        let err = encode(&[], width, height, 85).unwrap_err();
+        let err = test_encode(&[], width, height, 85).unwrap_err();
         assert!(matches!(err, Error::ImageTooLarge { .. }));
     }
 
@@ -1909,7 +2004,7 @@ mod tests {
     fn test_encode_invalid_data_length() {
         // Wrong number of bytes for dimensions
         let pixels = vec![0u8; 10]; // Not enough for 4x4 RGB
-        let err = encode(&pixels, 4, 4, 85).unwrap_err();
+        let err = test_encode(&pixels, 4, 4, 85).unwrap_err();
         assert!(matches!(err, Error::InvalidDataLength { .. }));
     }
 
@@ -1917,7 +2012,7 @@ mod tests {
     #[test]
     fn test_encode_overflow_data_length() {
         let pixels = Vec::new();
-        let err = encode(&pixels, MAX_DIMENSION, MAX_DIMENSION, 85).unwrap_err();
+        let err = test_encode(&pixels, MAX_DIMENSION, MAX_DIMENSION, 85).unwrap_err();
         assert!(matches!(err, Error::InvalidDataLength { .. }));
     }
 
@@ -1930,15 +2025,13 @@ mod tests {
         // Grayscale image (1 byte per pixel) with larger size
         let pixels: Vec<u8> = (0..64 * 64).map(|i| (i % 256) as u8).collect();
 
-        let opts = JpegOptions {
-            quality: 85,
-            progressive: false,
-            optimize_huffman: false,
-            ..Default::default()
-        };
+        let opts = JpegOptions::builder(64, 64)
+            .color_type(ColorType::Gray)
+            .quality(85)
+            .build();
 
         let mut output = Vec::new();
-        encode_with_options_into(&mut output, &pixels, 64, 64, ColorType::Gray, &opts).unwrap();
+        encode_into(&mut output, &pixels, &opts).unwrap();
 
         // Should produce valid JPEG
         assert_eq!(&output[0..2], &[0xFF, 0xD8]); // SOI
@@ -1950,15 +2043,14 @@ mod tests {
         // Grayscale image with progressive encoding
         let pixels: Vec<u8> = (0..64 * 64).map(|i| (i % 256) as u8).collect();
 
-        let opts = JpegOptions {
-            quality: 85,
-            progressive: true,
-            optimize_huffman: false,
-            ..Default::default()
-        };
+        let opts = JpegOptions::builder(64, 64)
+            .color_type(ColorType::Gray)
+            .quality(85)
+            .progressive(true)
+            .build();
 
         let mut output = Vec::new();
-        encode_with_options_into(&mut output, &pixels, 64, 64, ColorType::Gray, &opts).unwrap();
+        encode_into(&mut output, &pixels, &opts).unwrap();
 
         // Should produce valid JPEG
         assert_eq!(&output[0..2], &[0xFF, 0xD8]); // SOI
@@ -1970,15 +2062,14 @@ mod tests {
         // Grayscale image with optimized Huffman tables
         let pixels: Vec<u8> = (0..64 * 64).map(|i| (i % 256) as u8).collect();
 
-        let opts = JpegOptions {
-            quality: 85,
-            progressive: false,
-            optimize_huffman: true,
-            ..Default::default()
-        };
+        let opts = JpegOptions::builder(64, 64)
+            .color_type(ColorType::Gray)
+            .quality(85)
+            .optimize_huffman(true)
+            .build();
 
         let mut output = Vec::new();
-        encode_with_options_into(&mut output, &pixels, 64, 64, ColorType::Gray, &opts).unwrap();
+        encode_into(&mut output, &pixels, &opts).unwrap();
 
         // Should produce valid JPEG
         assert_eq!(&output[0..2], &[0xFF, 0xD8]); // SOI
@@ -1994,17 +2085,16 @@ mod tests {
         // RGB image with 4:2:0 subsampling, progressive, and trellis quantization
         let pixels: Vec<u8> = (0..64 * 64 * 3).map(|i| (i * 7 % 256) as u8).collect();
 
-        let opts = JpegOptions {
-            quality: 85,
-            subsampling: Subsampling::S420,
-            progressive: true,
-            trellis_quant: true,
-            optimize_huffman: false,
-            ..Default::default()
-        };
+        let opts = JpegOptions::builder(64, 64)
+            .color_type(ColorType::Rgb)
+            .quality(85)
+            .subsampling(Subsampling::S420)
+            .progressive(true)
+            .trellis_quant(true)
+            .build();
 
         let mut output = Vec::new();
-        encode_with_options_into(&mut output, &pixels, 64, 64, ColorType::Rgb, &opts).unwrap();
+        encode_into(&mut output, &pixels, &opts).unwrap();
 
         // Should produce valid JPEG
         assert_eq!(&output[0..2], &[0xFF, 0xD8]); // SOI
@@ -2020,16 +2110,15 @@ mod tests {
         // RGB image with optimized Huffman and restart intervals
         let pixels: Vec<u8> = (0..64 * 64 * 3).map(|i| (i * 11 % 256) as u8).collect();
 
-        let opts = JpegOptions {
-            quality: 85,
-            optimize_huffman: true,
-            restart_interval: Some(8),
-            progressive: false,
-            ..Default::default()
-        };
+        let opts = JpegOptions::builder(64, 64)
+            .color_type(ColorType::Rgb)
+            .quality(85)
+            .optimize_huffman(true)
+            .restart_interval(Some(8))
+            .build();
 
         let mut output = Vec::new();
-        encode_with_options_into(&mut output, &pixels, 64, 64, ColorType::Rgb, &opts).unwrap();
+        encode_into(&mut output, &pixels, &opts).unwrap();
 
         // Should produce valid JPEG
         assert_eq!(&output[0..2], &[0xFF, 0xD8]); // SOI
@@ -2047,16 +2136,16 @@ mod tests {
         // Progressive with optimized Huffman and restart intervals
         let pixels: Vec<u8> = (0..64 * 64 * 3).map(|i| (i * 13 % 256) as u8).collect();
 
-        let opts = JpegOptions {
-            quality: 85,
-            optimize_huffman: true,
-            restart_interval: Some(4),
-            progressive: true,
-            ..Default::default()
-        };
+        let opts = JpegOptions::builder(64, 64)
+            .color_type(ColorType::Rgb)
+            .quality(85)
+            .optimize_huffman(true)
+            .restart_interval(Some(4))
+            .progressive(true)
+            .build();
 
         let mut output = Vec::new();
-        encode_with_options_into(&mut output, &pixels, 64, 64, ColorType::Rgb, &opts).unwrap();
+        encode_into(&mut output, &pixels, &opts).unwrap();
 
         // Should produce valid JPEG
         assert_eq!(&output[0..2], &[0xFF, 0xD8]); // SOI

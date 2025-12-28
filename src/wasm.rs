@@ -86,9 +86,12 @@ pub fn encode_png(
 ) -> Result<Vec<u8>, JsError> {
     let color = color_type_from_u8(color_type)?;
     // lossy=true means we want quantization, which is lossless=false internally
-    let options = PngOptions::builder().preset(preset).lossy(lossy).build();
-    png::encode_with_options(data, width, height, color, &options)
-        .map_err(|e| JsError::new(&e.to_string()))
+    let options = PngOptions::builder(width, height)
+        .color_type(color)
+        .preset(preset)
+        .lossy(lossy)
+        .build();
+    png::encode(data, &options).map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// Encode raw pixel data as JPEG.
@@ -125,7 +128,8 @@ pub fn encode_jpeg(
             )))
         }
     };
-    let options = JpegOptions::builder()
+    let options = JpegOptions::builder(width, height)
+        .color_type(color)
         .quality(quality)
         .preset(preset)
         .subsampling(if subsampling_420 {
@@ -134,8 +138,7 @@ pub fn encode_jpeg(
             Subsampling::S444
         })
         .build();
-    jpeg::encode_with_options(data, width, height, color, &options)
-        .map_err(|e| JsError::new(&e.to_string()))
+    jpeg::encode(data, &options).map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// Get the number of bytes per pixel for a color type.
@@ -189,10 +192,12 @@ pub fn resize_image(
 ) -> Result<Vec<u8>, JsError> {
     let color = color_type_from_u8(color_type)?;
     let algo = resize_algorithm_from_u8(algorithm)?;
-    resize::resize(
-        data, src_width, src_height, dst_width, dst_height, color, algo,
-    )
-    .map_err(|e| JsError::new(&e.to_string()))
+    let options = resize::ResizeOptions::builder(src_width, src_height)
+        .dst(dst_width, dst_height)
+        .color_type(color)
+        .algorithm(algo)
+        .build();
+    resize::resize(data, &options).map_err(|e| JsError::new(&e.to_string()))
 }
 
 // Tests for the WASM module.

@@ -11,8 +11,6 @@ pub mod filter;
 
 use crate::color::ColorType;
 use crate::compress::deflate::{deflate_optimal_zlib, deflate_zlib_packed};
-#[cfg(feature = "timing")]
-use crate::compress::deflate::{deflate_zlib_packed_with_stats, DeflateStats};
 use crate::error::{Error, Result};
 use bit_depth::{pack_gray_rows, pack_indexed_rows, palette_bit_depth, reduce_bit_depth};
 
@@ -23,8 +21,30 @@ const PNG_SIGNATURE: [u8; 8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 const MAX_DIMENSION: u32 = 1 << 24; // 16 million pixels
 
 /// PNG encoding options.
+///
+/// Use [`PngOptions::builder()`] to create options with a fluent API.
+///
+/// # Example
+///
+/// ```rust
+/// use pixo::png::{encode, PngOptions};
+/// use pixo::ColorType;
+///
+/// let pixels = vec![255, 0, 0, 255]; // 1x1 RGBA red pixel
+/// let options = PngOptions::builder(1, 1)
+///     .color_type(ColorType::Rgba)
+///     .preset(1) // balanced
+///     .build();
+/// let png_bytes = encode(&pixels, &options).unwrap();
+/// ```
 #[derive(Debug, Clone)]
 pub struct PngOptions {
+    /// Image width in pixels.
+    pub width: u32,
+    /// Image height in pixels.
+    pub height: u32,
+    /// Color type of the pixel data.
+    pub color_type: ColorType,
     /// Compression level (1-9, default 6).
     pub compression_level: u8,
     /// Filter selection strategy.
@@ -82,6 +102,10 @@ impl Default for QuantizationOptions {
 impl Default for PngOptions {
     fn default() -> Self {
         Self {
+            // Default dimensions (must be set via builder)
+            width: 0,
+            height: 0,
+            color_type: ColorType::Rgba,
             // Prefer speed; level 2 favors throughput over ratio.
             compression_level: 2,
             // AdaptiveFast reduces per-row work with minimal compression impact.
@@ -101,9 +125,12 @@ impl PngOptions {
     /// Preset 0: Fast - prioritizes speed over compression.
     ///
     /// Uses level 2 compression with AdaptiveFast filter selection.
-    /// No additional optimizations enabled.
-    pub fn fast() -> Self {
+    /// No additional optimizations enabled. Defaults to RGBA color type.
+    pub fn fast(width: u32, height: u32) -> Self {
         Self {
+            width,
+            height,
+            color_type: ColorType::Rgba,
             compression_level: 2,
             filter_strategy: FilterStrategy::AdaptiveFast,
             optimize_alpha: false,
@@ -120,9 +147,12 @@ impl PngOptions {
     ///
     /// Uses level 6 compression with Adaptive filter selection.
     /// Enables all lossless optimizations (palette reduction, color type
-    /// reduction, alpha optimization, metadata stripping).
-    pub fn balanced() -> Self {
+    /// reduction, alpha optimization, metadata stripping). Defaults to RGBA color type.
+    pub fn balanced(width: u32, height: u32) -> Self {
         Self {
+            width,
+            height,
+            color_type: ColorType::Rgba,
             compression_level: 6,
             filter_strategy: FilterStrategy::Adaptive,
             optimize_alpha: true,
@@ -139,9 +169,12 @@ impl PngOptions {
     ///
     /// Uses level 9 compression with MinSum filter selection and optimal
     /// (Zopfli-style) DEFLATE compression with iterative refinement.
-    /// Enables all lossless optimizations.
-    pub fn max() -> Self {
+    /// Enables all lossless optimizations. Defaults to RGBA color type.
+    pub fn max(width: u32, height: u32) -> Self {
         Self {
+            width,
+            height,
+            color_type: ColorType::Rgba,
             compression_level: 9,
             filter_strategy: FilterStrategy::MinSum,
             optimize_alpha: true,
@@ -155,11 +188,11 @@ impl PngOptions {
     }
 
     /// Create from preset number (0=fast, 1=balanced, 2=max).
-    pub fn from_preset(preset: u8) -> Self {
+    pub fn from_preset(width: u32, height: u32, preset: u8) -> Self {
         match preset {
-            0 => Self::fast(),
-            2 => Self::max(),
-            _ => Self::balanced(),
+            0 => Self::fast(width, height),
+            2 => Self::max(width, height),
+            _ => Self::balanced(width, height),
         }
     }
 
@@ -167,8 +200,8 @@ impl PngOptions {
     ///
     /// When `lossless` is false, enables auto-quantization for potentially
     /// significant size reduction (lossy compression).
-    pub fn from_preset_with_lossless(preset: u8, lossless: bool) -> Self {
-        let mut opts = Self::from_preset(preset);
+    pub fn from_preset_with_lossless(width: u32, height: u32, preset: u8, lossless: bool) -> Self {
+        let mut opts = Self::from_preset(width, height, preset);
         if !lossless {
             opts.quantization = QuantizationOptions {
                 mode: QuantizationMode::Auto,
@@ -180,20 +213,42 @@ impl PngOptions {
     }
 }
 
-/// Builder for [`PngOptions`] to reduce boolean argument noise.
-#[derive(Debug, Clone, Default)]
+/// Builder for [`PngOptions`].
+///
+/// Create with [`PngOptions::builder(width, height)`] and configure options fluently.
+#[derive(Debug, Clone)]
 pub struct PngOptionsBuilder {
     options: PngOptions,
 }
 
 impl PngOptions {
     /// Create a builder for [`PngOptions`].
-    pub fn builder() -> PngOptionsBuilder {
-        PngOptionsBuilder::default()
+    ///
+    /// The source dimensions are required; color type defaults to RGBA.
+    pub fn builder(width: u32, height: u32) -> PngOptionsBuilder {
+        PngOptionsBuilder::new(width, height)
     }
 }
 
 impl PngOptionsBuilder {
+    /// Create a new builder with image dimensions.
+    pub fn new(width: u32, height: u32) -> Self {
+        Self {
+            options: PngOptions {
+                width,
+                height,
+                color_type: ColorType::Rgba,
+                ..Default::default()
+            },
+        }
+    }
+
+    /// Set the color type of the pixel data.
+    pub fn color_type(mut self, color_type: ColorType) -> Self {
+        self.options.color_type = color_type;
+        self
+    }
+
     pub fn compression_level(mut self, level: u8) -> Self {
         self.options.compression_level = level;
         self
@@ -264,11 +319,17 @@ impl PngOptionsBuilder {
         self
     }
 
+    /// Apply a preset while retaining dimensions and color type.
     pub fn preset(mut self, preset: u8) -> Self {
-        self.options = PngOptions::from_preset(preset);
+        let width = self.options.width;
+        let height = self.options.height;
+        let color_type = self.options.color_type;
+        self.options = PngOptions::from_preset(width, height, preset);
+        self.options.color_type = color_type;
         self
     }
 
+    /// Build the [`PngOptions`].
     #[must_use]
     pub fn build(self) -> PngOptions {
         self.options
@@ -299,35 +360,30 @@ pub enum FilterStrategy {
 /// Encode raw pixel data as PNG.
 ///
 /// # Arguments
+///
 /// * `data` - Raw pixel data (row-major order)
-/// * `width` - Image width in pixels
-/// * `height` - Image height in pixels
-/// * `color_type` - Color type of the input data
+/// * `options` - PNG encoding options (includes width, height, color type)
 ///
 /// # Returns
+///
 /// Complete PNG file as bytes.
-pub fn encode(data: &[u8], width: u32, height: u32, color_type: ColorType) -> Result<Vec<u8>> {
+///
+/// # Example
+///
+/// ```rust
+/// use pixo::png::{encode, PngOptions};
+/// use pixo::ColorType;
+///
+/// let pixels = vec![255, 0, 0, 255]; // 1x1 RGBA red pixel
+/// let options = PngOptions::builder(1, 1)
+///     .color_type(ColorType::Rgba)
+///     .build();
+/// let png_bytes = encode(&pixels, &options).unwrap();
+/// ```
+#[must_use = "encoding produces a PNG file that should be used"]
+pub fn encode(data: &[u8], options: &PngOptions) -> Result<Vec<u8>> {
     let mut output = Vec::new();
-    encode_into(
-        &mut output,
-        data,
-        width,
-        height,
-        color_type,
-        &PngOptions::default(),
-    )?;
-    Ok(output)
-}
-
-pub fn encode_with_options(
-    data: &[u8],
-    width: u32,
-    height: u32,
-    color_type: ColorType,
-    options: &PngOptions,
-) -> Result<Vec<u8>> {
-    let mut output = Vec::new();
-    encode_into(&mut output, data, width, height, color_type, options)?;
+    encode_into(&mut output, data, options)?;
     Ok(output)
 }
 
@@ -349,16 +405,34 @@ fn checked_expected_len(
 
 /// Encode raw pixel data as PNG into a caller-provided buffer.
 ///
-/// The `output` buffer will be cleared before writing. This API allows callers
-/// to reuse an allocation across multiple encodes.
-pub fn encode_into(
-    output: &mut Vec<u8>,
-    data: &[u8],
-    width: u32,
-    height: u32,
-    color_type: ColorType,
-    options: &PngOptions,
-) -> Result<()> {
+/// The `output` buffer will be cleared and reused, allowing callers to avoid
+/// repeated allocations across multiple encodes.
+///
+/// # Arguments
+///
+/// * `output` - Buffer to write PNG data into (will be cleared)
+/// * `data` - Raw pixel data (row-major order)
+/// * `options` - PNG encoding options (includes width, height, color type)
+///
+/// # Example
+///
+/// ```rust
+/// use pixo::png::{encode_into, PngOptions};
+/// use pixo::ColorType;
+///
+/// let pixels = vec![255, 0, 0, 255]; // 1x1 RGBA red pixel
+/// let options = PngOptions::builder(1, 1)
+///     .color_type(ColorType::Rgba)
+///     .build();
+/// let mut output = Vec::new();
+/// encode_into(&mut output, &pixels, &options).unwrap();
+/// ```
+#[must_use = "this `Result` may indicate an encoding error"]
+pub fn encode_into(output: &mut Vec<u8>, data: &[u8], options: &PngOptions) -> Result<()> {
+    let width = options.width;
+    let height = options.height;
+    let color_type = options.color_type;
+
     if !(1..=9).contains(&options.compression_level) {
         return Err(Error::InvalidCompressionLevel(options.compression_level));
     }
@@ -507,89 +581,6 @@ pub fn encode_into(
     }
 
     Ok(())
-}
-
-/// Encode raw pixel data as PNG into a caller-provided buffer, returning DEFLATE timing stats.
-///
-/// Only available when the `timing` feature is enabled. This mirrors `encode_into`
-/// but surfaces per-stage DEFLATE timings to aid profiling without external tools.
-#[cfg(feature = "timing")]
-pub fn encode_into_with_stats(
-    output: &mut Vec<u8>,
-    data: &[u8],
-    width: u32,
-    height: u32,
-    color_type: ColorType,
-    options: &PngOptions,
-) -> Result<DeflateStats> {
-    if !(1..=9).contains(&options.compression_level) {
-        return Err(Error::InvalidCompressionLevel(options.compression_level));
-    }
-
-    if width == 0 || height == 0 {
-        return Err(Error::InvalidDimensions { width, height });
-    }
-
-    if width > MAX_DIMENSION || height > MAX_DIMENSION {
-        return Err(Error::ImageTooLarge {
-            width,
-            height,
-            max: MAX_DIMENSION,
-        });
-    }
-
-    let bytes_per_pixel = color_type.bytes_per_pixel();
-    let expected_len = checked_expected_len(width, height, bytes_per_pixel, data.len())?;
-    if data.len() != expected_len {
-        return Err(Error::InvalidDataLength {
-            expected: expected_len,
-            actual: data.len(),
-        });
-    }
-
-    output.clear();
-    output.reserve(expected_len / 2 + 1024);
-    output.extend_from_slice(&PNG_SIGNATURE);
-    // Reduce (palette/color) for stats path as well.
-    let reduced =
-        maybe_reduce_color_type(data, width as usize, height as usize, color_type, options);
-    write_ihdr(
-        output,
-        width,
-        height,
-        reduced.bit_depth,
-        reduced.color_type_byte,
-    );
-    if let Some(ref palette) = reduced.palette {
-        let mut plte = Vec::with_capacity(palette.len() * 3);
-        for entry in palette {
-            plte.extend_from_slice(&entry[..3]);
-        }
-        chunk::write_chunk(output, b"PLTE", &plte);
-        if palette.iter().any(|p| p[3] != 255) {
-            let alphas: Vec<u8> = palette.iter().map(|p| p[3]).collect();
-            chunk::write_chunk(output, b"tRNS", &alphas);
-        }
-    }
-
-    let row_bytes = if reduced.bit_depth < 8 {
-        (width as usize * reduced.bit_depth as usize).div_ceil(8)
-    } else {
-        width as usize * reduced.bytes_per_pixel
-    };
-    let filtered = filter::apply_filters_with_row_bytes(
-        &reduced.data,
-        width,
-        height,
-        row_bytes,
-        reduced.bytes_per_pixel,
-        options,
-    );
-    let (compressed, stats) = deflate_zlib_packed_with_stats(&filtered, options.compression_level);
-    write_idat_chunks(output, &compressed);
-    write_iend(output);
-
-    Ok(stats)
 }
 
 fn write_ihdr(output: &mut Vec<u8>, width: u32, height: u32, bit_depth: u8, color_type_byte: u8) {
@@ -1752,6 +1743,7 @@ fn should_quantize_auto(data: &[u8], bpp: usize, max_colors: usize) -> bool {
 /// must contain between 1 and 256 entries. Optional `transparency` supplies
 /// per-entry alpha values (tRNS); its length must not exceed the palette
 /// length. Bit depth is fixed to 8 for indexed output.
+#[must_use = "encoding produces a PNG file that should be used"]
 pub fn encode_indexed(
     data: &[u8],
     width: u32,
@@ -1772,6 +1764,7 @@ pub fn encode_indexed(
     Ok(output)
 }
 
+#[must_use = "encoding produces a PNG file that should be used"]
 pub fn encode_indexed_with_options(
     data: &[u8],
     width: u32,
@@ -1793,6 +1786,7 @@ pub fn encode_indexed_with_options(
     Ok(output)
 }
 
+#[must_use = "this `Result` may indicate an encoding error"]
 pub fn encode_indexed_into(
     output: &mut Vec<u8>,
     data: &[u8],
@@ -1927,10 +1921,52 @@ fn strip_metadata_chunks(output: &mut Vec<u8>) {
 mod tests {
     use super::*;
 
+    fn test_encode(
+        data: &[u8],
+        width: u32,
+        height: u32,
+        color_type: ColorType,
+    ) -> crate::Result<Vec<u8>> {
+        let options = PngOptions::builder(width, height)
+            .color_type(color_type)
+            .build();
+        encode(data, &options)
+    }
+
+    fn test_encode_with_options(
+        data: &[u8],
+        width: u32,
+        height: u32,
+        color_type: ColorType,
+        options: &PngOptions,
+    ) -> crate::Result<Vec<u8>> {
+        let mut opts = options.clone();
+        opts.width = width;
+        opts.height = height;
+        opts.color_type = color_type;
+        encode(data, &opts)
+    }
+
+    #[allow(dead_code)]
+    fn test_encode_into(
+        output: &mut Vec<u8>,
+        data: &[u8],
+        width: u32,
+        height: u32,
+        color_type: ColorType,
+        options: &PngOptions,
+    ) -> crate::Result<()> {
+        let mut opts = options.clone();
+        opts.width = width;
+        opts.height = height;
+        opts.color_type = color_type;
+        encode_into(output, data, &opts)
+    }
+
     #[test]
     fn test_encode_1x1_rgb() {
         let pixels = vec![255, 0, 0]; // Red pixel
-        let png = encode(&pixels, 1, 1, ColorType::Rgb).unwrap();
+        let png = test_encode(&pixels, 1, 1, ColorType::Rgb).unwrap();
 
         // Check PNG signature
         assert_eq!(&png[0..8], &PNG_SIGNATURE);
@@ -1942,7 +1978,7 @@ mod tests {
     #[test]
     fn test_encode_1x1_rgba() {
         let pixels = vec![255, 0, 0, 255]; // Red opaque pixel
-        let png = encode(&pixels, 1, 1, ColorType::Rgba).unwrap();
+        let png = test_encode(&pixels, 1, 1, ColorType::Rgba).unwrap();
 
         assert_eq!(&png[0..8], &PNG_SIGNATURE);
     }
@@ -1950,14 +1986,14 @@ mod tests {
     #[test]
     fn test_encode_invalid_dimensions() {
         let pixels = vec![255, 0, 0];
-        let result = encode(&pixels, 0, 1, ColorType::Rgb);
+        let result = test_encode(&pixels, 0, 1, ColorType::Rgb);
         assert!(matches!(result, Err(Error::InvalidDimensions { .. })));
     }
 
     #[test]
     fn test_encode_invalid_data_length() {
         let pixels = vec![255, 0]; // Too short for 1x1 RGB
-        let result = encode(&pixels, 1, 1, ColorType::Rgb);
+        let result = test_encode(&pixels, 1, 1, ColorType::Rgb);
         assert!(matches!(result, Err(Error::InvalidDataLength { .. })));
     }
 
@@ -1965,7 +2001,7 @@ mod tests {
     #[test]
     fn test_encode_overflow_data_length() {
         let pixels = Vec::new();
-        let result = encode(&pixels, MAX_DIMENSION, MAX_DIMENSION, ColorType::Rgb);
+        let result = test_encode(&pixels, MAX_DIMENSION, MAX_DIMENSION, ColorType::Rgb);
         assert!(matches!(result, Err(Error::InvalidDataLength { .. })));
     }
 
@@ -1973,29 +2009,14 @@ mod tests {
     fn test_encode_into_reuses_buffer() {
         let mut output = Vec::with_capacity(64);
         let pixels1 = vec![0u8, 0, 0]; // black 1x1 RGB
-        encode_into(
-            &mut output,
-            &pixels1,
-            1,
-            1,
-            ColorType::Rgb,
-            &PngOptions::default(),
-        )
-        .unwrap();
+        let opts = PngOptions::builder(1, 1).color_type(ColorType::Rgb).build();
+        encode_into(&mut output, &pixels1, &opts).unwrap();
         let first = output.clone();
         let first_cap = output.capacity();
         assert!(!first.is_empty());
 
         let pixels2 = vec![255u8, 0, 0]; // red 1x1 RGB
-        encode_into(
-            &mut output,
-            &pixels2,
-            1,
-            1,
-            ColorType::Rgb,
-            &PngOptions::default(),
-        )
-        .unwrap();
+        encode_into(&mut output, &pixels2, &opts).unwrap();
 
         assert_ne!(
             first, output,
@@ -2109,7 +2130,7 @@ mod tests {
             reduce_palette: true,
             ..Default::default()
         };
-        let png = encode_with_options(&pixels, 2, 1, ColorType::Rgba, &opts).unwrap();
+        let png = test_encode_with_options(&pixels, 2, 1, ColorType::Rgba, &opts).unwrap();
         // Color type byte in IHDR should be 3 (palette)
         assert_eq!(png[25], 3);
         // Bit depth should reflect palette size (2 colors -> 1 bit)
@@ -2132,8 +2153,11 @@ mod tests {
             }
         }
 
-        let options = PngOptions::builder().reduce_palette(true).build();
-        let png = encode_with_options(&pixels, width, height, ColorType::Rgb, &options).unwrap();
+        let options = PngOptions::builder(width, height)
+            .color_type(ColorType::Rgb)
+            .reduce_palette(true)
+            .build();
+        let png = encode(&pixels, &options).unwrap();
         assert_eq!(&png[..8], &PNG_SIGNATURE);
         assert!(png.windows(4).any(|w| w == b"PLTE"));
     }
@@ -2141,7 +2165,7 @@ mod tests {
     #[test]
     fn test_png_presets() {
         // Test Fast preset
-        let fast = PngOptions::fast();
+        let fast = PngOptions::fast(100, 100);
         assert_eq!(fast.compression_level, 2);
         assert_eq!(fast.filter_strategy, FilterStrategy::AdaptiveFast);
         assert!(!fast.optimize_alpha);
@@ -2150,7 +2174,7 @@ mod tests {
         assert!(!fast.strip_metadata);
 
         // Test Balanced preset
-        let balanced = PngOptions::balanced();
+        let balanced = PngOptions::balanced(100, 100);
         assert_eq!(balanced.compression_level, 6);
         assert_eq!(balanced.filter_strategy, FilterStrategy::Adaptive);
         assert!(balanced.optimize_alpha);
@@ -2159,7 +2183,7 @@ mod tests {
         assert!(balanced.strip_metadata);
 
         // Test Max preset
-        let max = PngOptions::max();
+        let max = PngOptions::max(100, 100);
         assert_eq!(max.compression_level, 9);
         assert_eq!(max.filter_strategy, FilterStrategy::MinSum);
         assert!(max.optimize_alpha);
@@ -2168,14 +2192,14 @@ mod tests {
         assert!(max.strip_metadata);
 
         // Test from_preset
-        assert_eq!(PngOptions::from_preset(0).compression_level, 2);
-        assert_eq!(PngOptions::from_preset(1).compression_level, 6);
-        assert_eq!(PngOptions::from_preset(2).compression_level, 9);
+        assert_eq!(PngOptions::from_preset(100, 100, 0).compression_level, 2);
+        assert_eq!(PngOptions::from_preset(100, 100, 1).compression_level, 6);
+        assert_eq!(PngOptions::from_preset(100, 100, 2).compression_level, 9);
     }
 
     #[test]
     fn test_builder_overrides_after_preset() {
-        let opts = PngOptions::builder()
+        let opts = PngOptions::builder(100, 100)
             .preset(2) // max
             .compression_level(3)
             .filter_strategy(FilterStrategy::AdaptiveFast)
@@ -2197,10 +2221,10 @@ mod tests {
 
     #[test]
     fn test_builder_lossy_toggle() {
-        let lossy = PngOptions::builder().lossy(true).build();
+        let lossy = PngOptions::builder(100, 100).lossy(true).build();
         assert_eq!(lossy.quantization.mode, QuantizationMode::Auto);
 
-        let lossless = PngOptions::builder().lossy(false).build();
+        let lossless = PngOptions::builder(100, 100).lossy(false).build();
         assert_eq!(lossless.quantization.mode, QuantizationMode::Off);
     }
 
@@ -2211,7 +2235,7 @@ mod tests {
             0, 0, 0, 255, 255, 255, // Row 1: black, white
             255, 255, 255, 0, 0, 0, // Row 2: white, black
         ];
-        let png = encode(&pixels, 2, 2, ColorType::Rgb).unwrap();
+        let png = test_encode(&pixels, 2, 2, ColorType::Rgb).unwrap();
 
         assert_eq!(&png[0..8], &PNG_SIGNATURE);
     }
@@ -2219,7 +2243,7 @@ mod tests {
     #[test]
     fn test_encode_grayscale() {
         let pixels = vec![128, 255, 0, 64]; // 2x2 grayscale
-        let png = encode(&pixels, 2, 2, ColorType::Gray).unwrap();
+        let png = test_encode(&pixels, 2, 2, ColorType::Gray).unwrap();
 
         assert_eq!(&png[0..8], &PNG_SIGNATURE);
     }
@@ -2243,7 +2267,7 @@ mod tests {
             ..Default::default()
         };
 
-        let png = encode_with_options(&pixels, 16, 32, ColorType::Rgb, &opts).unwrap();
+        let png = test_encode_with_options(&pixels, 16, 32, ColorType::Rgb, &opts).unwrap();
 
         // Should produce indexed PNG (color type 3)
         assert_eq!(png[25], 3);
@@ -2272,7 +2296,7 @@ mod tests {
             ..Default::default()
         };
 
-        let png = encode_with_options(&pixels, 16, 32, ColorType::Rgb, &opts).unwrap();
+        let png = test_encode_with_options(&pixels, 16, 32, ColorType::Rgb, &opts).unwrap();
 
         // Should stay as RGB (color type 2)
         assert_eq!(png[25], 2);
@@ -2283,11 +2307,11 @@ mod tests {
     #[test]
     fn test_from_preset_with_lossless() {
         // Lossless = true should have quantization off
-        let lossless = PngOptions::from_preset_with_lossless(1, true);
+        let lossless = PngOptions::from_preset_with_lossless(100, 100, 1, true);
         assert_eq!(lossless.quantization.mode, QuantizationMode::Off);
 
         // Lossless = false should have quantization auto
-        let lossy = PngOptions::from_preset_with_lossless(1, false);
+        let lossy = PngOptions::from_preset_with_lossless(100, 100, 1, false);
         assert_eq!(lossy.quantization.mode, QuantizationMode::Auto);
     }
 
@@ -2311,7 +2335,7 @@ mod tests {
             ..Default::default()
         };
 
-        let png = encode_with_options(&pixels, 16, 16, ColorType::Rgba, &opts).unwrap();
+        let png = test_encode_with_options(&pixels, 16, 16, ColorType::Rgba, &opts).unwrap();
 
         // Should produce indexed PNG (color type 3)
         assert_eq!(png[25], 3);
@@ -2344,7 +2368,7 @@ mod tests {
             ..Default::default()
         };
 
-        let png = encode_with_options(&pixels, 64, 64, ColorType::Rgb, &opts).unwrap();
+        let png = test_encode_with_options(&pixels, 64, 64, ColorType::Rgb, &opts).unwrap();
 
         // Should produce indexed PNG
         assert_eq!(png[25], 3);
@@ -2374,7 +2398,7 @@ mod tests {
             ..Default::default()
         };
 
-        let png = encode_with_options(&pixels, 64, 64, ColorType::Rgb, &opts).unwrap();
+        let png = test_encode_with_options(&pixels, 64, 64, ColorType::Rgb, &opts).unwrap();
 
         // Should still create palette (via lossless reduction, not quantization)
         // The key is that it uses the exact colors, not quantized approximations
@@ -2399,31 +2423,22 @@ mod tests {
         }
 
         // Encode lossless without palette reduction (to get true RGB output)
-        let lossless_opts = PngOptions {
-            quantization: QuantizationOptions {
-                mode: QuantizationMode::Off,
-                max_colors: 256,
-                dithering: false,
-            },
-            reduce_palette: false, // Don't reduce to palette
-            reduce_color_type: false,
-            ..PngOptions::fast()
-        };
-        let lossless =
-            encode_with_options(&pixels, 32, 32, ColorType::Rgb, &lossless_opts).unwrap();
+        let lossless_opts = PngOptions::builder(32, 32)
+            .color_type(ColorType::Rgb)
+            .quantization_mode(QuantizationMode::Off)
+            .reduce_palette(false)
+            .reduce_color_type(false)
+            .build();
+        let lossless = encode(&pixels, &lossless_opts).unwrap();
 
         // Encode lossy with forced quantization
-        let lossy_opts = PngOptions {
-            quantization: QuantizationOptions {
-                mode: QuantizationMode::Force,
-                max_colors: 256,
-                dithering: false,
-            },
-            reduce_palette: false,
-            reduce_color_type: false,
-            ..PngOptions::fast()
-        };
-        let lossy = encode_with_options(&pixels, 32, 32, ColorType::Rgb, &lossy_opts).unwrap();
+        let lossy_opts = PngOptions::builder(32, 32)
+            .color_type(ColorType::Rgb)
+            .quantization_mode(QuantizationMode::Force)
+            .reduce_palette(false)
+            .reduce_color_type(false)
+            .build();
+        let lossy = encode(&pixels, &lossy_opts).unwrap();
 
         // Lossless should be RGB (color type 2), lossy should be indexed (color type 3)
         assert_eq!(lossless[25], 2, "Lossless should be RGB (color type 2)");
@@ -2453,7 +2468,7 @@ mod tests {
             ..Default::default()
         };
 
-        let png = encode_with_options(&pixels, 16, 16, ColorType::Rgb, &opts).unwrap();
+        let png = test_encode_with_options(&pixels, 16, 16, ColorType::Rgb, &opts).unwrap();
 
         // Should produce indexed PNG
         assert_eq!(png[25], 3);
@@ -2495,7 +2510,7 @@ mod tests {
             ..Default::default()
         };
 
-        let png = encode_with_options(&pixels, 64, 64, ColorType::Rgba, &opts).unwrap();
+        let png = test_encode_with_options(&pixels, 64, 64, ColorType::Rgba, &opts).unwrap();
 
         // Should produce indexed PNG with palette
         assert_eq!(png[25], 3);
@@ -2672,16 +2687,13 @@ mod tests {
             0, 0, 255, // blue
             255, 255, 0, // yellow
         ];
-        let options = PngOptions {
-            quantization: QuantizationOptions {
-                mode: QuantizationMode::Force,
-                max_colors: 4,
-                dithering: false,
-            },
-            ..PngOptions::default()
-        };
+        let options = PngOptions::builder(2, 2)
+            .color_type(ColorType::Rgb)
+            .quantization_mode(QuantizationMode::Force)
+            .quantization_max_colors(4)
+            .build();
 
-        let png = encode_with_options(&data, 2, 2, ColorType::Rgb, &options).unwrap();
+        let png = encode(&data, &options).unwrap();
         assert_eq!(
             png[25], 3,
             "color type should be palette (3) after quantization"
@@ -2696,16 +2708,12 @@ mod tests {
             255, 0, 0, 0, // transparent red
             0, 255, 0, 255, // opaque green
         ];
-        let options = PngOptions {
-            quantization: QuantizationOptions {
-                mode: QuantizationMode::Force,
-                max_colors: 256,
-                dithering: false,
-            },
-            ..PngOptions::default()
-        };
+        let options = PngOptions::builder(2, 1)
+            .color_type(ColorType::Rgba)
+            .quantization_mode(QuantizationMode::Force)
+            .build();
 
-        let png = encode_with_options(&data, 2, 1, ColorType::Rgba, &options).unwrap();
+        let png = encode(&data, &options).unwrap();
 
         // Color type should be palette (3) and bit depth 8
         assert_eq!(png[25], 3, "color type should be palette (3)");
@@ -3204,7 +3212,7 @@ mod tests {
             ..Default::default()
         };
 
-        let png = encode_with_options(&pixels, 64, 64, ColorType::Rgb, &opts).unwrap();
+        let png = test_encode_with_options(&pixels, 64, 64, ColorType::Rgb, &opts).unwrap();
 
         // Should produce indexed PNG (color type 3)
         assert_eq!(png[25], 3, "should produce indexed PNG");
@@ -3244,7 +3252,7 @@ mod tests {
         };
 
         // Should encode without error
-        let result = encode_with_options(&pixels, 10, 30, ColorType::Rgb, &opts);
+        let result = test_encode_with_options(&pixels, 10, 30, ColorType::Rgb, &opts);
         assert!(result.is_ok(), "should encode skin tones successfully");
     }
 
@@ -3269,7 +3277,7 @@ mod tests {
             ..Default::default()
         };
 
-        let png = encode_with_options(&pixels, 32, 32, ColorType::Rgb, &opts).unwrap();
+        let png = test_encode_with_options(&pixels, 32, 32, ColorType::Rgb, &opts).unwrap();
 
         // Should produce indexed PNG
         assert_eq!(png[25], 3, "should produce indexed PNG with dithering");
@@ -3294,7 +3302,7 @@ mod tests {
             ..Default::default()
         };
 
-        let png = encode_with_options(&pixels, 64, 64, ColorType::Rgb, &opts).unwrap();
+        let png = test_encode_with_options(&pixels, 64, 64, ColorType::Rgb, &opts).unwrap();
 
         // Should produce valid PNG
         assert_eq!(&png[0..8], &PNG_SIGNATURE);
@@ -3310,22 +3318,22 @@ mod tests {
         // Repetitive data should compress well
         let data = vec![42u8; 64 * 64 * 3];
 
-        let standard_opts = PngOptions {
-            compression_level: 9,
-            filter_strategy: FilterStrategy::Adaptive,
-            optimal_compression: false,
-            ..Default::default()
-        };
+        let standard_opts = PngOptions::builder(64, 64)
+            .color_type(ColorType::Rgb)
+            .compression_level(9)
+            .filter_strategy(FilterStrategy::Adaptive)
+            .optimal_compression(false)
+            .build();
 
-        let optimal_opts = PngOptions {
-            compression_level: 9,
-            filter_strategy: FilterStrategy::Adaptive,
-            optimal_compression: true,
-            ..Default::default()
-        };
+        let optimal_opts = PngOptions::builder(64, 64)
+            .color_type(ColorType::Rgb)
+            .compression_level(9)
+            .filter_strategy(FilterStrategy::Adaptive)
+            .optimal_compression(true)
+            .build();
 
-        let standard = encode_with_options(&data, 64, 64, ColorType::Rgb, &standard_opts).unwrap();
-        let optimal = encode_with_options(&data, 64, 64, ColorType::Rgb, &optimal_opts).unwrap();
+        let standard = encode(&data, &standard_opts).unwrap();
+        let optimal = encode(&data, &optimal_opts).unwrap();
 
         // Optimal should not be larger than standard (may be equal for simple data)
         assert!(
@@ -3358,7 +3366,7 @@ mod tests {
             ..Default::default()
         };
 
-        let png = encode_with_options(&pixels, 64, 64, ColorType::Rgba, &opts).unwrap();
+        let png = test_encode_with_options(&pixels, 64, 64, ColorType::Rgba, &opts).unwrap();
         assert_eq!(&png[0..8], &PNG_SIGNATURE);
 
         // Should produce indexed PNG (color type 3)
@@ -3384,7 +3392,7 @@ mod tests {
             ..Default::default()
         };
 
-        let png = encode_with_options(&pixels, 64, 64, ColorType::Rgb, &opts).unwrap();
+        let png = test_encode_with_options(&pixels, 64, 64, ColorType::Rgb, &opts).unwrap();
         assert_eq!(&png[0..8], &PNG_SIGNATURE);
 
         // With many colors, should stay as RGB (color type 2) or still be indexed if < 256
@@ -3414,7 +3422,7 @@ mod tests {
             ..Default::default()
         };
 
-        let png = encode_with_options(&pixels, 16, 16, ColorType::Rgba, &opts).unwrap();
+        let png = test_encode_with_options(&pixels, 16, 16, ColorType::Rgba, &opts).unwrap();
         assert_eq!(&png[0..8], &PNG_SIGNATURE);
 
         // Should convert to RGB (color type 2) since all alpha is 255
@@ -3437,7 +3445,7 @@ mod tests {
             ..Default::default()
         };
 
-        let png = encode_with_options(&pixels, 2, 2, ColorType::Rgba, &opts).unwrap();
+        let png = test_encode_with_options(&pixels, 2, 2, ColorType::Rgba, &opts).unwrap();
         assert_eq!(&png[0..8], &PNG_SIGNATURE);
 
         // Should produce valid PNG
@@ -3462,7 +3470,7 @@ mod tests {
             ..Default::default()
         };
 
-        let png = encode_with_options(&pixels, 16, 16, ColorType::Rgba, &opts).unwrap();
+        let png = test_encode_with_options(&pixels, 16, 16, ColorType::Rgba, &opts).unwrap();
         assert_eq!(&png[0..8], &PNG_SIGNATURE);
 
         // Should stay as RGBA (color type 6) since it has semi-transparent pixels

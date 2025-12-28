@@ -7,9 +7,63 @@
 #![cfg(feature = "cli")]
 
 use pixo::decode::{decode_jpeg, decode_png};
+use pixo::jpeg::JpegOptions;
+use pixo::png::PngOptions;
 use pixo::{jpeg, png, ColorType};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::path::Path;
+
+#[allow(dead_code)]
+fn encode_png(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    color_type: ColorType,
+) -> pixo::Result<Vec<u8>> {
+    let options = PngOptions::builder(width, height)
+        .color_type(color_type)
+        .build();
+    png::encode(data, &options)
+}
+
+#[allow(dead_code)]
+fn encode_jpeg(data: &[u8], width: u32, height: u32, quality: u8) -> pixo::Result<Vec<u8>> {
+    let options = JpegOptions::builder(width, height)
+        .color_type(ColorType::Rgb)
+        .quality(quality)
+        .build();
+    jpeg::encode(data, &options)
+}
+
+#[allow(dead_code)]
+fn encode_jpeg_with_color(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    quality: u8,
+    color_type: ColorType,
+) -> pixo::Result<Vec<u8>> {
+    let options = JpegOptions::builder(width, height)
+        .color_type(color_type)
+        .quality(quality)
+        .build();
+    jpeg::encode(data, &options)
+}
+
+#[allow(dead_code)]
+fn encode_jpeg_with_options(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    color_type: ColorType,
+    options: &JpegOptions,
+) -> pixo::Result<Vec<u8>> {
+    let mut opts = *options;
+    opts.width = width;
+    opts.height = height;
+    opts.color_type = color_type;
+    jpeg::encode(data, &opts)
+}
 
 // ============================================================================
 // PNG Decoder Tests
@@ -70,7 +124,7 @@ fn test_decode_png_fixture_playground() {
 #[test]
 fn test_png_encode_decode_roundtrip_rgb() {
     let pixels = vec![255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0]; // 2x2 RGB
-    let encoded = png::encode(&pixels, 2, 2, ColorType::Rgb).expect("encode");
+    let encoded = encode_png(&pixels, 2, 2, ColorType::Rgb).expect("encode");
     let decoded = decode_png(&encoded).expect("decode");
 
     assert_eq!(decoded.width, 2);
@@ -88,7 +142,7 @@ fn test_png_encode_decode_roundtrip_rgba() {
         0, 0, 255, 0, // Blue, transparent
         255, 255, 0, 255, // Yellow, opaque
     ];
-    let encoded = png::encode(&pixels, 2, 2, ColorType::Rgba).expect("encode");
+    let encoded = encode_png(&pixels, 2, 2, ColorType::Rgba).expect("encode");
     let decoded = decode_png(&encoded).expect("decode");
 
     assert_eq!(decoded.width, 2);
@@ -101,7 +155,7 @@ fn test_png_encode_decode_roundtrip_rgba() {
 #[test]
 fn test_png_encode_decode_roundtrip_gray() {
     let pixels = vec![0, 64, 128, 255]; // 2x2 grayscale
-    let encoded = png::encode(&pixels, 2, 2, ColorType::Gray).expect("encode");
+    let encoded = encode_png(&pixels, 2, 2, ColorType::Gray).expect("encode");
     let decoded = decode_png(&encoded).expect("decode");
 
     assert_eq!(decoded.width, 2);
@@ -114,7 +168,7 @@ fn test_png_encode_decode_roundtrip_gray() {
 #[test]
 fn test_png_encode_decode_roundtrip_gray_alpha() {
     let pixels = vec![0, 255, 128, 128, 255, 0, 64, 192]; // 2x2 gray+alpha
-    let encoded = png::encode(&pixels, 2, 2, ColorType::GrayAlpha).expect("encode");
+    let encoded = encode_png(&pixels, 2, 2, ColorType::GrayAlpha).expect("encode");
     let decoded = decode_png(&encoded).expect("decode");
 
     assert_eq!(decoded.width, 2);
@@ -128,8 +182,7 @@ fn test_png_encode_decode_roundtrip_gray_alpha() {
 fn test_png_encode_decode_various_sizes() {
     // Use the exact same pixel pattern as the working test_png_encode_decode_roundtrip_rgb
     let pixels_2x2_rgb = vec![255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0]; // 2x2 RGB
-    let encoded =
-        png::encode(&pixels_2x2_rgb, 2, 2, ColorType::Rgb).expect("encode should succeed");
+    let encoded = encode_png(&pixels_2x2_rgb, 2, 2, ColorType::Rgb).expect("encode should succeed");
     let decoded = decode_png(&encoded).unwrap_or_else(|e| panic!("decode failed for 2x2 RGB: {e}"));
     assert_eq!(decoded.width, 2);
     assert_eq!(decoded.height, 2);
@@ -141,8 +194,7 @@ fn test_png_encode_decode_various_sizes() {
     for _ in 0..4 {
         pixels_4x4_rgb.extend_from_slice(&[255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0]);
     }
-    let encoded =
-        png::encode(&pixels_4x4_rgb, 4, 4, ColorType::Rgb).expect("encode should succeed");
+    let encoded = encode_png(&pixels_4x4_rgb, 4, 4, ColorType::Rgb).expect("encode should succeed");
     let decoded = decode_png(&encoded).unwrap_or_else(|e| panic!("decode failed for 4x4 RGB: {e}"));
     assert_eq!(decoded.width, 4);
     assert_eq!(decoded.height, 4);
@@ -158,7 +210,7 @@ fn test_png_encode_decode_larger() {
     let mut pixels = vec![0u8; w * h * 3];
     rng.fill(pixels.as_mut_slice());
 
-    let encoded = png::encode(&pixels, w as u32, h as u32, ColorType::Rgb).expect("encode");
+    let encoded = encode_png(&pixels, w as u32, h as u32, ColorType::Rgb).expect("encode");
     let decoded = decode_png(&encoded).expect("decode");
 
     assert_eq!(decoded.width, w as u32);
@@ -251,7 +303,7 @@ fn test_jpeg_encode_decode_roundtrip_rgb() {
     let mut pixels = vec![0u8; w * h * 3];
     rng.fill(pixels.as_mut_slice());
 
-    let encoded = jpeg::encode(&pixels, w as u32, h as u32, 90).expect("encode");
+    let encoded = encode_jpeg(&pixels, w as u32, h as u32, 90).expect("encode");
     let decoded = decode_jpeg(&encoded).expect("decode");
 
     // JPEG is lossy, so just check dimensions
@@ -270,7 +322,7 @@ fn test_jpeg_encode_decode_roundtrip_gray() {
     rng.fill(pixels.as_mut_slice());
 
     let encoded =
-        jpeg::encode_with_color(&pixels, w as u32, h as u32, 90, ColorType::Gray).expect("encode");
+        encode_jpeg_with_color(&pixels, w as u32, h as u32, 90, ColorType::Gray).expect("encode");
     let decoded = decode_jpeg(&encoded).expect("decode");
 
     assert_eq!(decoded.width, w as u32);
@@ -289,7 +341,7 @@ fn test_jpeg_grayscale_non_mcu_aligned_size() {
     let pixels = vec![128u8; w * h];
 
     let encoded =
-        jpeg::encode_with_color(&pixels, w as u32, h as u32, 90, ColorType::Gray).expect("encode");
+        encode_jpeg_with_color(&pixels, w as u32, h as u32, 90, ColorType::Gray).expect("encode");
     let decoded = decode_jpeg(&encoded).expect("decode");
 
     assert_eq!(decoded.width, w as u32);
@@ -313,7 +365,7 @@ fn test_jpeg_encode_decode_various_sizes() {
         let mut pixels = vec![0u8; w * h * 3];
         rng.fill(pixels.as_mut_slice());
 
-        let encoded = jpeg::encode(&pixels, w as u32, h as u32, 85).expect("encode");
+        let encoded = encode_jpeg(&pixels, w as u32, h as u32, 85).expect("encode");
         let decoded = decode_jpeg(&encoded).expect("decode");
 
         assert_eq!(decoded.width, w as u32, "width mismatch for {w}x{h}");
@@ -330,6 +382,9 @@ fn test_jpeg_encode_decode_subsampling_420() {
     rng.fill(pixels.as_mut_slice());
 
     let opts = jpeg::JpegOptions {
+        width: w as u32,
+        height: h as u32,
+        color_type: ColorType::Rgb,
         quality: 85,
         subsampling: jpeg::Subsampling::S420,
         restart_interval: None,
@@ -338,8 +393,7 @@ fn test_jpeg_encode_decode_subsampling_420() {
         trellis_quant: false,
     };
 
-    let encoded = jpeg::encode_with_options(&pixels, w as u32, h as u32, ColorType::Rgb, &opts)
-        .expect("encode");
+    let encoded = jpeg::encode(&pixels, &opts).expect("encode");
     let decoded = decode_jpeg(&encoded).expect("decode");
 
     assert_eq!(decoded.width, w as u32);
@@ -376,7 +430,7 @@ fn test_jpeg_encode_decode_solid_color() {
     let (w, h) = (16, 16);
     let pixels = vec![128u8; w * h * 3]; // solid gray
 
-    let encoded = jpeg::encode(&pixels, w as u32, h as u32, 95).expect("encode");
+    let encoded = encode_jpeg(&pixels, w as u32, h as u32, 95).expect("encode");
     let decoded = decode_jpeg(&encoded).expect("decode");
 
     assert_eq!(decoded.width, w as u32);
@@ -411,7 +465,7 @@ fn test_jpeg_encode_decode_gradient() {
         }
     }
 
-    let encoded = jpeg::encode(&pixels, w as u32, h as u32, 90).expect("encode");
+    let encoded = encode_jpeg(&pixels, w as u32, h as u32, 90).expect("encode");
     let decoded = decode_jpeg(&encoded).expect("decode");
 
     assert_eq!(decoded.width, w as u32);

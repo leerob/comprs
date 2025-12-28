@@ -16,16 +16,20 @@
 //!
 //! ```rust
 //! use pixo::{png, jpeg, ColorType};
+//! use pixo::png::PngOptions;
+//! use pixo::jpeg::JpegOptions;
 //!
 //! # fn main() -> pixo::Result<()> {
 //! // PNG: 3x1 RGB pixels (red, green, blue)
 //! let png_pixels = vec![255, 0, 0, 0, 255, 0, 0, 0, 255];
-//! let png_bytes = png::encode(&png_pixels, 3, 1, ColorType::Rgb)?;
+//! let png_opts = PngOptions::builder(3, 1).color_type(ColorType::Rgb).build();
+//! let png_bytes = png::encode(&png_pixels, &png_opts)?;
 //! assert!(!png_bytes.is_empty());
 //!
 //! // JPEG: 1x1 RGB pixel
 //! let jpg_pixels = vec![255, 0, 0];
-//! let jpg_bytes = jpeg::encode(&jpg_pixels, 1, 1, 85)?;
+//! let jpg_opts = JpegOptions::builder(1, 1).color_type(ColorType::Rgb).quality(85).build();
+//! let jpg_bytes = jpeg::encode(&jpg_pixels, &jpg_opts)?;
 //! assert!(!jpg_bytes.is_empty());
 //! # Ok(())
 //! # }
@@ -34,17 +38,18 @@
 //! ### Custom options (PNG)
 //!
 //! ```rust
-//! use pixo::png::{FilterStrategy, PngOptions};
-//! use pixo::{png, ColorType};
+//! use pixo::png::{encode, FilterStrategy, PngOptions};
+//! use pixo::ColorType;
 //!
 //! # fn main() -> pixo::Result<()> {
 //! let pixels = vec![255, 0, 0, 0, 255, 0, 0, 0, 255];
-//! let options = PngOptions::builder()
+//! let options = PngOptions::builder(3, 1)
+//!     .color_type(ColorType::Rgb)
 //!     .preset(1) // balanced: compression level 6, adaptive filters + lossless opts
 //!     .filter_strategy(FilterStrategy::Adaptive)
 //!     .optimize_alpha(true)
 //!     .build();
-//! let png_bytes = png::encode_with_options(&pixels, 3, 1, ColorType::Rgb, &options)?;
+//! let png_bytes = encode(&pixels, &options)?;
 //! assert!(!png_bytes.is_empty());
 //! # Ok(())
 //! # }
@@ -53,14 +58,13 @@
 //! ### Custom options (JPEG)
 //!
 //! ```rust
-//! use pixo::jpeg::{self, JpegOptions};
+//! use pixo::jpeg::{encode, JpegOptions};
 //! use pixo::ColorType;
 //!
 //! # fn main() -> pixo::Result<()> {
 //! let pixels = vec![255, 0, 0];
-//! let options = JpegOptions::max(85); // progressive + trellis + optimized Huffman
-//! let jpg_bytes =
-//!     jpeg::encode_with_options(&pixels, 1, 1, ColorType::Rgb, &options)?;
+//! let options = JpegOptions::max(1, 1, 85); // progressive + trellis + optimized Huffman
+//! let jpg_bytes = encode(&pixels, &options)?;
 //! assert!(!jpg_bytes.is_empty());
 //! # Ok(())
 //! # }
@@ -69,14 +73,17 @@
 //! ### Image resizing
 //!
 //! ```rust
-//! use pixo::{resize, ColorType, ResizeAlgorithm};
+//! use pixo::{resize, ColorType, ResizeAlgorithm, ResizeOptions};
 //!
 //! # fn main() -> pixo::Result<()> {
 //! // 4x4 RGBA image -> 2x2 using Lanczos3 (highest quality)
 //! let pixels = vec![128u8; 4 * 4 * 4];
-//! let resized = resize::resize(
-//!     &pixels, 4, 4, 2, 2, ColorType::Rgba, ResizeAlgorithm::Lanczos3
-//! )?;
+//! let options = ResizeOptions::builder(4, 4)
+//!     .dst(2, 2)
+//!     .color_type(ColorType::Rgba)
+//!     .algorithm(ResizeAlgorithm::Lanczos3)
+//!     .build();
+//! let resized = resize::resize(&pixels, &options)?;
 //! assert_eq!(resized.len(), 2 * 2 * 4);
 //! # Ok(())
 //! # }
@@ -86,28 +93,20 @@
 //!
 //! ```rust
 //! use pixo::{jpeg, png, ColorType};
+//! use pixo::png::PngOptions;
+//! use pixo::jpeg::JpegOptions;
 //!
 //! # fn main() -> pixo::Result<()> {
 //! let pixels = vec![255, 0, 0, 0, 255, 0]; // 2 RGB pixels
+//!
 //! let mut png_buf = Vec::new();
-//! png::encode_into(
-//!     &mut png_buf,
-//!     &pixels,
-//!     2,
-//!     1,
-//!     ColorType::Rgb,
-//!     &png::PngOptions::default(),
-//! )?;
+//! let png_opts = PngOptions::builder(2, 1).color_type(ColorType::Rgb).build();
+//! png::encode_into(&mut png_buf, &pixels, &png_opts)?;
 //!
 //! let mut jpg_buf = Vec::new();
-//! jpeg::encode_with_options_into(
-//!     &mut jpg_buf,
-//!     &pixels,
-//!     2,
-//!     1,
-//!     ColorType::Rgb,
-//!     &jpeg::JpegOptions::balanced(85),
-//! )?;
+//! let jpg_opts = JpegOptions::balanced(2, 1, 85);
+//! jpeg::encode_into(&mut jpg_buf, &pixels, &jpg_opts)?;
+//!
 //! assert!(!png_buf.is_empty() && !jpg_buf.is_empty());
 //! # Ok(())
 //! # }
@@ -136,8 +135,8 @@
 //! ## Safety and performance notes
 //! - Unsafe is only compiled when `simd` or `wasm` is enabled; otherwise `forbid(unsafe_code)` is applied.
 //! - Prefer `encode_into` variants when encoding repeatedly to reuse allocations.
-//! - For smallest PNGs, use `PngOptions::max()` (slow) or enable auto quantization for lossy palette outputs.
-//! - For smallest JPEGs, use `JpegOptions::max(quality)` which enables optimized Huffman, progressive scans, and trellis quantization.
+//! - For smallest PNGs, use `PngOptions::max(w, h)` (slow) or enable auto quantization for lossy palette outputs.
+//! - For smallest JPEGs, use `JpegOptions::max(w, h, quality)` which enables optimized Huffman, progressive scans, and trellis quantization.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 // Allow unsafe code only when SIMD or WASM feature is enabled
@@ -164,7 +163,7 @@ pub mod wasm;
 
 pub use color::ColorType;
 pub use error::{Error, Result};
-pub use resize::ResizeAlgorithm;
+pub use resize::{ResizeAlgorithm, ResizeOptions};
 
 /// High-level and conceptual guides rendered inside rustdoc.
 ///

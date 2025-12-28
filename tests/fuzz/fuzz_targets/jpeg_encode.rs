@@ -52,16 +52,15 @@ fuzz_target!(|input: JpegInput| {
     // Clamp quality to valid range
     let quality = (input.quality % 100).max(1);
 
-    // Build options
-    let options = pixo::jpeg::JpegOptions {
-        quality,
-        progressive: input.progressive,
-        ..Default::default()
-    };
+    // Build options with new builder pattern
+    let options = pixo::jpeg::JpegOptions::builder(width, height)
+        .color_type(color_type)
+        .quality(quality)
+        .progressive(input.progressive)
+        .build();
 
     // Try to encode - should not panic
-    let result =
-        pixo::jpeg::encode_with_options(pixel_data, width, height, color_type, &options);
+    let result = pixo::jpeg::encode(pixel_data, &options);
 
     // If encoding succeeded, verify basic structure
     if let Ok(encoded) = result {

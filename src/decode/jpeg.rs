@@ -958,7 +958,8 @@ mod tests {
     fn test_jpeg_encode_decode_roundtrip() {
         // Create a simple image and encode it, then decode
         let pixels = vec![128u8; 8 * 8 * 3];
-        let encoded = crate::jpeg::encode(&pixels, 8, 8, 95).expect("encode should work");
+        let opts = crate::jpeg::JpegOptions::balanced(8, 8, 95);
+        let encoded = crate::jpeg::encode(&pixels, &opts).expect("encode should work");
         let decoded = decode_jpeg(&encoded).expect("decode should work");
 
         assert_eq!(decoded.width, 8);
@@ -970,8 +971,11 @@ mod tests {
     #[test]
     fn test_jpeg_encode_decode_grayscale() {
         let pixels = vec![128u8; 8 * 8];
-        let encoded = crate::jpeg::encode_with_color(&pixels, 8, 8, 95, crate::ColorType::Gray)
-            .expect("encode should work");
+        let opts = crate::jpeg::JpegOptions::builder(8, 8)
+            .color_type(crate::ColorType::Gray)
+            .quality(95)
+            .build();
+        let encoded = crate::jpeg::encode(&pixels, &opts).expect("encode should work");
         let decoded = decode_jpeg(&encoded).expect("decode should work");
 
         assert_eq!(decoded.width, 8);

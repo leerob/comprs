@@ -8,20 +8,17 @@
 //! # Example
 //!
 //! ```rust
-//! use pixo::resize::{resize, ResizeAlgorithm};
+//! use pixo::resize::{resize, ResizeOptions, ResizeAlgorithm};
 //! use pixo::ColorType;
 //!
 //! // Resize a 100x100 RGBA image to 50x50 using Lanczos3
 //! let pixels = vec![128u8; 100 * 100 * 4];
-//! let resized = resize(
-//!     &pixels,
-//!     100,
-//!     100,
-//!     50,
-//!     50,
-//!     ColorType::Rgba,
-//!     ResizeAlgorithm::Lanczos3,
-//! ).unwrap();
+//! let options = ResizeOptions::builder(100, 100)
+//!     .dst(50, 50)
+//!     .color_type(ColorType::Rgba)
+//!     .algorithm(ResizeAlgorithm::Lanczos3)
+//!     .build();
+//! let resized = resize(&pixels, &options).unwrap();
 //! assert_eq!(resized.len(), 50 * 50 * 4);
 //! ```
 
@@ -47,17 +44,113 @@ pub enum ResizeAlgorithm {
     Lanczos3,
 }
 
+/// Options for image resizing operations.
+///
+/// Use [`ResizeOptions::builder()`] to create options with a fluent API.
+///
+/// # Example
+///
+/// ```rust
+/// use pixo::resize::{resize, ResizeOptions, ResizeAlgorithm};
+/// use pixo::ColorType;
+///
+/// let pixels = vec![128u8; 100 * 100 * 4];
+/// let options = ResizeOptions::builder(100, 100)
+///     .dst(50, 50)
+///     .color_type(ColorType::Rgba)
+///     .algorithm(ResizeAlgorithm::Lanczos3)
+///     .build();
+/// let resized = resize(&pixels, &options).unwrap();
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResizeOptions {
+    /// Source image width in pixels.
+    pub src_width: u32,
+    /// Source image height in pixels.
+    pub src_height: u32,
+    /// Destination image width in pixels.
+    pub dst_width: u32,
+    /// Destination image height in pixels.
+    pub dst_height: u32,
+    /// Color type of the pixel data.
+    pub color_type: ColorType,
+    /// Resizing algorithm to use.
+    pub algorithm: ResizeAlgorithm,
+}
+
+impl ResizeOptions {
+    /// Create a builder for [`ResizeOptions`].
+    ///
+    /// The source dimensions are required; destination defaults to matching source
+    /// (no resize), color type defaults to RGBA, and algorithm defaults to Bilinear.
+    pub fn builder(src_width: u32, src_height: u32) -> ResizeOptionsBuilder {
+        ResizeOptionsBuilder::new(src_width, src_height)
+    }
+}
+
+/// Builder for [`ResizeOptions`].
+#[derive(Debug, Clone)]
+pub struct ResizeOptionsBuilder {
+    src_width: u32,
+    src_height: u32,
+    dst_width: u32,
+    dst_height: u32,
+    color_type: ColorType,
+    algorithm: ResizeAlgorithm,
+}
+
+impl ResizeOptionsBuilder {
+    /// Create a new builder with source dimensions.
+    pub fn new(src_width: u32, src_height: u32) -> Self {
+        Self {
+            src_width,
+            src_height,
+            dst_width: src_width,
+            dst_height: src_height,
+            color_type: ColorType::Rgba,
+            algorithm: ResizeAlgorithm::default(),
+        }
+    }
+
+    /// Set the destination dimensions.
+    pub fn dst(mut self, width: u32, height: u32) -> Self {
+        self.dst_width = width;
+        self.dst_height = height;
+        self
+    }
+
+    /// Set the color type of the pixel data.
+    pub fn color_type(mut self, color_type: ColorType) -> Self {
+        self.color_type = color_type;
+        self
+    }
+
+    /// Set the resizing algorithm.
+    pub fn algorithm(mut self, algorithm: ResizeAlgorithm) -> Self {
+        self.algorithm = algorithm;
+        self
+    }
+
+    /// Build the [`ResizeOptions`].
+    #[must_use]
+    pub fn build(self) -> ResizeOptions {
+        ResizeOptions {
+            src_width: self.src_width,
+            src_height: self.src_height,
+            dst_width: self.dst_width,
+            dst_height: self.dst_height,
+            color_type: self.color_type,
+            algorithm: self.algorithm,
+        }
+    }
+}
+
 /// Resize an image to new dimensions.
 ///
 /// # Arguments
 ///
 /// * `data` - Raw pixel data (row-major order)
-/// * `src_width` - Source image width in pixels
-/// * `src_height` - Source image height in pixels
-/// * `dst_width` - Destination image width in pixels
-/// * `dst_height` - Destination image height in pixels
-/// * `color_type` - Color type of the pixel data
-/// * `algorithm` - Resizing algorithm to use
+/// * `options` - Resize options specifying dimensions, color type, and algorithm
 ///
 /// # Returns
 ///
@@ -66,26 +159,10 @@ pub enum ResizeAlgorithm {
 /// # Errors
 ///
 /// Returns an error if dimensions are invalid or data length doesn't match.
-pub fn resize(
-    data: &[u8],
-    src_width: u32,
-    src_height: u32,
-    dst_width: u32,
-    dst_height: u32,
-    color_type: ColorType,
-    algorithm: ResizeAlgorithm,
-) -> Result<Vec<u8>> {
+#[must_use = "resizing produces pixel data that should be used"]
+pub fn resize(data: &[u8], options: &ResizeOptions) -> Result<Vec<u8>> {
     let mut output = Vec::new();
-    resize_into(
-        &mut output,
-        data,
-        src_width,
-        src_height,
-        dst_width,
-        dst_height,
-        color_type,
-        algorithm,
-    )?;
+    resize_into(&mut output, data, options)?;
     Ok(output)
 }
 
@@ -98,14 +175,24 @@ pub fn resize(
 ///
 /// * `output` - Buffer to write resized data into (will be cleared)
 /// * `data` - Raw pixel data (row-major order)
-/// * `src_width` - Source image width in pixels
-/// * `src_height` - Source image height in pixels
-/// * `dst_width` - Destination image width in pixels
-/// * `dst_height` - Destination image height in pixels
-/// * `color_type` - Color type of the pixel data
-/// * `algorithm` - Resizing algorithm to use
+/// * `options` - Resize options specifying dimensions, color type, and algorithm
+#[must_use = "this `Result` may indicate a resize error"]
+pub fn resize_into(output: &mut Vec<u8>, data: &[u8], options: &ResizeOptions) -> Result<()> {
+    resize_impl(
+        output,
+        data,
+        options.src_width,
+        options.src_height,
+        options.dst_width,
+        options.dst_height,
+        options.color_type,
+        options.algorithm,
+    )
+}
+
+/// Internal resize implementation.
 #[allow(clippy::too_many_arguments)]
-pub fn resize_into(
+fn resize_impl(
     output: &mut Vec<u8>,
     data: &[u8],
     src_width: u32,
@@ -518,6 +605,45 @@ fn resize_lanczos3(
 mod tests {
     use super::*;
 
+    /// Helper for tests: builds ResizeOptions from positional args
+    fn test_resize(
+        data: &[u8],
+        src_width: u32,
+        src_height: u32,
+        dst_width: u32,
+        dst_height: u32,
+        color_type: ColorType,
+        algorithm: ResizeAlgorithm,
+    ) -> Result<Vec<u8>> {
+        let options = ResizeOptions::builder(src_width, src_height)
+            .dst(dst_width, dst_height)
+            .color_type(color_type)
+            .algorithm(algorithm)
+            .build();
+        resize(data, &options)
+    }
+
+    /// Helper for tests: resize_into with positional args
+    #[allow(dead_code)]
+    #[allow(clippy::too_many_arguments)]
+    fn test_resize_into(
+        output: &mut Vec<u8>,
+        data: &[u8],
+        src_width: u32,
+        src_height: u32,
+        dst_width: u32,
+        dst_height: u32,
+        color_type: ColorType,
+        algorithm: ResizeAlgorithm,
+    ) -> Result<()> {
+        let options = ResizeOptions::builder(src_width, src_height)
+            .dst(dst_width, dst_height)
+            .color_type(color_type)
+            .algorithm(algorithm)
+            .build();
+        resize_into(output, data, &options)
+    }
+
     #[test]
     fn test_resize_nearest_basic() {
         // 2x2 RGBA image -> 4x4
@@ -528,7 +654,7 @@ mod tests {
             255, 255, 0, 255, // Yellow
         ];
 
-        let result = resize(
+        let result = test_resize(
             &pixels,
             2,
             2,
@@ -551,7 +677,7 @@ mod tests {
             255, 255, 0, // Yellow
         ];
 
-        let result = resize(
+        let result = test_resize(
             &pixels,
             2,
             2,
@@ -569,7 +695,7 @@ mod tests {
         // 4x4 grayscale image -> 2x2
         let pixels = vec![0u8; 4 * 4];
 
-        let result = resize(
+        let result = test_resize(
             &pixels,
             4,
             4,
@@ -587,7 +713,7 @@ mod tests {
         // Resize to same size should be near-identity
         let pixels = vec![128u8; 8 * 8 * 4];
 
-        let result = resize(
+        let result = test_resize(
             &pixels,
             8,
             8,
@@ -605,7 +731,7 @@ mod tests {
         // 16x16 -> 4x4
         let pixels: Vec<u8> = (0..16 * 16 * 3).map(|i| (i % 256) as u8).collect();
 
-        let result = resize(
+        let result = test_resize(
             &pixels,
             16,
             16,
@@ -623,7 +749,7 @@ mod tests {
         // 4x4 -> 16x16
         let pixels: Vec<u8> = (0..4 * 4 * 3).map(|i| (i % 256) as u8).collect();
 
-        let result = resize(
+        let result = test_resize(
             &pixels,
             4,
             4,
@@ -641,7 +767,7 @@ mod tests {
         // 8x4 -> 4x8
         let pixels = vec![200u8; 8 * 4 * 4];
 
-        let result = resize(
+        let result = test_resize(
             &pixels,
             8,
             4,
@@ -657,7 +783,7 @@ mod tests {
     #[test]
     fn test_resize_invalid_src_dimensions() {
         let pixels = vec![0u8; 0];
-        let result = resize(
+        let result = test_resize(
             &pixels,
             0,
             10,
@@ -672,7 +798,7 @@ mod tests {
     #[test]
     fn test_resize_invalid_dst_dimensions() {
         let pixels = vec![0u8; 10 * 10 * 3];
-        let result = resize(
+        let result = test_resize(
             &pixels,
             10,
             10,
@@ -687,7 +813,7 @@ mod tests {
     #[test]
     fn test_resize_invalid_data_length() {
         let pixels = vec![0u8; 10]; // Wrong size for 10x10 RGB
-        let result = resize(
+        let result = test_resize(
             &pixels,
             10,
             10,
@@ -704,7 +830,7 @@ mod tests {
         // 1x1 -> 4x4 (edge case)
         let pixels = vec![255, 128, 64, 255]; // RGBA
 
-        let result = resize(
+        let result = test_resize(
             &pixels,
             1,
             1,
@@ -730,7 +856,7 @@ mod tests {
         // 4x4 -> 1x1 (edge case)
         let pixels = vec![128u8; 4 * 4 * 3];
 
-        let result = resize(
+        let result = test_resize(
             &pixels,
             4,
             4,
@@ -748,7 +874,7 @@ mod tests {
         // Test GrayAlpha (2 bytes per pixel)
         let pixels = vec![100, 200, 150, 250]; // 2x1 GrayAlpha
 
-        let result = resize(
+        let result = test_resize(
             &pixels,
             2,
             1,
@@ -762,37 +888,27 @@ mod tests {
     }
 
     #[test]
-    fn test_resize_into_reuses_buffer() {
+    fn test_resize_buffer_reuse() {
         let mut output = Vec::with_capacity(1024);
         let pixels = vec![128u8; 8 * 8 * 4];
 
-        resize_into(
-            &mut output,
-            &pixels,
-            8,
-            8,
-            4,
-            4,
-            ColorType::Rgba,
-            ResizeAlgorithm::Nearest,
-        )
-        .unwrap();
+        let options1 = ResizeOptions::builder(8, 8)
+            .dst(4, 4)
+            .color_type(ColorType::Rgba)
+            .algorithm(ResizeAlgorithm::Nearest)
+            .build();
+        resize_into(&mut output, &pixels, &options1).unwrap();
 
         let first_cap = output.capacity();
         assert_eq!(output.len(), 4 * 4 * 4);
 
         // Resize again with same output buffer
-        resize_into(
-            &mut output,
-            &pixels,
-            8,
-            8,
-            4,
-            4,
-            ColorType::Rgba,
-            ResizeAlgorithm::Bilinear,
-        )
-        .unwrap();
+        let options2 = ResizeOptions::builder(8, 8)
+            .dst(4, 4)
+            .color_type(ColorType::Rgba)
+            .algorithm(ResizeAlgorithm::Bilinear)
+            .build();
+        resize_into(&mut output, &pixels, &options2).unwrap();
 
         // Capacity should be preserved (buffer reuse)
         assert!(output.capacity() >= first_cap);
@@ -820,7 +936,7 @@ mod tests {
     #[test]
     fn test_resize_large_dimension_error() {
         let pixels = vec![0u8; 3];
-        let result = resize(
+        let result = test_resize(
             &pixels,
             1,
             1,
@@ -841,7 +957,7 @@ mod tests {
             ResizeAlgorithm::Bilinear,
             ResizeAlgorithm::Lanczos3,
         ] {
-            let result = resize(&pixels, 32, 32, 16, 16, ColorType::Rgba, algo).unwrap();
+            let result = test_resize(&pixels, 32, 32, 16, 16, ColorType::Rgba, algo).unwrap();
             assert_eq!(result.len(), 16 * 16 * 4);
 
             // All values should be valid u8
@@ -919,7 +1035,7 @@ mod tests {
             .map(|i| ((i * 7) % 256) as u8)
             .collect();
 
-        let result = resize(
+        let result = test_resize(
             &pixels,
             src_w as u32,
             src_h as u32,
@@ -947,7 +1063,7 @@ mod tests {
         let color = [100u8, 150, 200, 255];
         let pixels: Vec<u8> = (0..64 * 64).flat_map(|_| color).collect();
 
-        let result = resize(
+        let result = test_resize(
             &pixels,
             64,
             64,
@@ -979,7 +1095,7 @@ mod tests {
             64, 64, 64, 255, // Dark gray
         ];
 
-        let result = resize(
+        let result = test_resize(
             &pixels,
             2,
             2,
@@ -1005,7 +1121,7 @@ mod tests {
         // Test non-uniform scaling (different x and y ratios)
         let pixels: Vec<u8> = (0..100 * 50 * 3).map(|i| (i % 256) as u8).collect();
 
-        let result = resize(
+        let result = test_resize(
             &pixels,
             100,
             50,
@@ -1038,7 +1154,7 @@ mod tests {
         // 1x1 -> 10x10 with Lanczos3
         let pixels = vec![128, 64, 192, 255]; // Single RGBA pixel
 
-        let result = resize(
+        let result = test_resize(
             &pixels,
             1,
             1,
@@ -1086,7 +1202,7 @@ mod tests {
         // 1000x1000 -> 10x10 (100x downscale)
         let pixels: Vec<u8> = (0..1000 * 1000 * 3).map(|i| (i % 256) as u8).collect();
 
-        let result = resize(
+        let result = test_resize(
             &pixels,
             1000,
             1000,
@@ -1105,7 +1221,7 @@ mod tests {
         // Test with prime number dimensions (edge case for algorithms)
         let pixels: Vec<u8> = (0..97 * 89 * 4).map(|i| (i % 256) as u8).collect();
 
-        let result = resize(
+        let result = test_resize(
             &pixels,
             97,
             89,

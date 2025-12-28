@@ -7,6 +7,12 @@ use crate::jpeg::quantize::zigzag_reorder;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
+/// Huffman table specification (bits and values).
+struct HuffmanSpec {
+    bits: [u8; 16],
+    vals: Vec<u8>,
+}
+
 /// Standard DC luminance Huffman table (number of codes per bit length).
 const DC_LUM_BITS: [u8; 16] = [0, 1, 5, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0];
 
@@ -129,31 +135,26 @@ impl HuffmanTables {
     }
 
     /// Create Huffman tables from per-symbol code lengths (bits/vals).
-    #[allow(clippy::too_many_arguments)]
-    fn from_bits_vals(
-        dc_lum_bits: [u8; 16],
-        dc_lum_vals: Vec<u8>,
-        dc_chrom_bits: [u8; 16],
-        dc_chrom_vals: Vec<u8>,
-        ac_lum_bits: [u8; 16],
-        ac_lum_vals: Vec<u8>,
-        ac_chrom_bits: [u8; 16],
-        ac_chrom_vals: Vec<u8>,
+    fn from_specs(
+        dc_lum: HuffmanSpec,
+        dc_chrom: HuffmanSpec,
+        ac_lum: HuffmanSpec,
+        ac_chrom: HuffmanSpec,
     ) -> Option<Self> {
-        let dc_lum_codes = build_code_table::<12>(&dc_lum_bits, &dc_lum_vals, 12)?;
-        let dc_chrom_codes = build_code_table::<12>(&dc_chrom_bits, &dc_chrom_vals, 12)?;
-        let ac_lum_codes = build_code_table::<256>(&ac_lum_bits, &ac_lum_vals, 256)?;
-        let ac_chrom_codes = build_code_table::<256>(&ac_chrom_bits, &ac_chrom_vals, 256)?;
+        let dc_lum_codes = build_code_table::<12>(&dc_lum.bits, &dc_lum.vals, 12)?;
+        let dc_chrom_codes = build_code_table::<12>(&dc_chrom.bits, &dc_chrom.vals, 12)?;
+        let ac_lum_codes = build_code_table::<256>(&ac_lum.bits, &ac_lum.vals, 256)?;
+        let ac_chrom_codes = build_code_table::<256>(&ac_chrom.bits, &ac_chrom.vals, 256)?;
 
         Some(Self {
-            dc_lum_bits,
-            dc_lum_vals,
-            dc_chrom_bits,
-            dc_chrom_vals,
-            ac_lum_bits,
-            ac_lum_vals,
-            ac_chrom_bits,
-            ac_chrom_vals,
+            dc_lum_bits: dc_lum.bits,
+            dc_lum_vals: dc_lum.vals,
+            dc_chrom_bits: dc_chrom.bits,
+            dc_chrom_vals: dc_chrom.vals,
+            ac_lum_bits: ac_lum.bits,
+            ac_lum_vals: ac_lum.vals,
+            ac_chrom_bits: ac_chrom.bits,
+            ac_chrom_vals: ac_chrom.vals,
             dc_lum_codes,
             dc_chrom_codes,
             ac_lum_codes,
@@ -183,15 +184,23 @@ impl HuffmanTables {
             (AC_CHROM_BITS, AC_CHROM_VALS.to_vec())
         };
 
-        HuffmanTables::from_bits_vals(
-            dc_lum_bits,
-            dc_lum_vals,
-            dc_chrom_bits,
-            dc_chrom_vals,
-            ac_lum_bits,
-            ac_lum_vals,
-            ac_chrom_bits,
-            ac_chrom_vals,
+        HuffmanTables::from_specs(
+            HuffmanSpec {
+                bits: dc_lum_bits,
+                vals: dc_lum_vals,
+            },
+            HuffmanSpec {
+                bits: dc_chrom_bits,
+                vals: dc_chrom_vals,
+            },
+            HuffmanSpec {
+                bits: ac_lum_bits,
+                vals: ac_lum_vals,
+            },
+            HuffmanSpec {
+                bits: ac_chrom_bits,
+                vals: ac_chrom_vals,
+            },
         )
     }
 }

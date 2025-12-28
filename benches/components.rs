@@ -10,7 +10,6 @@ use pixo::compress::lz77::Lz77Compressor;
 use pixo::compress::{adler32, crc32};
 use pixo::png::filter::apply_filters;
 use pixo::png::{FilterStrategy, PngOptions};
-use pixo::ColorType;
 
 fn make_pattern(len: usize) -> Vec<u8> {
     let mut out = Vec::with_capacity(len);
@@ -257,7 +256,8 @@ fn bench_png_encode(c: &mut Criterion) {
 
     group.bench_function("pixo_default", |b| {
         b.iter(|| {
-            black_box(pixo::png::encode(black_box(&pixels), width, height, ColorType::Rgb).unwrap())
+            let opts = pixo::png::PngOptions::balanced(width, height);
+            black_box(pixo::png::encode(black_box(&pixels), &opts).unwrap())
         });
     });
 
