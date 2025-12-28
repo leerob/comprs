@@ -277,7 +277,7 @@ The DCT is related to the DFT (Discrete Fourier Transform), but better for image
 | Boundary behavior | Smooth (symmetric) | Wraparound          |
 | Computation       | ~N²                | ~N log N (with FFT) |
 
-The DCT's smooth boundary handling is crucial — it implicitly mirrors the data, avoiding discontinuities at block edges.
+The DCT's smooth boundary handling is crucial; it implicitly mirrors the data, avoiding discontinuities at block edges.
 
 ## Fast DCT Algorithms
 

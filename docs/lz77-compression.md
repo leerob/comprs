@@ -98,7 +98,7 @@ Position 7: A
   → Match(length=4, distance=7)
 
 Final output: A B R A C A D [4,7]
-              7 literals + 1 match = much smaller than 11 literals!
+              7 literals + 1 match = much smaller than 11 literals
 ```
 
 ## Window Size Matters
@@ -128,7 +128,7 @@ pub const MIN_MATCH_LENGTH: usize = 3;
 
 ## Finding Matches Efficiently: Hash Chains
 
-Naive matching (comparing every position) is O(n × window_size) — too slow!
+Naive matching (comparing every position) is O(n × window_size). Too slow!
 
 The solution: **hash chains**. We hash the first 3 bytes at each position and maintain chains of positions with the same hash.
 
@@ -233,7 +233,7 @@ During decompression:
   ...until length 9 is reached
 ```
 
-This is why LZ77 can compress runs extremely efficiently!
+This is why LZ77 can compress runs so efficiently.
 
 ### The Empty Match
 
@@ -322,7 +322,7 @@ Our implementation uses:
 - **Chain links**: 32K entries × 4 bytes = 128 KB
 - **Total**: ~256 KB for the compressor state
 
-This is modest by modern standards, but was a significant consideration when LZ77 was invented in 1977!
+This is modest by modern standards, but was a significant consideration when LZ77 was invented in 1977.
 
 ## Summary
 
@@ -334,7 +334,7 @@ LZ77 provides:
 - **Compression levels** for speed/quality trade-offs
 - Foundation for DEFLATE, gzip, ZIP, PNG, and more
 
-The genius of LZ77 is its simplicity: just look for repeating patterns and point to them. This simple idea, combined with Huffman coding, powers most of the compression we use daily.
+The power of LZ77 is its simplicity: just look for repeating patterns and point to them. This simple idea, combined with Huffman coding, powers most of the compression we use daily.
 
 ## Next Steps
 

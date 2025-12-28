@@ -370,7 +370,7 @@ Understanding quantization helps you choose appropriate quality settings:
 - **Web display**: Quality 80-85
 - **Thumbnails**: Quality 60-70
 
-*(Advanced: the `max` JPEG preset in this library enables trellis quantization to pick coefficient levels that minimize bit cost at the chosen quality.)*
+_(Advanced: the `max` JPEG preset in this library enables trellis quantization to pick coefficient levels that minimize bit cost at the chosen quality.)_
 
 ---
 

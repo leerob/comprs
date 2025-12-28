@@ -6,7 +6,7 @@ Consider a screenshot of a text editor. Most pixels are the same background colo
 1920 × 1080 × 3 = 6,220,800 bytes ≈ 6 MB
 ```
 
-With PNG compression, that same screenshot might be just 200-400 KB — a **15-30x reduction**! How does PNG achieve this? By exploiting a key insight: **adjacent pixels are usually similar**.
+With PNG compression, that same screenshot might be just 200-400 KB, a **15-30x reduction**. How does PNG achieve this? By exploiting a key insight: **adjacent pixels are usually similar**.
 
 ## The Core Insight
 
@@ -408,7 +408,7 @@ PNG compression works through two key mechanisms:
 1. **Predictive filtering** — Exploit spatial correlation between adjacent pixels
 2. **DEFLATE compression** — LZ77 + Huffman on the filtered data
 
-The genius of PNG is that filtering **transforms the data** to be more compressible without losing any information. Every byte you save in the filtered output translates directly to a smaller file.
+The key insight of PNG is that filtering **transforms the data** to be more compressible without losing any information. Every byte you save in the filtered output translates directly to a smaller file.
 
 ## Next Steps
 

@@ -4,7 +4,7 @@ Huffman coding is one of the most elegant algorithms in computer science. Invent
 
 ## The Core Insight
 
-Consider Morse code: the most common letter in English, 'E', is encoded as a single dot (·), while the rare letter 'Q' is encoded as dash-dash-dot-dash (– – · –). This isn't arbitrary — it's efficient! Common symbols get short codes, rare symbols get long codes.
+Consider Morse code: the most common letter in English, 'E', is encoded as a single dot (·), while the rare letter 'Q' is encoded as dash-dash-dot-dash (– – · –). This is efficient! Common symbols get short codes, while rare symbols get long codes.
 
 Huffman coding takes this principle to its mathematical optimum.
 

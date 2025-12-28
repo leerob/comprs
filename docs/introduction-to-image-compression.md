@@ -18,8 +18,6 @@ Image compression solves this problem. The same 4K photo compressed as JPEG migh
 
 ## The Origins of Compression
 
-Compression is a simple idea that goes _incredibly_ deep.
-
 Back in the 1840s, it was expensive to use a telegraph, so a fine gentleman named Samuel Morse came up with, you guessed it, Morse code. If you gave shorter codes to the most common letters, you could save some money! "E" is the most frequent in English, so it gets a single dot. "Q" is dash-dash-dot-dash.
 
 This was clever engineering, but nobody knew how good compression could theoretically get. It wasn't until 1948 that Claude Shannon answered both questions in a paper called "A Mathematical Theory of Communication."
@@ -36,7 +34,7 @@ His answer was **entropy** — a number that tells you the theoretical minimum b
 
 After Shannon, getting to today took decades:
 
-**1952: Huffman Coding** — David Huffman, as a _grad student_, invented optimal prefix codes. His algorithm assigns shorter codes to common symbols and longer codes to rare ones, approaching Shannon's limit. This is still used in JPEG and DEFLATE today.
+**1952: Huffman Coding** — David Huffman, as a _grad student_, invented optimal prefix codes. His algorithm assigns shorter codes to common symbols and longer codes to rare ones, approaching Shannon's limit. JPEG and DEFLATE still use this today.
 
 **1977: LZ77** — Lempel and Ziv realized that repetition is everywhere. Instead of encoding "the cat sat on the mat" character by character, why not say "copy 4 bytes from 20 positions back"? This dictionary-based approach handles patterns that entropy coding alone can't see.
 

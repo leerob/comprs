@@ -53,7 +53,7 @@ for chunk in data.chunks(NMAX) {
 }
 ```
 
-**Result**: We reduced 5552 modulo operations to just 2 per chunk — a 2776x reduction in the most expensive operation.
+**Result**: We reduced 5552 modulo operations to just 2 per chunk, a 2776x reduction in the most expensive operation.
 
 ### Example: Early Exit
 
@@ -328,7 +328,7 @@ The standard Adler-32 loop processes one byte at a time. With SSSE3, we process 
 pub unsafe fn adler32_ssse3(data: &[u8]) -> u32 {
     // Process 16 bytes at a time
     let chunk = _mm_loadu_si128(ptr as *const __m128i);
-    
+
     // Use SIMD multiply-add for weighted sums
     // (the actual implementation is more complex)
 }
@@ -342,7 +342,7 @@ Calculating the sum of absolute values for filter selection:
 // From src/simd/x86_64.rs
 pub unsafe fn score_filter_sse2(filtered: &[u8]) -> u64 {
     let mut sum = _mm_setzero_si128();
-    
+
     // Process 16 bytes at a time
     while remaining >= 16 {
         let chunk = _mm_loadu_si128(ptr as *const __m128i);
@@ -355,6 +355,7 @@ pub unsafe fn score_filter_sse2(filtered: &[u8]) -> u64 {
 ```
 
 **Key SIMD operations used**:
+
 - `_mm_loadu_si128`: Load 16 bytes into a register
 - `_mm_sad_epu8`: Sum of Absolute Differences (perfect for filter scoring)
 - `_mm_cmpeq_epi8`: Compare 16 bytes at once (for match length)
@@ -373,7 +374,7 @@ pub fn adler32(data: &[u8]) -> u32 {
             return unsafe { x86_64::adler32_ssse3(data) };
         }
     }
-    
+
     // Fallback to scalar implementation
     fallback::adler32(data)
 }
@@ -519,6 +520,7 @@ At each position: literal OR match of length 3, 4, 5, ... 258
 ### The Solution: Model as a Graph
 
 Instead of brute force, observe that:
+
 1. **Decisions are sequential** — you make choices one position at a time
 2. **Future costs don't depend on how you got here** — only on your current state
 3. **You can compute optimal paths efficiently** — using DP or shortest-path algorithms
@@ -532,7 +534,7 @@ Position 0        Position 1        Position 2
     │╲               │╲               │
     │ ╲cost          │ ╲              │
    [5]──╲───────────[3]──╲───────────[1]
-          ╲               ╲              
+          ╲               ╲
           [6]─────────────[4]─────────────[2]
 
 Each node = a possible quantized value
@@ -540,7 +542,7 @@ Each edge = cost (rate + λ × distortion) to transition
 Solution  = shortest path from start to end
 ```
 
-**Key insight**: You only need to track the *best way to reach each state*, not all possible paths. This reduces 2^N to O(N × S²) where S is states per position.
+**Key insight**: You only need to track the _best way to reach each state_, not all possible paths. This reduces 2^N to O(N × S²) where S is states per position.
 
 ### Example: Optimal LZ77 Parsing
 
@@ -556,6 +558,7 @@ The greedy choice at position 3 blocks a longer match at position 0.
 ```
 
 The optimal approach:
+
 1. Build a graph: each position has edges for "literal" and all valid match lengths
 2. Edge costs = actual bit cost (from Huffman statistics)
 3. Find shortest path with forward DP
@@ -568,7 +571,7 @@ for i in 0..n {
     if lit_cost < cost[i + 1] {
         cost[i + 1] = lit_cost;
     }
-    
+
     // Try each match length
     for (len, dist) in find_matches(data, i) {
         let match_cost = cost[i] + match_bits(len, dist);
@@ -586,11 +589,13 @@ for i in 0..n {
 Ask: "Am I making sequential decisions where each choice affects future options?"
 
 If yes, model it as a graph:
+
 - **Nodes** = states (what information do I need to make the next decision?)
 - **Edges** = choices with costs
 - **Solution** = shortest path (Viterbi, Dijkstra, or forward DP)
 
 The key properties that make this work:
+
 - **Optimal substructure**: Best solution contains best sub-solutions
 - **Limited state space**: You don't need to track everything—just enough to evaluate future costs
 
@@ -656,6 +661,7 @@ Zopfli uses 15 iterations by default. Each iteration improves by smaller amounts
 ### When to Apply This Pattern
 
 Multi-pass is worth it when:
+
 - **Output size matters more than encoding speed** (storage, bandwidth)
 - **The input fits in memory** (can buffer for second pass)
 - **Decisions early in the stream affect optimal choices later**
@@ -692,12 +698,12 @@ fn aan_dct_1d(data: &mut [f32; 8]) {
     let tmp0 = data[0] + data[7];
     let tmp7 = data[0] - data[7];
     // ... more additions
-    
+
     // Rotations (the only multiplications)
     let z1 = (tmp12 + tmp13) * A1;
     let z5 = (tmp10 - tmp12) * A5;
     // ... just 5 multiplications total
-    
+
     // Apply post-scaling
     for i in 0..8 {
         data[i] *= S[i];
@@ -705,7 +711,7 @@ fn aan_dct_1d(data: &mut [f32; 8]) {
 }
 ```
 
-**Result**: 5 multiplications instead of 64 — a 12x reduction in the most expensive operation.
+**Result**: 5 multiplications instead of 64, a 12x reduction in the most expensive operation.
 
 ## Parallel Processing
 
@@ -727,7 +733,7 @@ fn apply_filters_parallel(data: &[u8], height: usize, ...) -> Vec<u8> {
             filter_row(row, prev_row, ...)
         })
         .collect();
-    
+
     // Combine results
     rows.into_iter().flatten().collect()
 }
@@ -800,42 +806,51 @@ if xor != 0 {
 When optimizing, consider these techniques in order of impact:
 
 1. **Choose the right algorithm**
+
    - AAN DCT instead of naive DCT
    - Hash tables instead of linear search
 
 2. **Transform data before processing**
+
    - Reorder for spatial locality (palette sorting)
    - Group similar data together (progressive encoding)
 
 3. **Structure the search space**
+
    - Model decisions as a graph
    - Use DP/Viterbi instead of brute-force enumeration
    - Find optimal paths, not all paths
 
 4. **Consider multi-pass when output quality matters**
+
    - Analyze first, then optimize (optimized Huffman)
    - Iterate when there are circular dependencies
 
 5. **Use appropriate data structures**
+
    - Lookup tables for repeated computations
    - Power-of-2 sizes for fast modulo
 
 6. **Reduce work**
+
    - Defer expensive operations (batch modulo)
    - Early exit when possible
    - Skip unnecessary work (good match threshold)
 
 7. **Use efficient numeric representations**
+
    - Integer arithmetic instead of floating-point
    - Smaller types when range permits
    - Fixed-point for fractional values
 
 8. **Batch operations**
+
    - Process 8 bytes at once with u64
    - Process 16 bytes at once with SIMD
    - Write multiple bits at once
 
 9. **Cache results**
+
    - Precompute lookup tables
    - Lazy-initialize constants
    - Reuse scratch buffers
@@ -857,8 +872,6 @@ These optimization patterns are applied throughout pixo. To see them in action:
 - **SIMD implementations**: `src/simd/x86_64.rs`
 - **Fast DCT algorithm**: `src/jpeg/dct.rs`
 - **Batch bit operations**: `src/bits.rs`
-
-## Next Steps
 
 Continue to [Compression Evolution](./compression-evolution.md) to explore the history and philosophy behind modern compression techniques.
 

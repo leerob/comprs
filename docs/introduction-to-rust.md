@@ -8,14 +8,14 @@ If you're coming from C, C++, Python, or JavaScript, Rust will feel both familia
 
 Compression algorithms have demanding requirements:
 
-| Requirement | Challenge | Rust's Solution |
-|-------------|-----------|-----------------|
-| **Performance** | Bit manipulation, tight loops, SIMD | Zero-cost abstractions, inline assembly |
-| **Memory safety** | Buffer overflows, use-after-free | Compile-time ownership checking |
-| **Correctness** | Edge cases, off-by-one errors | Strong type system, exhaustive matching |
-| **Low-level control** | Exact memory layout, no GC pauses | No runtime, predictable performance |
+| Requirement           | Challenge                           | Rust's Solution                         |
+| --------------------- | ----------------------------------- | --------------------------------------- |
+| **Performance**       | Bit manipulation, tight loops, SIMD | Zero-cost abstractions, inline assembly |
+| **Memory safety**     | Buffer overflows, use-after-free    | Compile-time ownership checking         |
+| **Correctness**       | Edge cases, off-by-one errors       | Strong type system, exhaustive matching |
+| **Low-level control** | Exact memory layout, no GC pauses   | No runtime, predictable performance     |
 
-Rust gives us C-level performance without C-level bugs. In a compression library, where we're manipulating bits and bytes at high speed, this is invaluable.
+Rust gives us C-level performance without C-level bugs. In a compression library, where we're manipulating bits and bytes at high speed, this matters: one buffer overflow can corrupt your output, and one use-after-free can crash your program.
 
 ## Ownership: Rust's Core Innovation
 
@@ -86,7 +86,7 @@ At any given time, you can have EITHER:
 But never both simultaneously.
 ```
 
-This prevents data races at compile time—no mutexes needed for single-threaded code.
+This prevents data races at compile time. No mutexes are needed for single-threaded code.
 
 ## Enums: More Than Just Constants
 
@@ -164,7 +164,7 @@ From our LZ77 implementation:
 
 ```rust,ignore
 // From src/compress/lz77.rs
-fn find_best_match(&self, data: &[u8], pos: usize, chain_limit: usize) 
+fn find_best_match(&self, data: &[u8], pos: usize, chain_limit: usize)
     -> Option<(usize, usize)>  // Returns Some((length, distance)) or None
 {
     // ...
@@ -239,14 +239,14 @@ Now `Result<Vec<u8>>` means "either a `Vec<u8>` or an `Error`".
 
 ```rust,ignore
 // From src/png/mod.rs
-pub fn encode(data: &[u8], width: u32, height: u32, color_type: ColorType) 
-    -> Result<Vec<u8>> 
+pub fn encode(data: &[u8], width: u32, height: u32, color_type: ColorType)
+    -> Result<Vec<u8>>
 {
     // Validate dimensions
     if width == 0 || height == 0 {
         return Err(Error::InvalidDimensions { width, height });
     }
-    
+
     // Validate data length
     let expected_len = width as usize * height as usize * bpp;
     if data.len() != expected_len {
@@ -255,7 +255,7 @@ pub fn encode(data: &[u8], width: u32, height: u32, color_type: ColorType)
             actual: data.len(),
         });
     }
-    
+
     // ... encoding logic ...
     Ok(output)  // Success!
 }
@@ -303,7 +303,7 @@ impl Lz77Compressor {
     /// Create a new LZ77 compressor.
     pub fn new(level: u8) -> Self {
         let level = level.clamp(1, 9);
-        
+
         let (max_chain_length, lazy_matching) = match level {
             1 => (4, false),
             2 => (8, false),
@@ -319,7 +319,7 @@ impl Lz77Compressor {
             lazy_matching,
         }
     }
-    
+
     /// Compress data and return LZ77 tokens.
     pub fn compress(&mut self, data: &[u8]) -> Vec<Token> {
         let mut tokens = Vec::with_capacity(data.len());
@@ -330,6 +330,7 @@ impl Lz77Compressor {
 ```
 
 Note the naming conventions:
+
 - `new()` — constructor (by convention, not a language keyword)
 - `Self` — alias for the type being implemented
 - `&mut self` — method takes mutable borrow of the instance
@@ -446,6 +447,7 @@ fn weighted_edges(matrix: &[Vec<u32>]) -> Vec<(usize, usize)> {
 ```
 
 Key iterator methods:
+
 - `.iter()` — create an iterator over references
 - `.enumerate()` — add indices: `(0, first), (1, second), ...`
 - `.take(n)` — limit to first n elements
@@ -454,7 +456,7 @@ Key iterator methods:
 
 ### Chaining Iterators
 
-Iterators compose elegantly:
+Iterators compose without overhead:
 
 ```rust,ignore
 // From src/png/mod.rs
@@ -492,7 +494,7 @@ pub use error::{Error, Result};
 
 ```text
 pub           — visible everywhere
-pub(crate)    — visible within this crate only  
+pub(crate)    — visible within this crate only
 pub(super)    — visible to parent module
 (nothing)     — private to current module
 ```
@@ -595,7 +597,7 @@ Rust's safety guarantees come from the compiler. Sometimes we need to do things 
 #[target_feature(enable = "sse2")]
 pub unsafe fn score_filter_sse2(filtered: &[u8]) -> u64 {
     let mut sum = _mm_setzero_si128();
-    
+
     while remaining >= 16 {
         let chunk = _mm_loadu_si128(ptr as *const __m128i);
         let sad = _mm_sad_epu8(chunk, _mm_setzero_si128());
@@ -607,6 +609,7 @@ pub unsafe fn score_filter_sse2(filtered: &[u8]) -> u64 {
 ```
 
 The `unsafe` keyword marks a **trust boundary**:
+
 - Inside `unsafe`, we promise to uphold invariants the compiler can't check
 - Outside `unsafe`, the compiler guarantees safety
 - Most code never needs `unsafe`
@@ -720,6 +723,7 @@ fn maybe_optimize_alpha<'a>(
 The `'a` is a **lifetime parameter**. It says: "the returned `Cow` borrows from `data` and can't outlive it."
 
 `Cow` (Copy on Write) is an enum that's either:
+
 - `Borrowed(&[u8])` — no allocation, just a reference
 - `Owned(Vec<u8>)` — we made a copy and own it
 
@@ -755,6 +759,7 @@ pub fn rgb_to_ycbcr(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
 ```
 
 This function demonstrates:
+
 - **Type annotations** where needed (`i32`, `u8`)
 - **Explicit type casts** (`as i32`, `as u8`)
 - **Method chaining** (`.clamp(0, 255) as u8`)
@@ -792,7 +797,7 @@ impl PngOptions {
     pub fn fast() -> Self { /* low compression, high speed */ }
     pub fn balanced() -> Self { /* good tradeoff */ }
     pub fn max() -> Self { /* maximum compression */ }
-    
+
     pub fn from_preset(preset: u8) -> Self {
         match preset {
             0 => Self::fast(),

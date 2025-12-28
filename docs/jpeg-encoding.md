@@ -81,7 +81,7 @@ pub fn rgb_to_ycbcr(r: u8, g: u8, b: u8) -> (u8, u8, u8) {
 }
 ```
 
-Notice the weights: green contributes 58.7% to brightness because human eyes have more green-sensitive cells!
+Notice the weights: green contributes 58.7% to brightness because human eyes have more green-sensitive cells.
 
 ## Stage 2: Block Processing
 

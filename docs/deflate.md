@@ -1,6 +1,6 @@
 # The DEFLATE Algorithm
 
-Every time you download a webpage, unzip a file, or view a PNG image, DEFLATE is working behind the scenes. This 1996 algorithm compresses the Linux kernel source from **1.4 GB to 140 MB** — a 10x reduction! How does it achieve this?
+Every time you download a webpage, unzip a file, or view a PNG image, DEFLATE is working behind the scenes. This 1996 algorithm compresses the Linux kernel source from **1.4 GB to 140 MB**, a 10x reduction. How does it achieve this?
 
 The core is a two-stage approach: first find repeated patterns, then encode them optimally.
 
@@ -18,9 +18,10 @@ Notice anything? "to be" appears twice! Instead of storing 18 characters, we cou
 "to be or not [copy 6 chars from 13 back]"
 ```
 
-That's 14 characters plus a small reference — already shorter. But we can go further: the reference "(6, 13)" uses common values that we can encode with fewer bits than spelling out "to be".
+That's 14 characters plus a small reference. But we can go further: the reference "(6, 13)" uses common values that we can encode with fewer bits than spelling out "to be".
 
 This is DEFLATE in a nutshell:
+
 1. **LZ77**: Find the repeated "to be" and replace it with a back-reference
 2. **Huffman**: Encode those references (and remaining literals) with optimal bit codes
 
@@ -431,7 +432,7 @@ This is why DEFLATE excels on real-world data with many repeated patterns.
 
 ### 1. Expecting Compression on Already-Compressed Data
 
-DEFLATE cannot compress data that's already compressed (JPEG, MP3, ZIP files). Attempting to do so often makes the output *larger* due to block headers and Huffman table overhead.
+DEFLATE cannot compress data that's already compressed (JPEG, MP3, ZIP files). Attempting to do so often makes the output _larger_ due to block headers and Huffman table overhead.
 
 ```text
 Original ZIP:    1,000,000 bytes
@@ -444,11 +445,11 @@ Fixed Huffman codes are convenient (no table transmission), but for large data b
 
 ### 3. Choosing Wrong Compression Level
 
-| Scenario | Recommended Level | Why |
-|----------|-------------------|-----|
-| Real-time compression | 1-3 | Speed matters more |
-| General files | 6 | Good balance |
-| Archival/distribution | 9 | Size matters more |
+| Scenario              | Recommended Level | Why                |
+| --------------------- | ----------------- | ------------------ |
+| Real-time compression | 1-3               | Speed matters more |
+| General files         | 6                 | Good balance       |
+| Archival/distribution | 9                 | Size matters more  |
 
 Level 9 can take 10x longer than level 1, but only compress 5-10% better.
 

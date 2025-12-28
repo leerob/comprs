@@ -1,6 +1,6 @@
 # Decoding: The Other Half of a Codec
 
-When you open a JPEG in your photo app, the encoder's work happened long ago — perhaps on a camera, a web server, or your friend's phone. What matters now is the **decoder**: the algorithm that reconstructs viewable pixels from a compact bitstream.
+When you open a JPEG in your photo app, the encoder's work happened long ago, perhaps on a camera, a web server, or your friend's phone. What matters now is the **decoder**: the algorithm that reconstructs viewable pixels from a compact bitstream.
 
 This document explores decoding for both PNG and JPEG, explaining how each encoding step has a corresponding decoding step.
 
@@ -362,7 +362,7 @@ pub fn inflate_zlib(data: &[u8]) -> Result<Vec<u8>> {
 }
 ```
 
-Decoding support is currently available through the CLI feature and is used for round-trip testing.
+You can access decoding support through the CLI feature.
 
 ## Summary
 

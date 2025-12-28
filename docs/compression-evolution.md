@@ -1,6 +1,6 @@
 # The Evolution of Compression: How Small Gains Compound
 
-This document explores the history and philosophy behind advanced compression techniques. Rather than implementation details, we focus on the *ideas* that drive compression improvements and the patterns they share.
+This document explores the history and philosophy behind advanced compression techniques. Rather than implementation details, we focus on the _ideas_ that drive compression improvements and the patterns they share.
 
 ## The Fundamental Challenge
 
@@ -27,7 +27,7 @@ All compression faces the same core tension:
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-Modern codecs like mozjpeg don't use one clever trick—they use *dozens* of small optimizations that each shave off 1-5%. These compound:
+Modern codecs like mozjpeg don't use one clever trick. They use _dozens_ of small optimizations that each shave off 1-5%. These compound:
 
 ```text
 0.95 × 0.97 × 0.95 × 0.98 × 0.96 = 0.82
@@ -63,9 +63,10 @@ The rest becomes small numbers, often zero.
 **Why it works**: Images don't change randomly. Smooth gradients become a single number (the DC coefficient). Only edges and textures need the high-frequency coefficients.
 
 **Historical evolution**:
+
 - 1974: DCT proposed by Ahmed, Natarajan, and Rao
 - 1988: AAN fast algorithm reduces multiplications from 64 to 5
-- 1990s: Integer DCT provides reproducible results across platforms
+- 1990s: Integer DCT produces reproducible results across platforms
 
 ### 2. Smarter Encoding
 
@@ -92,7 +93,7 @@ But Huffman has limits. It must assign whole bits, so a symbol with 90% probabil
 
 ### 3. Rate-Distortion Optimization
 
-**Core idea**: Accept some quality loss to save bits, but choose *which* losses give the best tradeoff.
+**Core idea**: Accept some quality loss to save bits, but choose _which_ losses give the best tradeoff.
 
 This is the most sophisticated approach. Instead of asking "how do I encode this data?", we ask "what data should I encode?"
 
@@ -122,6 +123,7 @@ The original JPEG standard (1992) made practical choices for 1990s hardware. Ove
 ### Stage 1: Baseline JPEG (1992)
 
 The original JPEG encoder:
+
 - **Floating-point DCT**: Fast on FPUs, but results vary by platform
 - **Simple quantization**: Round to nearest integer
 - **Fixed Huffman tables**: Pre-defined, not optimized for the image
@@ -134,6 +136,7 @@ This was revolutionary for 1992. But each choice left performance on the table.
 **The insight**: Pre-defined Huffman tables are generic. Tables tuned to the actual image content compress better.
 
 **The technique**: Two-pass encoding
+
 1. First pass: Count symbol frequencies
 2. Build optimal Huffman tables from frequencies
 3. Second pass: Encode with optimal tables
@@ -147,6 +150,7 @@ This was revolutionary for 1992. But each choice left performance on the table.
 **The problem**: Floating-point arithmetic varies by platform. The same image encoded on different machines produces slightly different files.
 
 **The insight**: Fixed-point integer math is:
+
 - Reproducible across platforms
 - Often faster (no FPU needed)
 - Can be tuned for optimal coefficient distribution
@@ -163,7 +167,7 @@ Multiplication becomes:
 
 **Typical gain**: 1-3% from better coefficient distribution
 
-**Why it works**: Careful rounding in integer math can actually produce *better* coefficient distributions than floating-point, because the small rounding errors happen in predictable, controllable ways.
+**Why it works**: Careful rounding in integer math can actually produce _better_ coefficient distributions than floating-point, because the small rounding errors happen in predictable, controllable ways.
 
 ### Stage 4: Progressive Encoding (1990s-2000s)
 
@@ -199,14 +203,15 @@ Scan 3-N: Higher frequencies (details, texture)
 
 **Typical gain**: 5-15% smaller files
 
-**Why it works**: 
+**Why it works**:
+
 1. **Better Huffman statistics**: Each scan contains similar data, improving compression
 2. **Spectral correlation**: DC coefficients across blocks are similar, as are low-frequency AC coefficients
 3. **User experience**: Image appears quickly (blurry), then sharpens progressively
 
 ### Stage 5: Trellis Quantization (2000s-2010s)
 
-**The insight**: Simple rounding isn't optimal. Sometimes rounding *away* from the nearest integer produces a smaller file with negligible quality loss.
+**The insight**: Simple rounding isn't optimal. Sometimes rounding _away_ from the nearest integer produces a smaller file with negligible quality loss.
 
 **The problem in detail**:
 
@@ -252,6 +257,7 @@ Use Viterbi algorithm to find optimal path.
 ### Stage 6: mozjpeg (2014-present)
 
 mozjpeg combines all the above, plus:
+
 - **Scan optimization**: Automatically select the best progressive scan script
 - **DC coefficient optimization**: Special handling for DC differences
 - **Quantization table tuning**: Tables optimized for human perception, not just PSNR
@@ -268,11 +274,11 @@ These compression improvements share several recurring themes:
 
 Many optimizations require knowing something about the data before encoding it:
 
-| Technique | First Pass | Second Pass |
-|-----------|------------|-------------|
-| Optimized Huffman | Count frequencies | Encode with optimal tables |
+| Technique            | First Pass                   | Second Pass                    |
+| -------------------- | ---------------------------- | ------------------------------ |
+| Optimized Huffman    | Count frequencies            | Encode with optimal tables     |
 | Trellis Quantization | Compute all DCT coefficients | Find optimal quantization path |
-| Progressive | Store all coefficients | Encode in optimal scan order |
+| Progressive          | Store all coefficients       | Encode in optimal scan order   |
 
 **The tradeoff**: 2× encoding time for 5-15% size reduction. Usually worth it for storage/transmission.
 
@@ -280,14 +286,14 @@ Many optimizations require knowing something about the data before encoding it:
 
 Information theory tells us: the more you know about what comes next, the fewer bits you need to encode it.
 
-| Technique | Context Used |
-|-----------|--------------|
-| Differential DC coding | Previous block's DC value |
-| Run-length encoding | How many zeros came before |
-| Progressive scans | Similar-frequency coefficients together |
-| Trellis quantization | Previous coefficient values |
+| Technique              | Context Used                            |
+| ---------------------- | --------------------------------------- |
+| Differential DC coding | Previous block's DC value               |
+| Run-length encoding    | How many zeros came before              |
+| Progressive scans      | Similar-frequency coefficients together |
+| Trellis quantization   | Previous coefficient values             |
 
-**The insight**: Don't just encode values—encode *differences* from predictions.
+**The insight**: Don't just encode values—encode _differences_ from predictions.
 
 ### Pattern 3: Human Perception Is Non-Linear
 
@@ -309,14 +315,15 @@ Smart compression allocates bits where humans will notice, not uniformly.
 ### Pattern 4: Exact vs. Good Enough
 
 Many optimizations distinguish between:
+
 - **Mathematically optimal**: The provably best answer (often expensive to compute)
 - **Good enough**: 99% as good, 10× faster to compute
 
-| Technique | Optimal Approach | Practical Approach |
-|-----------|-----------------|-------------------|
-| Huffman tables | Arithmetic coding | Canonical Huffman |
-| Trellis | Full Viterbi | Pruned trellis |
-| Progressive scans | Exhaustive search | Heuristic scripts |
+| Technique         | Optimal Approach  | Practical Approach |
+| ----------------- | ----------------- | ------------------ |
+| Huffman tables    | Arithmetic coding | Canonical Huffman  |
+| Trellis           | Full Viterbi      | Pruned trellis     |
+| Progressive scans | Exhaustive search | Heuristic scripts  |
 
 **The wisdom**: Diminishing returns are real. The last 1% improvement often costs 10× the computation.
 
@@ -354,15 +361,16 @@ Each iteration refines the cost model, enabling better parsing decisions.
 Typically converges in 5-15 iterations.
 ```
 
-| Iteration | What Happens |
-|-----------|--------------|
-| 1 | Greedy parse, rough frequency estimates |
-| 2-5 | Costs stabilize, parse improves significantly |
-| 5-15 | Diminishing returns, occasional escapes from local minima |
+| Iteration | What Happens                                              |
+| --------- | --------------------------------------------------------- |
+| 1         | Greedy parse, rough frequency estimates                   |
+| 2-5       | Costs stabilize, parse improves significantly             |
+| 5-15      | Diminishing returns, occasional escapes from local minima |
 
 **Why it works**: The cost function and the parsing algorithm co-evolve toward a better solution. Neither alone finds the optimum, but together they converge.
 
 **Real-world examples**:
+
 - Zopfli uses 15 iterations by default
 - Video codecs iterate between motion estimation and rate control
 - Machine learning uses gradient descent (same principle: iterate to refine)
@@ -383,7 +391,7 @@ Starting with baseline JPEG (100%)
   Trellis quantization:         ×0.95  →  83%
   Chroma subsampling:           ×0.85  →  71%
   DC coefficient optimization:  ×0.98  →  69%
-  
+
   Final: ~70% of baseline size at same quality
 ```
 
@@ -412,26 +420,31 @@ When implementing compression:
 ## Further Reading
 
 ### Foundational Papers
+
 - Shannon, C. E. (1948). "A Mathematical Theory of Communication"
 - Huffman, D. (1952). "A Method for the Construction of Minimum-Redundancy Codes"
 - Ahmed, Natarajan, Rao (1974). "Discrete Cosine Transform"
 - Arai, Agui, Nakajima (1988). "A Fast DCT-SQ Scheme for Images"
 
 ### JPEG Specific
+
 - ITU-T T.81: The original JPEG specification
 - Lakhani, G. (2003). "Optimal Huffman Coding of DCT Blocks"
 - mozjpeg documentation: <https://github.com/mozilla/mozjpeg>
 
 ### Rate-Distortion Theory
+
 - Berger, T. (1971). "Rate Distortion Theory"
 - Sullivan & Wiegand (1998). "Rate-Distortion Optimization for Video Compression"
 
 ### Deflate/PNG Specific
+
 - RFC 1951: DEFLATE Compressed Data Format Specification
 - Zopfli documentation: <https://github.com/google/zopfli>
 - Pinho et al. (2004). "A note on Zeng's technique for color reindexing" (palette optimization)
 
 ### Implementation References
+
 - libjpeg source code (especially jfdctint.c, jchuff.c)
 - Independent JPEG Group documentation
 - zopfli source code (especially squeeze.c for iterative refinement)
