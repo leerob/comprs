@@ -41,7 +41,7 @@
   let jobs: Job[] = $state([]);
   let dropActive = $state(false);
   let wasmReady = $state(false);
-  let viewMode: ViewMode = $state("drop");
+  let viewMode = $state<ViewMode>("drop");
   let selectedJobId: string | null = $state(null);
 
   let globalOptions = $state({
