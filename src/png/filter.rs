@@ -1294,7 +1294,9 @@ mod tests {
 
         // Scores are usize, so they're inherently non-negative.
         // Just verify they were computed (non-zero for non-trivial input).
-        assert!(score_none > 0 || score_sub > 0 || score_up > 0 || score_avg > 0 || score_paeth > 0);
+        assert!(
+            score_none > 0 || score_sub > 0 || score_up > 0 || score_avg > 0 || score_paeth > 0
+        );
     }
 
     #[test]
