@@ -651,7 +651,11 @@ impl Lz77Compressor {
                         .match_length(data, match_pos, pos)
                         .min(MAX_MATCH_LENGTH);
                     // Gate short matches: reject length 3 with very long distance.
-                    if len >= min_match_length && !(len == 3 && distance > 8192) {
+                    // Only update if this match is longer than the current best (e.g., RLE match).
+                    if len >= min_match_length
+                        && !(len == 3 && distance > 8192)
+                        && len > best_length
+                    {
                         best_length = len;
                         best_distance = distance;
                         if best_length >= nice_length {
@@ -915,8 +919,15 @@ impl Lz77Compressor {
                 let a = &data[pos..pos + 3];
                 let b = &data[match_pos..match_pos + 3];
                 if a == b {
-                    sublen[3] = distance as u16;
-                    max_length = 3;
+                    // Only update sublen[3] if no match exists yet or this distance is shorter.
+                    // RLE detection may have already set sublen[3] = 1 (optimal distance).
+                    if sublen[3] == 0 || (distance as u16) < sublen[3] {
+                        sublen[3] = distance as u16;
+                    }
+                    // Only increase max_length, never decrease it (RLE may have set it higher).
+                    if max_length < 3 {
+                        max_length = 3;
+                    }
                 }
             }
         }
