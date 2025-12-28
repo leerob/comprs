@@ -1,5 +1,12 @@
 <script lang="ts">
-  import { compressImage, initWasm, type PresetLevel } from "$lib/wasm";
+  import {
+    compressImage,
+    initWasm,
+    resizeImage,
+    calculateResizeDimensions,
+    type PresetLevel,
+    type ResizeAlgorithm,
+  } from "$lib/wasm";
   import { onDestroy, onMount } from "svelte";
   import JSZip from "jszip";
 
@@ -34,7 +41,7 @@
   let jobs: Job[] = $state([]);
   let dropActive = $state(false);
   let wasmReady = $state(false);
-  let viewMode: ViewMode = $state("drop");
+  let viewMode = $state<ViewMode>("drop");
   let selectedJobId: string | null = $state(null);
 
   let globalOptions = $state({
@@ -43,6 +50,14 @@
     pngPreset: 1 as PresetLevel, // 0=faster, 1=auto, 2=smallest
     pngLossless: false, // Default OFF = lossy enabled for smaller PNGs
   });
+
+  // Resize options
+  let resizeEnabled = $state(false);
+  let resizeWidth = $state(1920);
+  let resizeHeight = $state(1080);
+  let resizeMaintainAspect = $state(true);
+  let resizeAlgorithm: ResizeAlgorithm = $state("lanczos3");
+  let resizePending = $state(false); // True when resize is enabled but not yet applied
 
   let isCompressing = $derived(jobs.some((j) => j.status === "compressing"));
 
@@ -80,6 +95,59 @@
   );
   let selectedJob = $derived(jobs.find((j) => j.id === selectedJobId) ?? null);
   let hasMultipleJobs = $derived(jobs.length > 1);
+
+  // Check if resize option should be visible (single image, done or compressing)
+  let showResizeOption = $derived(
+    viewMode === "single" &&
+      selectedJob !== null &&
+      (selectedJob.status === "done" || selectedJob.status === "compressing") &&
+      !hasMultipleJobs
+  );
+
+  // Get aspect ratio of selected job for maintaining proportions
+  let selectedAspectRatio = $derived(
+    selectedJob ? selectedJob.width / selectedJob.height : 1
+  );
+
+  function handleResizeToggle() {
+    if (resizeEnabled && selectedJob) {
+      // When enabling resize, set dimensions to image dimensions
+      resizeWidth = selectedJob.width;
+      resizeHeight = selectedJob.height;
+      resizePending = true;
+    } else {
+      resizePending = false;
+    }
+  }
+
+  function handleWidthChange() {
+    if (resizeMaintainAspect && selectedJob) {
+      resizeHeight = Math.max(1, Math.round(resizeWidth / selectedAspectRatio));
+    }
+    resizePending = true;
+  }
+
+  function handleHeightChange() {
+    if (resizeMaintainAspect && selectedJob) {
+      resizeWidth = Math.max(1, Math.round(resizeHeight * selectedAspectRatio));
+    }
+    resizePending = true;
+  }
+
+  function handleAlgorithmChange() {
+    resizePending = true;
+  }
+
+  function applyResize() {
+    resizePending = false;
+    recompressAll();
+  }
+
+  function handleResizeKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      applyResize();
+    }
+  }
 
   type ZoomLevel = 1 | 2 | 4;
   let zoomLevel: ZoomLevel = $state(1);
@@ -228,12 +296,38 @@
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     try {
+      // Apply resize if enabled
+      let imageDataToCompress = job.imageData;
+      if (resizeEnabled) {
+        const targetDims = resizeMaintainAspect
+          ? calculateResizeDimensions(
+              job.width,
+              job.height,
+              resizeWidth,
+              resizeHeight
+            )
+          : { width: resizeWidth, height: resizeHeight };
+
+        // Only resize if dimensions actually change
+        if (
+          targetDims.width !== job.width ||
+          targetDims.height !== job.height
+        ) {
+          imageDataToCompress = await resizeImage(job.imageData, {
+            width: targetDims.width,
+            height: targetDims.height,
+            algorithm: resizeAlgorithm,
+            maintainAspectRatio: false, // Already calculated
+          });
+        }
+      }
+
       // Use the job's original format for compression
       const jobFormat = job.type === "image/jpeg" ? "jpeg" : "png";
       // PNG slider: 0=Smaller(left), 1=Auto, 2=Faster(right)
       // Map to presets: 0->2(max), 1->1(balanced), 2->0(fast)
       const pngPresetValue = (2 - globalOptions.pngPreset) as PresetLevel;
-      const { blob, elapsedMs } = await compressImage(job.imageData, {
+      const { blob, elapsedMs } = await compressImage(imageDataToCompress, {
         ...globalOptions,
         format: jobFormat,
         hasAlpha: job.hasAlpha,
@@ -326,6 +420,10 @@
     }
     jobs = jobs.filter((j) => j.id !== id);
 
+    // Reset resize state when removing the image
+    resizeEnabled = false;
+    resizePending = false;
+
     if (jobs.length === 0) {
       viewMode = "drop";
       selectedJobId = null;
@@ -348,6 +446,9 @@
     jobs = [];
     viewMode = "drop";
     selectedJobId = null;
+    // Reset resize state
+    resizeEnabled = false;
+    resizePending = false;
   }
 
   onDestroy(() => {
@@ -366,6 +467,9 @@
   function goBackToList() {
     viewMode = "list";
     selectedJobId = null;
+    // Reset resize state when going back to list
+    resizeEnabled = false;
+    resizePending = false;
   }
 
   async function downloadSingle(job: Job) {
@@ -846,7 +950,7 @@
 
 {#snippet controlsFooter()}
   <footer
-    class="flex min-h-14 flex-col gap-2 border-t border-border bg-surface-1 px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-4 sm:px-4 sm:py-0 sm:pb-0"
+    class="flex min-h-14 flex-col gap-2 border-t border-border bg-surface-1 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-4 sm:px-4 sm:py-2"
     data-testid="controls-footer"
     data-wasm-ready={wasmReady}
   >
@@ -907,8 +1011,78 @@
           <span class="text-neutral-400">Lossless</span>
         </label>
       {/if}
-      <!-- When mixed, no format-specific controls are shown -->
+
+      <!-- Resize checkbox (only for single completed images) -->
+      {#if showResizeOption}
+        <label class="flex items-center gap-2 text-xs cursor-pointer">
+          <input
+            type="checkbox"
+            class="accent-neutral-400"
+            bind:checked={resizeEnabled}
+            onchange={handleResizeToggle}
+            data-testid="resize-enabled-checkbox"
+          />
+          <span class="text-neutral-400">Resize</span>
+        </label>
+      {/if}
     </div>
+
+    <!-- Resize options (shown when resize is enabled for single images) -->
+    {#if resizeEnabled && showResizeOption}
+      <div
+        class="flex w-full flex-wrap items-center gap-2 border-t border-border pt-2 text-xs sm:gap-4"
+        data-testid="resize-options"
+      >
+        <div class="flex items-center gap-2">
+          <span class="text-neutral-500">Size</span>
+          <input
+            type="number"
+            min="1"
+            max="16384"
+            class="w-16 rounded bg-surface-2 px-2 py-1 text-neutral-300 text-xs"
+            bind:value={resizeWidth}
+            onchange={handleWidthChange}
+            onkeydown={handleResizeKeydown}
+            data-testid="resize-width-input"
+          />
+          <span class="text-neutral-600">×</span>
+          <input
+            type="number"
+            min="1"
+            max="16384"
+            class="w-16 rounded bg-surface-2 px-2 py-1 text-neutral-300 text-xs"
+            bind:value={resizeHeight}
+            onchange={handleHeightChange}
+            onkeydown={handleResizeKeydown}
+            data-testid="resize-height-input"
+          />
+        </div>
+
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            class="accent-neutral-400"
+            bind:checked={resizeMaintainAspect}
+            data-testid="resize-aspect-checkbox"
+          />
+          <span class="text-neutral-400">Keep aspect</span>
+        </label>
+
+        <label class="flex items-center gap-2">
+          <span class="text-neutral-500">Quality</span>
+          <select
+            class="rounded bg-surface-2 px-2 py-1 text-neutral-300 text-xs"
+            bind:value={resizeAlgorithm}
+            onchange={handleAlgorithmChange}
+            data-testid="resize-algorithm-select"
+          >
+            <option value="nearest">Nearest (fast)</option>
+            <option value="bilinear">Bilinear</option>
+            <option value="lanczos3">Lanczos3 (best)</option>
+          </select>
+        </label>
+      </div>
+    {/if}
 
     <div
       class="flex flex-wrap items-center gap-2 text-xs sm:gap-4"
@@ -936,15 +1110,11 @@
         >
           {formatSavings(totalSavingsPct)}
         </span>
-      {:else if jobs.length > 0}
-        <span class="text-neutral-500" data-testid="compressing-status"
-          >Compressing...</span
-        >
       {/if}
     </div>
 
     <div
-      class="flex shrink-0 items-center gap-2 max-sm:mt-2"
+      class="flex shrink-0 items-center justify-end gap-2 max-sm:mt-2 sm:min-w-[7rem]"
       data-testid="download-section"
     >
       {#if !wasmReady}
@@ -952,7 +1122,18 @@
           >Loading WASM...</span
         >
       {:else if isCompressing}
-        <span class="text-xs text-neutral-400">Compressing...</span>
+        <span
+          class="inline-flex items-center px-4 py-2 text-sm text-neutral-400"
+          data-testid="compressing-status">Compressing...</span
+        >
+      {:else if resizeEnabled && resizePending && showResizeOption}
+        <button
+          class="btn-primary whitespace-nowrap"
+          onclick={applyResize}
+          data-testid="resize-button"
+        >
+          Resize
+        </button>
       {:else if completedJobs.length > 0}
         <button
           class="btn-primary whitespace-nowrap"
