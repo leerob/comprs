@@ -2623,4 +2623,425 @@ mod tests {
         decoder.read_to_end(&mut decoded).expect("decode");
         assert_eq!(decoded, data);
     }
+
+    // Huffman Encoding Threshold Tests
+
+    #[test]
+    fn test_encode_best_huffman_at_fixed_threshold() {
+        // tokens.len() == FIXED_ONLY_TOKEN_THRESHOLD (128)
+        // Should use fixed Huffman only path
+        let tokens: Vec<Token> = (0..128).map(|i| Token::Literal((i % 256) as u8)).collect();
+        let (encoded, used_dynamic) = encode_best_huffman(&tokens, 1024);
+        assert!(!encoded.is_empty());
+        // At threshold, should use fixed only (not dynamic)
+        assert!(!used_dynamic);
+    }
+
+    #[test]
+    fn test_encode_best_huffman_above_dynamic_threshold() {
+        // tokens.len() >= DYNAMIC_ONLY_TOKEN_THRESHOLD (128)
+        // Should go straight to dynamic Huffman
+        let tokens: Vec<Token> = (0..200).map(|i| Token::Literal((i % 256) as u8)).collect();
+        let (encoded, used_dynamic) = encode_best_huffman(&tokens, 1024);
+        assert!(!encoded.is_empty());
+        // Above threshold, should use dynamic
+        assert!(used_dynamic);
+    }
+
+    #[test]
+    fn test_encode_best_huffman_packed_at_fixed_threshold() {
+        // PackedToken variant at threshold
+        let tokens: Vec<PackedToken> = (0..128)
+            .map(|i| PackedToken::literal((i % 256) as u8))
+            .collect();
+        let (encoded, used_dynamic) = encode_best_huffman_packed(&tokens, 1024);
+        assert!(!encoded.is_empty());
+        assert!(!used_dynamic);
+    }
+
+    #[test]
+    fn test_encode_best_huffman_packed_above_dynamic_threshold() {
+        // PackedToken variant above threshold
+        let tokens: Vec<PackedToken> = (0..200)
+            .map(|i| PackedToken::literal((i % 256) as u8))
+            .collect();
+        let (encoded, used_dynamic) = encode_best_huffman_packed(&tokens, 1024);
+        assert!(!encoded.is_empty());
+        assert!(used_dynamic);
+    }
+
+    // RLE Code Length Tests
+
+    #[test]
+    fn test_rle_code_lengths_long_zero_run_code_18() {
+        // 11+ consecutive zeros should use code 18
+        let lit_lengths = [0u8; 50]; // 50 zeros
+        let dist_lengths: [u8; 0] = [];
+        let mut cl_freqs = [0u32; 19];
+        rle_code_lengths(&lit_lengths, &dist_lengths, &mut cl_freqs);
+        // Code 18 encodes 11-138 zeros, so 50 zeros should use code 18
+        assert!(cl_freqs[18] > 0, "Should use code 18 for long zero runs");
+    }
+
+    #[test]
+    fn test_rle_code_lengths_max_zero_run_138() {
+        // Maximum zero run for code 18 is 138
+        let lit_lengths = [0u8; 150]; // 150 zeros = 138 + 12
+        let dist_lengths: [u8; 0] = [];
+        let mut cl_freqs = [0u32; 19];
+        rle_code_lengths(&lit_lengths, &dist_lengths, &mut cl_freqs);
+        // Should use at least one code 18 (for 138 zeros) and code 17 for remaining
+        assert!(cl_freqs[18] >= 1, "Should use code 18 for max zero run");
+    }
+
+    #[test]
+    fn test_rle_code_lengths_short_zero_run_code_17() {
+        // 3-10 consecutive zeros should use code 17
+        let lit_lengths = [0u8; 7]; // 7 zeros
+        let dist_lengths: [u8; 0] = [];
+        let mut cl_freqs = [0u32; 19];
+        rle_code_lengths(&lit_lengths, &dist_lengths, &mut cl_freqs);
+        // Code 17 encodes 3-10 zeros
+        assert!(cl_freqs[17] > 0, "Should use code 17 for 3-10 zero runs");
+    }
+
+    #[test]
+    fn test_rle_code_lengths_repeat_code_16_max() {
+        // Code 16 repeats previous value 3-6 times
+        // 7 identical non-zero values = 1 literal + code 16 (6 repeats)
+        let lit_lengths = [5u8; 7];
+        let dist_lengths: [u8; 0] = [];
+        let mut cl_freqs = [0u32; 19];
+        rle_code_lengths(&lit_lengths, &dist_lengths, &mut cl_freqs);
+        // Should use code 16 for repeating the value
+        assert!(cl_freqs[16] >= 1, "Should use code 16 for repeats");
+        assert!(cl_freqs[5] >= 1, "Should emit first occurrence as literal");
+    }
+
+    #[test]
+    fn test_rle_code_lengths_long_repeat() {
+        // Long repeat run: 20 identical values
+        // = 1 literal + multiple code 16 entries
+        let lit_lengths = [8u8; 20];
+        let dist_lengths: [u8; 0] = [];
+        let mut cl_freqs = [0u32; 19];
+        rle_code_lengths(&lit_lengths, &dist_lengths, &mut cl_freqs);
+        // 19 repeats: 6+6+6+1 = needs 3 code 16s plus 1 literal for remainder
+        assert!(
+            cl_freqs[16] >= 3,
+            "Should use multiple code 16 for long repeat"
+        );
+    }
+
+    #[test]
+    fn test_rle_code_lengths_mixed_zeros_and_values() {
+        // Alternating pattern: zeros and non-zeros
+        let lit_lengths = [0u8, 0, 0, 0, 5, 5, 5, 5, 0, 0, 0, 0, 0, 7, 7];
+        let dist_lengths: [u8; 0] = [];
+        let mut cl_freqs = [0u32; 19];
+        let rle = rle_code_lengths(&lit_lengths, &dist_lengths, &mut cl_freqs);
+        // Should use code 17 for 4 zeros (3-10 range)
+        assert!(cl_freqs[17] >= 1, "Should use code 17 for short zero runs");
+        // Should use code 16 for repeating 5 and 7
+        assert!(cl_freqs[16] >= 1 || cl_freqs[5] >= 1);
+        assert!(!rle.is_empty());
+    }
+
+    #[test]
+    fn test_rle_code_lengths_with_dist_lengths() {
+        // Test with both lit and dist lengths
+        let lit_lengths = [5u8, 5, 5, 6, 6, 6];
+        let dist_lengths = [3u8, 3, 3, 0, 0, 0];
+        let mut cl_freqs = [0u32; 19];
+        let rle = rle_code_lengths(&lit_lengths, &dist_lengths, &mut cl_freqs);
+        assert!(!rle.is_empty());
+        // Should have entries for values 5, 6, 3, and zeros
+        assert!(cl_freqs[5] >= 1 || cl_freqs[16] >= 1);
+    }
+
+    // Zlib Header Tests
+
+    #[test]
+    fn test_zlib_header_all_levels() {
+        // Verify correct header bytes for all compression levels
+        for level in 0..=9 {
+            let header = zlib_header(level);
+            // CMF should always be 0x78 (DEFLATE with 32K window)
+            assert_eq!(header[0], 0x78, "CMF should be 0x78 for level {level}");
+            // FLG checksum: (CMF * 256 + FLG) must be multiple of 31
+            let check = (header[0] as u16) * 256 + (header[1] as u16);
+            assert_eq!(check % 31, 0, "Checksum failed for level {level}");
+        }
+    }
+
+    #[test]
+    fn test_zlib_header_flevel_values() {
+        // Verify FLEVEL (bits 6-7 of FLG) matches compression level
+        // Level 0-2 -> FLEVEL 1 (fast)
+        // Level 3-6 -> FLEVEL 2 (default)
+        // Level 7-9 -> FLEVEL 3 (maximum)
+        let header_fast = zlib_header(1);
+        let header_default = zlib_header(5);
+        let header_max = zlib_header(9);
+
+        let flevel_fast = (header_fast[1] >> 6) & 0x03;
+        let flevel_default = (header_default[1] >> 6) & 0x03;
+        let flevel_max = (header_max[1] >> 6) & 0x03;
+
+        assert_eq!(flevel_fast, 1, "Fast compression should have FLEVEL=1");
+        assert_eq!(
+            flevel_default, 2,
+            "Default compression should have FLEVEL=2"
+        );
+        assert_eq!(flevel_max, 3, "Max compression should have FLEVEL=3");
+    }
+
+    // High Entropy Detection Tests
+
+    #[test]
+    fn test_is_high_entropy_alternating_pattern() {
+        // Create data with alternating bytes - not truly random
+        let data: Vec<u8> = (0..10000)
+            .map(|i| if i % 2 == 0 { 0xAA } else { 0x55 })
+            .collect();
+        // Alternating pattern is not high entropy
+        assert!(!is_high_entropy_data(&data));
+    }
+
+    #[test]
+    fn test_is_high_entropy_sequential() {
+        // Sequential bytes have low entropy
+        let data: Vec<u8> = (0..10000).map(|i| (i % 256) as u8).collect();
+        assert!(!is_high_entropy_data(&data));
+    }
+
+    #[test]
+    fn test_is_high_entropy_constant() {
+        // All same value - definitely not high entropy
+        let data = vec![0x42u8; 10000];
+        assert!(!is_high_entropy_data(&data));
+    }
+
+    #[test]
+    fn test_deflate_zlib_stored_very_large_input() {
+        // Input > 65535 * 2 bytes forcing multiple stored blocks
+        let size = 140_000;
+        let mut data = vec![0u8; size];
+        let mut rng = rand::rngs::StdRng::seed_from_u64(9999);
+        rng.fill(data.as_mut_slice());
+
+        // Use stored compression directly
+        let encoded = deflate_zlib_stored(&data, 6);
+        assert!(!encoded.is_empty());
+
+        // Verify roundtrip
+        let decoded = decompress_zlib(&encoded);
+        assert_eq!(decoded, data);
+
+        // Should have multiple blocks (each block max 65535 bytes)
+        // 140000 / 65535 = 3 blocks
+        assert!(encoded.len() > data.len(), "Stored adds overhead");
+    }
+
+    // Block Splitting Edge Case Tests
+
+    #[test]
+    fn test_encode_with_block_splitting_exact_min_size() {
+        // Create tokens exactly at MIN_BLOCK_SIZE * 2
+        let data = b"abcdefghijklmnop".repeat(200); // ~3200 bytes
+        let mut lz77 = Lz77Compressor::new(6);
+        let tokens = lz77.compress(&data);
+
+        // Only proceed if we have enough tokens
+        if tokens.len() >= MIN_BLOCK_SIZE * 2 {
+            let encoded = encode_with_block_splitting(&tokens, 10);
+            assert!(!encoded.is_empty());
+
+            // Verify roundtrip
+            use flate2::read::DeflateDecoder;
+            use std::io::Read;
+            let mut decoder = DeflateDecoder::new(&encoded[..]);
+            let mut decoded = Vec::new();
+            decoder.read_to_end(&mut decoded).expect("decode");
+            assert_eq!(decoded, data);
+        }
+    }
+
+    #[test]
+    fn test_find_block_splits_uniform_data() {
+        // Uniform data shouldn't benefit from splitting
+        let data = vec![b'x'; 5000];
+        let mut lz77 = Lz77Compressor::new(6);
+        let tokens = lz77.compress(&data);
+
+        let splits = find_block_splits(&tokens, 10);
+        // Uniform data likely won't have beneficial split points
+        // Just verify it doesn't crash and returns valid result
+        assert!(splits.len() <= 9);
+    }
+
+    #[test]
+    fn test_estimate_block_cost_with_matches() {
+        let tokens = vec![
+            Token::Literal(b'a'),
+            Token::Match {
+                length: 5,
+                distance: 2,
+            },
+            Token::Literal(b'b'),
+            Token::Match {
+                length: 10,
+                distance: 5,
+            },
+        ];
+        let cost = estimate_block_cost(&tokens, 0, tokens.len());
+        // Should have positive cost including header overhead
+        assert!(cost > 0.0);
+    }
+
+    #[test]
+    fn test_count_symbols_range_with_all_matches() {
+        let tokens = vec![
+            Token::Match {
+                length: 3,
+                distance: 1,
+            },
+            Token::Match {
+                length: 5,
+                distance: 3,
+            },
+            Token::Match {
+                length: 10,
+                distance: 7,
+            },
+        ];
+
+        let (lit_counts, dist_counts) = count_symbols_range(&tokens, 0, 3);
+        // Length codes should be counted
+        assert!(lit_counts[257] > 0 || lit_counts[258] > 0 || lit_counts[261] > 0);
+        // Distance codes should be counted
+        assert!(dist_counts.iter().sum::<u32>() > 0);
+    }
+
+    // Deflater Level Tests
+
+    #[test]
+    fn test_deflater_level_accessor() {
+        let deflater = Deflater::new(7);
+        assert_eq!(deflater.level(), 7);
+
+        let deflater_min = Deflater::new(1);
+        assert_eq!(deflater_min.level(), 1);
+
+        let deflater_max = Deflater::new(9);
+        assert_eq!(deflater_max.level(), 9);
+    }
+
+    #[test]
+    fn test_deflate_packed_all_levels() {
+        let data = b"test data for packed compression at various levels";
+        for level in 1..=9 {
+            let compressed = deflate_packed(data, level);
+            assert!(
+                !compressed.is_empty(),
+                "Level {level} produced empty output"
+            );
+        }
+    }
+
+    #[test]
+    fn test_deflate_packed_roundtrip() {
+        use flate2::read::DeflateDecoder;
+        use std::io::Read;
+
+        let data = b"The quick brown fox jumps over the lazy dog repeatedly!".repeat(10);
+        let compressed = deflate_packed(&data, 6);
+
+        let mut decoder = DeflateDecoder::new(&compressed[..]);
+        let mut decoded = Vec::new();
+        decoder.read_to_end(&mut decoded).expect("decode packed");
+        assert_eq!(decoded, data);
+    }
+
+    // Empty and Edge Case Tests
+
+    #[test]
+    fn test_last_nonzero_all_zeros() {
+        let lengths = [0u8; 10];
+        assert_eq!(last_nonzero(&lengths), 1); // minimum 1
+    }
+
+    #[test]
+    fn test_last_nonzero_single_nonzero() {
+        let lengths = [0u8, 0, 0, 5, 0, 0];
+        assert_eq!(last_nonzero(&lengths), 4); // index 3 + 1
+    }
+
+    #[test]
+    fn test_last_nonzero_last_element() {
+        let lengths = [0u8, 0, 0, 0, 7];
+        assert_eq!(last_nonzero(&lengths), 5);
+    }
+
+    #[test]
+    fn test_estimated_deflate_size_levels() {
+        let data_len = 10000;
+        let size_fast = estimated_deflate_size(data_len, 2);
+        let size_default = estimated_deflate_size(data_len, 5);
+        let size_max = estimated_deflate_size(data_len, 9);
+
+        // Fast should estimate larger size than max
+        assert!(size_fast >= size_max);
+        assert!(size_default >= size_max);
+    }
+
+    #[test]
+    fn test_estimated_deflate_size_minimum() {
+        // Very small data should still return at least 1024
+        let size = estimated_deflate_size(10, 6);
+        assert!(size >= 1024);
+    }
+
+    #[test]
+    fn test_reverse_bits_zero_length() {
+        // Zero length should return 0
+        assert_eq!(reverse_bits(0xFFFF, 0), 0);
+    }
+
+    #[test]
+    fn test_empty_zlib_output() {
+        let encoded = empty_zlib(6);
+        // Should produce valid zlib stream
+        let decoded = decompress_zlib(&encoded);
+        assert!(decoded.is_empty());
+    }
+
+    #[test]
+    fn test_token_counts_packed_all_literals() {
+        let tokens: Vec<PackedToken> = (0..100).map(|i| PackedToken::literal(i as u8)).collect();
+        let (lit_count, match_count) = token_counts_packed(&tokens);
+        assert_eq!(lit_count, 100);
+        assert_eq!(match_count, 0);
+    }
+
+    #[test]
+    fn test_token_counts_packed_all_matches() {
+        let tokens: Vec<PackedToken> = (0..50).map(|_| PackedToken::match_(5, 3)).collect();
+        let (lit_count, match_count) = token_counts_packed(&tokens);
+        assert_eq!(lit_count, 0);
+        assert_eq!(match_count, 50);
+    }
+
+    #[test]
+    fn test_token_counts_packed_mixed() {
+        let tokens = vec![
+            PackedToken::literal(b'a'),
+            PackedToken::match_(4, 2),
+            PackedToken::literal(b'b'),
+            PackedToken::match_(6, 5),
+        ];
+        let (lit_count, match_count) = token_counts_packed(&tokens);
+        assert_eq!(lit_count, 2);
+        assert_eq!(match_count, 2);
+    }
 }

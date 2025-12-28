@@ -206,7 +206,7 @@ impl PngOptions {
             opts.quantization = QuantizationOptions {
                 mode: QuantizationMode::Auto,
                 max_colors: 256,
-                dithering: false,
+                dithering: true,
             };
         }
         opts
@@ -300,12 +300,16 @@ impl PngOptionsBuilder {
     }
 
     /// Convenience to toggle lossy (Auto quantization) vs. lossless (Off).
+    ///
+    /// When lossy is true, enables auto-quantization with dithering for
+    /// better visual quality on photographic content.
     pub fn lossy(mut self, lossy: bool) -> Self {
-        self.options.quantization.mode = if lossy {
-            QuantizationMode::Auto
+        if lossy {
+            self.options.quantization.mode = QuantizationMode::Auto;
+            self.options.quantization.dithering = true; // Better quality for photos
         } else {
-            QuantizationMode::Off
-        };
+            self.options.quantization.mode = QuantizationMode::Off;
+        }
         self
     }
 
@@ -1385,14 +1389,18 @@ fn refine_palette_kmeans(palette: &mut [[u8; 4]], colors: &[ColorCount]) {
     }
 }
 
-/// Perceptual color distance (squared) using weighted RGB.
+/// Perceptual color distance (squared) using the Redmean formula.
 ///
-/// Uses weights that approximate human color perception: green contributes most
-/// to perceived luminance, followed by red, then blue. This is better than
-/// Euclidean RGB distance for skin tones and gradients.
+/// The Redmean formula provides a perceptually accurate color distance by
+/// adjusting weights based on the average red intensity. Human vision is most
+/// sensitive to green, with red/blue sensitivity varying by luminance level.
 ///
-/// Weights are based on typical luminance perception: Y = 0.299R + 0.587G + 0.114B
-/// Simplified to integer ratios: R=3, G=4, B=1 (approximately 3:6:1 squared).
+/// This is significantly better than simple Euclidean RGB distance for:
+/// - Skin tones and faces
+/// - Smooth gradients
+/// - Bright highlights (white balance)
+///
+/// See: https://en.wikipedia.org/wiki/Color_difference#sRGB
 #[inline]
 fn perceptual_distance_sq(c1: [u8; 4], c2: [u8; 4]) -> u32 {
     let dr = c1[0] as i32 - c2[0] as i32;
@@ -1400,13 +1408,25 @@ fn perceptual_distance_sq(c1: [u8; 4], c2: [u8; 4]) -> u32 {
     let db = c1[2] as i32 - c2[2] as i32;
     let da = c1[3] as i32 - c2[3] as i32;
 
-    // Perceptual weights: G (4) > R (3) > B (1)
-    // Based on human luminance sensitivity
-    const R_WEIGHT: i32 = 3;
-    const G_WEIGHT: i32 = 4;
-    const B_WEIGHT: i32 = 1;
+    // Redmean formula: weights vary based on average red intensity
+    // For high red (bright colors), red differences matter more
+    // For low red (dark colors), blue differences matter more
+    // Green always has the highest fixed weight (human eye most sensitive)
+    let r_mean = (c1[0] as i32 + c2[0] as i32) >> 1;
 
-    (R_WEIGHT * dr * dr + G_WEIGHT * dg * dg + B_WEIGHT * db * db + da * da) as u32
+    // Scale weights by 256 to avoid floating point
+    // r_weight = 2 + r_mean/256 → (512 + r_mean) / 256
+    // g_weight = 4 (fixed)
+    // b_weight = 2 + (255-r_mean)/256 → (767 - r_mean) / 256
+    let r_weight = 512 + r_mean;
+    let b_weight = 767 - r_mean;
+    const G_WEIGHT: i32 = 1024; // 4 * 256
+
+    // Compute weighted distance (result scaled by 256)
+    let dist = (r_weight * dr * dr + G_WEIGHT * dg * dg + b_weight * db * db) >> 8;
+
+    // Add alpha difference (unweighted)
+    (dist + da * da) as u32
 }
 
 fn nearest_palette_index(color: [u8; 4], palette: &[[u8; 4]]) -> u8 {
@@ -1423,10 +1443,10 @@ fn nearest_palette_index(color: [u8; 4], palette: &[[u8; 4]]) -> u8 {
 }
 
 /// Precomputed lookup table for fast nearest-palette-index queries.
-/// Uses 5-5-5 RGB quantization (32K entries) for O(1) lookups.
+/// Uses 6-6-6 RGB quantization (256K entries) for O(1) lookups with high accuracy.
 /// For colors with alpha < 255, falls back to direct computation.
 struct PaletteLut {
-    /// LUT for opaque colors: index = (r5 << 10) | (g5 << 5) | b5
+    /// LUT for opaque colors: index = (r6 << 12) | (g6 << 6) | b6
     opaque_lut: Vec<u8>,
     /// Reference to the palette for transparent color lookups
     palette: Vec<[u8; 4]>,
@@ -1435,20 +1455,22 @@ struct PaletteLut {
 impl PaletteLut {
     /// Build a lookup table for the given palette.
     fn new(palette: Vec<[u8; 4]>) -> Self {
-        // Build 5-5-5 RGB LUT for opaque colors (32K entries)
-        // Each 8-bit channel is reduced to 5 bits by taking top 5 bits
-        let mut opaque_lut = vec![0u8; 32 * 32 * 32];
+        // Build 6-6-6 RGB LUT for opaque colors (256K entries = 64^3)
+        // Each 8-bit channel is reduced to 6 bits by taking top 6 bits.
+        // This provides 4x better color accuracy than 5-5-5 (32K entries).
+        let mut opaque_lut = vec![0u8; 64 * 64 * 64];
 
-        for r5 in 0..32u8 {
-            for g5 in 0..32u8 {
-                for b5 in 0..32u8 {
-                    // Convert 5-bit back to 8-bit (expand to full range)
-                    let r8 = (r5 << 3) | (r5 >> 2);
-                    let g8 = (g5 << 3) | (g5 >> 2);
-                    let b8 = (b5 << 3) | (b5 >> 2);
+        for r6 in 0..64u8 {
+            for g6 in 0..64u8 {
+                for b6 in 0..64u8 {
+                    // Convert 6-bit back to 8-bit (expand to full range)
+                    // Formula: (val << 2) | (val >> 4) maps 0..63 to 0..255
+                    let r8 = (r6 << 2) | (r6 >> 4);
+                    let g8 = (g6 << 2) | (g6 >> 4);
+                    let b8 = (b6 << 2) | (b6 >> 4);
 
                     let idx = nearest_palette_index([r8, g8, b8, 255], &palette);
-                    let lut_idx = ((r5 as usize) << 10) | ((g5 as usize) << 5) | (b5 as usize);
+                    let lut_idx = ((r6 as usize) << 12) | ((g6 as usize) << 6) | (b6 as usize);
                     opaque_lut[lut_idx] = idx;
                 }
             }
@@ -1465,10 +1487,10 @@ impl PaletteLut {
     fn lookup(&self, r: u8, g: u8, b: u8, a: u8) -> u8 {
         if a == 255 {
             // Use precomputed LUT for opaque colors (most common case)
-            let r5 = r >> 3;
-            let g5 = g >> 3;
-            let b5 = b >> 3;
-            let lut_idx = ((r5 as usize) << 10) | ((g5 as usize) << 5) | (b5 as usize);
+            let r6 = r >> 2;
+            let g6 = g >> 2;
+            let b6 = b >> 2;
+            let lut_idx = ((r6 as usize) << 12) | ((g6 as usize) << 6) | (b6 as usize);
             self.opaque_lut[lut_idx]
         } else {
             // For transparent colors, compute directly (rare case)
@@ -2226,6 +2248,10 @@ mod tests {
     fn test_builder_lossy_toggle() {
         let lossy = PngOptions::builder(100, 100).lossy(true).build();
         assert_eq!(lossy.quantization.mode, QuantizationMode::Auto);
+        assert!(
+            lossy.quantization.dithering,
+            "lossy mode should enable dithering"
+        );
 
         let lossless = PngOptions::builder(100, 100).lossy(false).build();
         assert_eq!(lossless.quantization.mode, QuantizationMode::Off);
@@ -2313,9 +2339,13 @@ mod tests {
         let lossless = PngOptions::from_preset_with_lossless(100, 100, 1, true);
         assert_eq!(lossless.quantization.mode, QuantizationMode::Off);
 
-        // Lossless = false should have quantization auto
+        // Lossless = false should have quantization auto with dithering
         let lossy = PngOptions::from_preset_with_lossless(100, 100, 1, false);
         assert_eq!(lossy.quantization.mode, QuantizationMode::Auto);
+        assert!(
+            lossy.quantization.dithering,
+            "lossy mode should enable dithering"
+        );
     }
 
     #[test]
@@ -3480,6 +3510,359 @@ mod tests {
         assert_eq!(
             png[25], 6,
             "should stay RGBA when semi-transparent pixels exist"
+        );
+    }
+
+    // Builder Pattern Coverage Tests
+
+    #[test]
+    fn test_builder_all_methods() {
+        let opts = PngOptions::builder(100, 100)
+            .color_type(ColorType::Rgb)
+            .compression_level(7)
+            .filter_strategy(FilterStrategy::Paeth)
+            .optimize_alpha(true)
+            .reduce_color_type(true)
+            .strip_metadata(true)
+            .reduce_palette(true)
+            .verbose_filter_log(false)
+            .optimal_compression(true)
+            .quantization_mode(QuantizationMode::Auto)
+            .quantization_max_colors(128)
+            .quantization_dithering(true)
+            .build();
+
+        assert_eq!(opts.width, 100);
+        assert_eq!(opts.height, 100);
+        assert_eq!(opts.color_type, ColorType::Rgb);
+        assert_eq!(opts.compression_level, 7);
+        assert_eq!(opts.filter_strategy, FilterStrategy::Paeth);
+        assert!(opts.optimize_alpha);
+        assert!(opts.reduce_color_type);
+        assert!(opts.strip_metadata);
+        assert!(opts.reduce_palette);
+        assert!(!opts.verbose_filter_log);
+        assert!(opts.optimal_compression);
+        assert_eq!(opts.quantization.mode, QuantizationMode::Auto);
+        assert_eq!(opts.quantization.max_colors, 128);
+        assert!(opts.quantization.dithering);
+    }
+
+    #[test]
+    fn test_builder_quantization_full() {
+        let quant_opts = QuantizationOptions {
+            mode: QuantizationMode::Force,
+            max_colors: 64,
+            dithering: false,
+        };
+        let opts = PngOptions::builder(50, 50)
+            .quantization(quant_opts.clone())
+            .build();
+
+        assert_eq!(opts.quantization.mode, QuantizationMode::Force);
+        assert_eq!(opts.quantization.max_colors, 64);
+        assert!(!opts.quantization.dithering);
+    }
+
+    #[test]
+    fn test_preset_0_is_fast() {
+        let opts = PngOptions::from_preset(10, 10, 0);
+        assert_eq!(opts.compression_level, 2);
+        assert_eq!(opts.filter_strategy, FilterStrategy::AdaptiveFast);
+        assert!(!opts.optimize_alpha);
+        assert!(!opts.optimal_compression);
+    }
+
+    #[test]
+    fn test_preset_1_is_balanced() {
+        let opts = PngOptions::from_preset(10, 10, 1);
+        assert_eq!(opts.compression_level, 6);
+        assert_eq!(opts.filter_strategy, FilterStrategy::Adaptive);
+        assert!(opts.optimize_alpha);
+        assert!(!opts.optimal_compression);
+    }
+
+    #[test]
+    fn test_preset_2_is_max() {
+        let opts = PngOptions::from_preset(10, 10, 2);
+        assert_eq!(opts.compression_level, 9);
+        assert_eq!(opts.filter_strategy, FilterStrategy::Bigrams);
+        assert!(opts.optimize_alpha);
+        assert!(opts.optimal_compression);
+    }
+
+    #[test]
+    fn test_preset_invalid_defaults_to_balanced() {
+        let opts = PngOptions::from_preset(10, 10, 99);
+        assert_eq!(opts.compression_level, 6); // Balanced
+    }
+
+    // should_quantize_auto Tests
+
+    #[test]
+    fn test_should_quantize_auto_empty_data() {
+        assert!(!should_quantize_auto(&[], 4, 256));
+    }
+
+    #[test]
+    fn test_should_quantize_auto_few_colors() {
+        // Very few colors - fewer than max_colors - should return false
+        let data: Vec<u8> = (0..100).flat_map(|_| vec![100, 150, 200, 255]).collect();
+        assert!(!should_quantize_auto(&data, 4, 256)); // Only 1 unique color
+    }
+
+    #[test]
+    fn test_should_quantize_auto_photo_like_many_colors() {
+        // Photo-like data with many distinct colors - should return false
+        let mut data = Vec::with_capacity(10000 * 4);
+        for i in 0..10000 {
+            data.push((i % 256) as u8);
+            data.push(((i * 3) % 256) as u8);
+            data.push(((i * 7) % 256) as u8);
+            data.push(255);
+        }
+        // With many colors (thousands), it looks like a photo - skip
+        assert!(!should_quantize_auto(&data, 4, 256));
+    }
+
+    #[test]
+    fn test_should_quantize_auto_unsupported_bpp() {
+        // BPP != 3 or 4 should return false
+        let data = vec![100u8; 100]; // 1 bpp
+        assert!(!should_quantize_auto(&data, 1, 256));
+        assert!(!should_quantize_auto(&data, 2, 256));
+    }
+
+    #[test]
+    fn test_should_quantize_auto_rgb_data() {
+        // RGB data (bpp=3) with moderate colors
+        let mut data = Vec::new();
+        for i in 0..5000 {
+            let color_idx = i % 500;
+            data.push((color_idx % 256) as u8);
+            data.push(((color_idx / 256) * 50) as u8);
+            data.push(((color_idx * 3) % 256) as u8);
+        }
+        // Just verify it doesn't panic and returns a boolean
+        let _ = should_quantize_auto(&data, 3, 256);
+    }
+
+    // Filter Strategy Tests
+
+    #[test]
+    fn test_filter_strategy_none() {
+        let pixels = vec![100u8; 64 * 64 * 3];
+        let opts = PngOptions::builder(64, 64)
+            .color_type(ColorType::Rgb)
+            .filter_strategy(FilterStrategy::None)
+            .build();
+        let png = encode(&pixels, &opts).unwrap();
+        assert!(!png.is_empty());
+    }
+
+    #[test]
+    fn test_filter_strategy_up() {
+        let pixels = vec![100u8; 64 * 64 * 3];
+        let opts = PngOptions::builder(64, 64)
+            .color_type(ColorType::Rgb)
+            .filter_strategy(FilterStrategy::Up)
+            .build();
+        let png = encode(&pixels, &opts).unwrap();
+        assert!(!png.is_empty());
+    }
+
+    #[test]
+    fn test_filter_strategy_average() {
+        let pixels = vec![100u8; 64 * 64 * 3];
+        let opts = PngOptions::builder(64, 64)
+            .color_type(ColorType::Rgb)
+            .filter_strategy(FilterStrategy::Average)
+            .build();
+        let png = encode(&pixels, &opts).unwrap();
+        assert!(!png.is_empty());
+    }
+
+    #[test]
+    fn test_filter_strategy_minsum() {
+        let pixels = vec![100u8; 64 * 64 * 3];
+        let opts = PngOptions::builder(64, 64)
+            .color_type(ColorType::Rgb)
+            .filter_strategy(FilterStrategy::MinSum)
+            .build();
+        let png = encode(&pixels, &opts).unwrap();
+        assert!(!png.is_empty());
+    }
+
+    // Indexed Encoding Edge Cases
+
+    #[test]
+    fn test_encode_indexed_single_color_palette() {
+        let indices = vec![0u8; 16]; // 4x4 image, all index 0
+        let palette = [[255, 0, 0]]; // Single red entry
+        let png = encode_indexed(&indices, 4, 4, &palette, None).unwrap();
+        assert_eq!(&png[0..8], &PNG_SIGNATURE);
+        // Verify it decodes correctly
+        let decoded = image::load_from_memory(&png).expect("decode");
+        assert_eq!(decoded.width(), 4);
+    }
+
+    #[test]
+    fn test_encode_indexed_256_color_palette() {
+        let mut indices = Vec::with_capacity(256);
+        let mut palette = Vec::with_capacity(256);
+        for i in 0..256 {
+            indices.push(i as u8);
+            palette.push([i as u8, (255 - i) as u8, (i / 2) as u8]);
+        }
+        let png = encode_indexed(&indices, 16, 16, &palette, None).unwrap();
+        assert_eq!(&png[0..8], &PNG_SIGNATURE);
+        assert!(png.windows(4).any(|w| w == b"PLTE"));
+    }
+
+    #[test]
+    fn test_encode_indexed_with_partial_trns() {
+        // tRNS shorter than palette - remaining entries are opaque
+        let indices = vec![0u8, 1, 2, 3];
+        let palette = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0]];
+        let trns = [128u8, 255]; // Only first 2 entries have transparency
+        let png = encode_indexed(&indices, 2, 2, &palette, Some(&trns)).unwrap();
+        assert_eq!(&png[0..8], &PNG_SIGNATURE);
+        assert!(png.windows(4).any(|w| w == b"tRNS"));
+    }
+
+    #[test]
+    fn test_encode_indexed_with_options_compression() {
+        let indices = vec![0u8; 64]; // 8x8 image
+        let palette = [[100, 150, 200]];
+        let opts = PngOptions::builder(8, 8)
+            .compression_level(9)
+            .filter_strategy(FilterStrategy::Sub)
+            .build();
+        let png = encode_indexed_with_options(&indices, 8, 8, &palette, None, &opts).unwrap();
+        assert!(!png.is_empty());
+    }
+
+    // Color Reduction Edge Cases
+
+    #[test]
+    fn test_all_gray_rgb_single_pixel() {
+        assert!(all_gray_rgb(&[128, 128, 128]));
+    }
+
+    #[test]
+    fn test_all_gray_rgb_not_gray() {
+        assert!(!all_gray_rgb(&[128, 128, 129]));
+    }
+
+    #[test]
+    fn test_all_gray_rgb_empty() {
+        assert!(all_gray_rgb(&[]));
+    }
+
+    #[test]
+    fn test_analyze_rgba_single_opaque_gray() {
+        let (all_opaque, all_gray) = analyze_rgba(&[100, 100, 100, 255]);
+        assert!(all_opaque);
+        assert!(all_gray);
+    }
+
+    #[test]
+    fn test_analyze_rgba_transparent_gray() {
+        let (all_opaque, all_gray) = analyze_rgba(&[100, 100, 100, 0]);
+        assert!(!all_opaque);
+        assert!(all_gray);
+    }
+
+    #[test]
+    fn test_analyze_rgba_opaque_color() {
+        let (all_opaque, all_gray) = analyze_rgba(&[100, 150, 200, 255]);
+        assert!(all_opaque);
+        assert!(!all_gray);
+    }
+
+    // Optimal Compression Tests
+
+    #[test]
+    fn test_optimal_compression_small_image() {
+        let pixels = vec![100u8; 8 * 8 * 3];
+        let opts = PngOptions::builder(8, 8)
+            .color_type(ColorType::Rgb)
+            .optimal_compression(true)
+            .build();
+        let png = encode(&pixels, &opts).unwrap();
+        assert!(!png.is_empty());
+    }
+
+    #[test]
+    fn test_max_preset_exercises_optimal_compression() {
+        let mut pixels = Vec::with_capacity(32 * 32 * 3);
+        for i in 0..(32 * 32) {
+            pixels.push(((i * 3) % 256) as u8);
+            pixels.push(((i * 5) % 256) as u8);
+            pixels.push(((i * 7) % 256) as u8);
+        }
+
+        let mut max_opts = PngOptions::max(32, 32);
+        max_opts.color_type = ColorType::Rgb;
+        // Disable extra features that might affect size comparison
+        max_opts.reduce_palette = false;
+        max_opts.reduce_color_type = false;
+
+        let png = encode(&pixels, &max_opts).unwrap();
+        assert!(!png.is_empty());
+        assert_eq!(&png[0..8], &PNG_SIGNATURE);
+
+        // Verify roundtrip
+        let decoded = image::load_from_memory(&png).expect("decode");
+        assert_eq!(decoded.width(), 32);
+        assert_eq!(decoded.height(), 32);
+    }
+
+    // Metadata Stripping Tests
+
+    #[test]
+    fn test_strip_metadata_removes_text_chunks() {
+        let pixels = vec![100u8; 16 * 16 * 3];
+        let opts = PngOptions::builder(16, 16)
+            .color_type(ColorType::Rgb)
+            .strip_metadata(true)
+            .build();
+        let png = encode(&pixels, &opts).unwrap();
+
+        // Verify no tEXt, iTXt, or zTXt chunks
+        assert!(!png.windows(4).any(|w| w == b"tEXt"));
+        assert!(!png.windows(4).any(|w| w == b"iTXt"));
+        assert!(!png.windows(4).any(|w| w == b"zTXt"));
+    }
+
+    // GrayAlpha Color Type Tests
+
+    #[test]
+    fn test_encode_grayalpha() {
+        let pixels = vec![128u8, 255, 64, 128, 192, 64, 32, 255]; // 2x2 gray+alpha
+        let opts = PngOptions::builder(2, 2)
+            .color_type(ColorType::GrayAlpha)
+            .build();
+        let png = encode(&pixels, &opts).unwrap();
+        assert_eq!(&png[0..8], &PNG_SIGNATURE);
+        assert_eq!(png[25], 4); // Color type 4 = GrayAlpha
+    }
+
+    #[test]
+    fn test_reduce_grayalpha_to_gray() {
+        // GrayAlpha with all alpha=255 - verify valid encoding
+        let pixels = vec![128u8, 255, 64, 255, 192, 255, 32, 255]; // 2x2 gray+alpha, all opaque
+        let opts = PngOptions::builder(2, 2)
+            .color_type(ColorType::GrayAlpha)
+            .reduce_color_type(true)
+            .build();
+        let png = encode(&pixels, &opts).unwrap();
+        assert_eq!(&png[0..8], &PNG_SIGNATURE);
+        // The encoder may or may not reduce to Gray - verify it produces valid PNG
+        let color_type = png[25];
+        assert!(
+            color_type == 0 || color_type == 4,
+            "Should be Gray or GrayAlpha"
         );
     }
 }

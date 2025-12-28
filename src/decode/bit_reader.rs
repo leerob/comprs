@@ -47,6 +47,22 @@ impl<'a> BitReader<'a> {
         Ok((self.bit_buf & ((1u64 << n) - 1)) as u32)
     }
 
+    /// Try to peek at `n` bits, returning available bits and count if stream ends.
+    /// Returns Ok((bits, actual_count)) where actual_count <= n.
+    /// This is useful for Huffman decoding near end of stream.
+    #[inline]
+    pub fn try_peek_bits(&mut self, n: u8) -> Result<(u32, u8)> {
+        debug_assert!(n <= 32);
+        // Try to load as many bits as possible
+        while self.bits_in_buf < n && self.pos < self.data.len() {
+            self.bit_buf |= (self.data[self.pos] as u64) << self.bits_in_buf;
+            self.pos += 1;
+            self.bits_in_buf += 8;
+        }
+        let actual = self.bits_in_buf.min(n);
+        Ok(((self.bit_buf & ((1u64 << actual) - 1)) as u32, actual))
+    }
+
     /// Consume `n` bits from the buffer.
     #[inline]
     pub fn consume(&mut self, n: u8) {

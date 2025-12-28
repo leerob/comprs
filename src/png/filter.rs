@@ -1152,4 +1152,202 @@ mod tests {
         // Should produce valid output (5 rows, each with filter byte + 100 bytes)
         assert_eq!(filtered.len(), 5 * (1 + 100));
     }
+
+    // Additional Filter Tests
+
+    #[test]
+    fn test_apply_filters_parallel_large_image() {
+        // Large image (height > 32) to trigger parallel filtering path
+        let width = 100;
+        let height = 64; // > 32 to trigger parallel
+        let bytes_per_pixel = 3;
+        let data: Vec<u8> = (0..(width * height * bytes_per_pixel))
+            .map(|i| (i % 256) as u8)
+            .collect();
+
+        let options = PngOptions {
+            filter_strategy: FilterStrategy::Adaptive,
+            ..Default::default()
+        };
+
+        let filtered = apply_filters(
+            &data,
+            width as u32,
+            height as u32,
+            bytes_per_pixel,
+            &options,
+        );
+
+        // Should produce valid output
+        let row_bytes = width * bytes_per_pixel;
+        assert_eq!(filtered.len(), height * (1 + row_bytes));
+    }
+
+    #[test]
+    fn test_apply_filters_parallel_bigrams() {
+        // Large image with Bigrams strategy for parallel path
+        let width = 100;
+        let height = 64;
+        let bytes_per_pixel = 4; // RGBA
+        let data: Vec<u8> = (0..(width * height * bytes_per_pixel))
+            .map(|i| (i % 256) as u8)
+            .collect();
+
+        let options = PngOptions {
+            filter_strategy: FilterStrategy::Bigrams,
+            ..Default::default()
+        };
+
+        let filtered = apply_filters(
+            &data,
+            width as u32,
+            height as u32,
+            bytes_per_pixel,
+            &options,
+        );
+
+        let row_bytes = width * bytes_per_pixel;
+        assert_eq!(filtered.len(), height * (1 + row_bytes));
+    }
+
+    #[test]
+    fn test_apply_filters_parallel_adaptive_fast() {
+        // Large image with AdaptiveFast strategy
+        let width = 100;
+        let height = 64;
+        let bytes_per_pixel = 3;
+        let data: Vec<u8> = (0..(width * height * bytes_per_pixel))
+            .map(|i| (i % 256) as u8)
+            .collect();
+
+        let options = PngOptions {
+            filter_strategy: FilterStrategy::AdaptiveFast,
+            ..Default::default()
+        };
+
+        let filtered = apply_filters(
+            &data,
+            width as u32,
+            height as u32,
+            bytes_per_pixel,
+            &options,
+        );
+
+        let row_bytes = width * bytes_per_pixel;
+        assert_eq!(filtered.len(), height * (1 + row_bytes));
+    }
+
+    #[test]
+    fn test_filter_paeth_predictor_edge_cases() {
+        // Test Paeth filter with specific edge cases
+        let row = vec![100, 50, 25, 75];
+        let prev = vec![50, 100, 75, 25];
+        let mut output = Vec::new();
+
+        filter_paeth(&row, &prev, 1, &mut output);
+
+        // Just verify it produces output without panicking
+        assert_eq!(output.len(), 4);
+    }
+
+    #[test]
+    fn test_filter_average_multi_bpp() {
+        // Average filter with bpp > 1
+        let row = vec![10, 20, 30, 40, 50, 60]; // 2 RGB pixels
+        let prev = vec![20, 40, 60, 80, 100, 120];
+        let mut output = Vec::new();
+
+        filter_average(&row, &prev, 3, &mut output);
+
+        assert_eq!(output.len(), 6);
+        // First 3 bytes only use prev (no left neighbor)
+        // Remaining use avg(left, prev)
+    }
+
+    #[test]
+    fn test_score_filter_all_types() {
+        let row = vec![100, 110, 120, 130, 140];
+        let prev = vec![50, 60, 70, 80, 90];
+
+        // Test all filter types produce valid scores
+        let score_none = score_filter(&row);
+        let score_sub = {
+            let mut out = Vec::new();
+            filter_sub(&row, 1, &mut out);
+            score_filter(&out)
+        };
+        let score_up = {
+            let mut out = Vec::new();
+            filter_up(&row, &prev, &mut out);
+            score_filter(&out)
+        };
+        let score_avg = {
+            let mut out = Vec::new();
+            filter_average(&row, &prev, 1, &mut out);
+            score_filter(&out)
+        };
+        let score_paeth = {
+            let mut out = Vec::new();
+            filter_paeth(&row, &prev, 1, &mut out);
+            score_filter(&out)
+        };
+
+        // Scores are usize, so they're inherently non-negative.
+        // Just verify they were computed (non-zero for non-trivial input).
+        assert!(score_none > 0 || score_sub > 0 || score_up > 0 || score_avg > 0 || score_paeth > 0);
+    }
+
+    #[test]
+    fn test_filter_strategies_produce_different_results() {
+        // Same data with different strategies may produce different outputs
+        let width = 50;
+        let height = 50;
+        let bpp = 3;
+        let data: Vec<u8> = (0..(width * height * bpp))
+            .map(|i| ((i * 7) % 256) as u8)
+            .collect();
+
+        let none_opts = PngOptions {
+            filter_strategy: FilterStrategy::None,
+            ..Default::default()
+        };
+        let sub_opts = PngOptions {
+            filter_strategy: FilterStrategy::Sub,
+            ..Default::default()
+        };
+
+        let filtered_none = apply_filters(&data, width as u32, height as u32, bpp, &none_opts);
+        let filtered_sub = apply_filters(&data, width as u32, height as u32, bpp, &sub_opts);
+
+        // Both should be valid but may differ
+        assert_eq!(filtered_none.len(), filtered_sub.len());
+        // Filter bytes should differ
+        assert_eq!(filtered_none[0], FILTER_NONE);
+        assert_eq!(filtered_sub[0], FILTER_SUB);
+    }
+
+    #[test]
+    fn test_adaptive_scratch_clear_and_reuse() {
+        // Test that AdaptiveScratch can be cleared and reused
+        let row_len = 100;
+        let mut scratch = AdaptiveScratch::new(row_len);
+
+        // First use
+        scratch.none.extend_from_slice(&[0u8; 50]);
+        scratch.sub.extend_from_slice(&[1u8; 50]);
+        scratch.avg.extend_from_slice(&[3u8; 25]);
+        scratch.paeth.extend_from_slice(&[4u8; 25]);
+
+        // Clear and reuse
+        scratch.clear();
+        assert!(scratch.none.is_empty());
+        assert!(scratch.sub.is_empty());
+        assert!(scratch.up.is_empty());
+        assert!(scratch.avg.is_empty());
+        assert!(scratch.paeth.is_empty());
+
+        // Can use again after clear
+        scratch.up.extend_from_slice(&[2u8; 100]);
+        assert_eq!(scratch.up.len(), 100);
+    }
 }

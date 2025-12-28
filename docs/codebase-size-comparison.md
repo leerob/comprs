@@ -1,6 +1,6 @@
 # Codebase Size Comparison Report
 
-**Generated:** December 27, 2025
+**Generated:** December 28, 2025
 
 This document provides a comprehensive comparison of codebase sizes between `pixo` and other image compression libraries referenced in the benchmarks, including Rust, C/C++, and JavaScript/Node.js ecosystems.
 
@@ -28,7 +28,7 @@ This document provides a comprehensive comparison of codebase sizes between `pix
 
 | Library      | Total LOC | Core Code | Test Code | Test %                          | Dependencies   | Formats                       |
 | ------------ | --------- | --------- | --------- | ------------------------------- | -------------- | ----------------------------- |
-| **pixo**     | 35,295    | 17,706    | 17,589    | **49.9%** (81.8% line coverage) | 0 (zero deps)  | PNG, JPEG (enc + dec), Resize |
+| **pixo**     | 37,780    | 17,706    | 20,074    | **53.1%** (85.5% line coverage) | 0 (zero deps)  | PNG, JPEG (enc + dec), Resize |
 | jpeg-encoder | 3,642     | 2,846     | 796       | 21.9%                           | 0              | JPEG only             |
 | miniz_oxide  | 7,805     | 4,501     | 3,304     | 42.3%                           | 0              | DEFLATE only          |
 | zopfli       | 3,449     | 3,337     | 112       | 3.2%                            | 0              | DEFLATE only          |
@@ -56,12 +56,12 @@ This document provides a comprehensive comparison of codebase sizes between `pix
 
 ### Key Findings
 
-1. **pixo maintains 49.9% test ratio with 81.8% actual code coverage** - leading among zero-dependency multi-format libraries
+1. **pixo maintains 53.1% test ratio with 85.5% actual code coverage** - leading among zero-dependency multi-format libraries
 2. **pixo includes PNG and JPEG decoding, plus image resizing** - full encode/decode/resize support with zero external dependencies
 3. **pixo is ~3× smaller than mozjpeg** while providing comparable JPEG encoding and basic decoding
 4. **The compression gap comes from SIMD**: mozjpeg has 50K+ lines of hand-tuned assembly; pixo has 3.4K lines of Rust SIMD
 5. **sharp appears small (10K) but depends on libvips (194K LOC)**
-6. **849 test functions** validate encoding, decoding, resizing, CLI, and edge cases
+6. **965 test functions** validate encoding, decoding, resizing, CLI, and edge cases
 
 ---
 
@@ -226,7 +226,7 @@ When comparing libraries that support PNG+JPEG (with encode + decode):
 ```
 === PIXO ===
 Rust files: 49
-Total Rust code: 35,295 LOC
+Total Rust code: 37,780 LOC
 
 Component Breakdown:
 ├── PNG encoding:       3,485 LOC (src/png/mod.rs)
@@ -246,21 +246,20 @@ Component Breakdown:
 ├── CLI:                1,127 LOC (src/bin/pixo.rs)
 └── Other utilities:    1,779 LOC
 
-Test Code: 17,589 LOC (49.9%)
+Test Code: 20,074 LOC (53.1%)
 ├── src/ colocated:   10,358 LOC
 ├── tests/:            4,957 LOC
 └── benches/:          2,274 LOC
 
-#[test] functions: 849
-├── PNG tests:           123
+#[test] functions: 965
+├── PNG tests:           161
 ├── JPEG tests:          150
-├── Compression tests:   170
-├── Decoding tests:      101
+├── Compression tests:   204
+├── Decoding tests:      145
 ├── SIMD tests:           78
 ├── Resize tests:         30
-├── CLI unit tests:       27
-├── Integration tests:   114
-└── Other:                56
+├── Integration tests:   119
+└── Other:                78
 Playwright e2e tests: 22
 Files with colocated tests: 28
 ```
@@ -420,10 +419,10 @@ mod aarch64 {
 
 | Metric     | pixo   | mozjpeg      | Ratio |
 | ---------- | ------ | ------------ | ----- |
-| Total LOC  | 35,295 | 111,966      | 1:3.2 |
+| Total LOC  | 37,780 | 111,966      | 1:3.0 |
 | Core codec | 17,706 | 68,129       | 1:3.8 |
 | SIMD       | 3,356  | 50,623       | 1:15  |
-| Test %     | 49.9%  | ~5%\*        | 10:1  |
+| Test %     | 53.1%  | ~5%\*        | 10:1  |
 | Age        | 2025   | 1991-present | -     |
 
 \* mozjpeg test code is minimal
@@ -432,7 +431,7 @@ mod aarch64 {
 
 ### What pixo Does Well
 
-1. **Higher test coverage** (49.9% vs ~5%): AI-generated code tends to come with tests
+1. **Higher test coverage** (53.1% vs ~5%): AI-generated code tends to come with tests
 2. **Full encode/decode/resize support**: PNG and JPEG encoding/decoding plus image resizing with zero external dependencies
 3. **Modern Rust idioms**: Memory safety, no undefined behavior
 4. **Consistent documentation**: ~18% comment ratio
@@ -451,7 +450,7 @@ mod aarch64 {
 | Library      | LOC/Test | Interpretation                 |
 | ------------ | -------- | ------------------------------ |
 | oxipng       | 33       | Very well-tested (uses C deps) |
-| **pixo**     | **42**   | **Excellent (self-contained)** |
+| **pixo**     | **39**   | **Excellent (self-contained)** |
 | image        | 116      | Less tested                    |
 | jpeg-encoder | 145      | Moderately tested              |
 | mozjpeg      | ~2,000+  | Minimally tested               |
@@ -472,13 +471,13 @@ mod aarch64 {
 **pixo is NOT bloated from AI generation.** In fact, it's remarkably compact:
 
 - **17.7K core LOC** implements PNG + JPEG encoding/decoding + image resizing + DEFLATE/INFLATE + SIMD
-- **49.9% test coverage** is exceptional for codec libraries (849 test functions)
+- **53.1% test coverage** is exceptional for codec libraries (965 test functions)
 - The compression gap (4-5%) comes from **missing 47K lines of hand-tuned assembly**, not from code bloat
 
 The AI-assisted approach traded decades of low-level optimization for:
 
 - Modern safety guarantees
-- High test coverage (49.9% test ratio, 81.8% line coverage)
+- High test coverage (53.1% test ratio, 85.5% line coverage)
 - Full encode/decode/resize support with zero dependencies
 - WASM compatibility
 - Maintainable codebase
@@ -540,7 +539,7 @@ compiled to WebAssembly via Emscripten.
 | Rank | Library      | Test %    | Tests   | Notes                                     |
 | ---- | ------------ | --------- | ------- | ----------------------------------------- |
 | 1    | oxipng       | 50.8%     | ~280    | PNG only (uses C deps)            |
-| 2    | **pixo**     | **49.9%** | **849** | **PNG + JPEG enc/dec + resize, zero deps**|
+| 2    | **pixo**     | **53.1%** | **965** | **PNG + JPEG enc/dec + resize, zero deps**|
 | 3    | miniz_oxide  | 42.3%     | 61      | DEFLATE only                      |
 | 4    | image-png    | 34.3%     | 90      | PNG only                          |
 | 5    | flate2-rs    | 28.3%     | 62      | Wrapper                           |
@@ -553,7 +552,7 @@ compiled to WebAssembly via Emscripten.
 | Rank | Library      | LOC/Test | Interpretation                          |
 | ---- | ------------ | -------- | --------------------------------------- |
 | 1    | oxipng       | 33       | Excellent (but C deps do heavy lifting) |
-| 2    | **pixo**     | **42**   | **Excellent (self-contained)**          |
+| 2    | **pixo**     | **39**   | **Excellent (self-contained)**          |
 | 3    | flate2-rs    | 111      | Good                                    |
 | 4    | image        | 116      | Good                                    |
 | 5    | jpeg-encoder | 145      | Moderate                                |
@@ -588,8 +587,8 @@ compiled to WebAssembly via Emscripten.
 
 | Dimension            | pixo                       | Best Alternative         | Verdict                          |
 | -------------------- | -------------------------- | ------------------------ | -------------------------------- |
-| Test code ratio      | 49.9% (17,589 LOC)         | oxipng (50.8%)           | **Excellent (zero deps)**        |
-| Actual code coverage | 81.8%                      | -                        | **Excellent**                    |
+| Test code ratio      | 53.1% (20,074 LOC)         | oxipng (50.8%)           | **Excellent (zero deps)**        |
+| Actual code coverage | 85.5%                      | -                        | **Excellent**                    |
 | Zero dependencies    | Yes                        | jpeg-encoder (JPEG only) | **Unique for PNG+JPEG+Resize**   |
 | Codebase size        | 17,706 LOC (enc+dec+resize)| jpeg-encoder (2,846)     | Compact for scope                |
 | Encode + Decode      | ✓ Both formats + resize    | Most libs                | **Full codec + resize support**  |
@@ -609,13 +608,13 @@ compiled to WebAssembly via Emscripten.
 | Node.js server              | ❌ Use sharp (faster native)                     |
 | Progressive JPEG decode     | ❌ Use image crate (pixo only supports baseline) |
 | Minimal codebase to audit   | ✅ pixo (17.7K LOC)                              |
-| High test coverage required | ✅ pixo (49.9% test ratio, 81.8% line coverage)  |
+| High test coverage required | ✅ pixo (53.1% test ratio, 85.5% line coverage)  |
 
 ### Final Verdict
 
 **pixo is a well-engineered, compact, well-tested image compression library that trades 30+ years of hand-tuned assembly optimization for modern Rust safety, WASM compatibility, and developer experience.**
 
-The library provides **full encode/decode/resize support** for both PNG and JPEG formats with zero external dependencies. With 849 test functions covering encoding, decoding, resizing, CLI, and edge cases, pixo maintains excellent test coverage while remaining compact.
+The library provides **full encode/decode/resize support** for both PNG and JPEG formats with zero external dependencies. With 965 test functions covering encoding, decoding, resizing, CLI, and edge cases, pixo maintains excellent test coverage while remaining compact.
 
 The 4-5% compression gap is the cost of maintaining ~17.7K LOC instead of ~68K+ LOC (mozjpeg alone). For most web applications, this is an excellent tradeoff.
 
@@ -649,12 +648,12 @@ The 4-5% compression gap is the cost of maintaining ~17.7K LOC instead of ~68K+ 
 
 | Location                  | LOC        | Tests   |
 | ------------------------- | ---------- | ------- |
-| src/ (colocated)          | 10,358     | 730     |
-| ├── src/decode/           | ~1,347     | 101     |
+| src/ (colocated)          | 12,843     | 846     |
+| ├── src/decode/           | ~1,900     | 145     |
 | ├── src/bin/ (CLI)        | ~264       | 27      |
-| ├── src/png/              | ~2,089     | 123     |
+| ├── src/png/              | ~2,600     | 161     |
 | ├── src/jpeg/             | ~2,355     | 150     |
-| ├── src/compress/         | ~2,165     | 170     |
+| ├── src/compress/         | ~2,600     | 204     |
 | ├── src/simd/             | ~1,090     | 78      |
 | ├── src/resize.rs         | ~634       | 30      |
 | └── src/wasm.rs           | ~0         | 8       |
@@ -665,7 +664,7 @@ The 4-5% compression gap is the cost of maintaining ~17.7K LOC instead of ~68K+ 
 | └── simd_fallback.rs      | 542        | 24      |
 | benches/                  | 2,274      | -       |
 | web/e2e/ (Playwright)     | 320        | 22      |
-| **Total**                 | **17,909** | **849** |
+| **Total**                 | **20,394** | **965** |
 
 Note: Test counts include doctests, property-based tests, CLI unit tests, resize tests, and decode conformance tests.
 
@@ -674,7 +673,7 @@ Note: Test counts include doctests, property-based tests, CLI unit tests, resize
 Measured with `cargo tarpaulin --all-features`:
 
 ```
-81.75% coverage, 5550/6789 lines covered
+85.50% coverage, 5989/7002 lines covered
 ```
 
 | Component             | Lines Covered | Total Lines | Coverage |

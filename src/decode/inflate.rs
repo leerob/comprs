@@ -132,17 +132,37 @@ impl HuffmanTable {
             return Err(Error::InvalidDecode("empty Huffman table".into()));
         }
 
-        // Fast path: lookup table
-        let peek = reader.peek_bits(LOOKUP_BITS)?;
-        let entry = self.lookup[peek as usize];
-        let len = (entry >> 12) as u8;
+        // Try to peek LOOKUP_BITS bits for fast path.
+        // If we're near end of stream, we may have fewer bits available.
+        let (peek, available) = reader.try_peek_bits(LOOKUP_BITS)?;
 
-        if len > 0 && len <= LOOKUP_BITS {
-            reader.consume(len);
-            return Ok(entry & 0xFFF);
+        if available >= LOOKUP_BITS {
+            // Fast path: full lookup table available
+            let entry = self.lookup[peek as usize];
+            let len = (entry >> 12) as u8;
+
+            if len > 0 && len <= LOOKUP_BITS {
+                reader.consume(len);
+                return Ok(entry & 0xFFF);
+            }
+
+            // Code is longer than LOOKUP_BITS, use slow path
+            return self.decode_slow(reader);
         }
 
-        // Slow path: bit-by-bit decoding for longer codes
+        // Near end of stream: fewer than LOOKUP_BITS bits available.
+        // Check if any short code matches the available bits.
+        if available > 0 {
+            let entry = self.lookup[peek as usize];
+            let len = (entry >> 12) as u8;
+
+            if len > 0 && len <= available {
+                reader.consume(len);
+                return Ok(entry & 0xFFF);
+            }
+        }
+
+        // Fall back to slow path for remaining bits
         self.decode_slow(reader)
     }
 
@@ -660,5 +680,148 @@ mod tests {
         // None expected size should work
         let decompressed = inflate_zlib_with_size(&compressed, None).unwrap();
         assert_eq!(decompressed, original.to_vec());
+    }
+
+    #[test]
+    fn test_inflate_empty_data() {
+        let result = inflate_zlib_with_size(&[], None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_inflate_truncated_header() {
+        // Only 1 byte of zlib header
+        let data = [0x78];
+        let result = inflate_zlib_with_size(&data, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_inflate_invalid_zlib_header() {
+        // Invalid CMF (not deflate compression)
+        let data = [0x00, 0x00, 0x00, 0x00, 0x00];
+        let result = inflate_zlib_with_size(&data, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_inflate_invalid_block_type() {
+        // Valid zlib header followed by invalid block type (BTYPE=11)
+        let data = [
+            0x78, 0x9C, // zlib header
+            0x07, // BFINAL=1, BTYPE=11 (reserved)
+        ];
+        let result = inflate_zlib_with_size(&data, None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_inflate_stored_block() {
+        use crate::compress::adler32::adler32;
+        use crate::compress::deflate::deflate_stored;
+
+        // Create a stored block manually with zlib wrapper
+        let original = b"stored block test data";
+        let compressed = deflate_stored(original);
+
+        // Add zlib header and adler32
+        let mut zlib_data = vec![0x78, 0x01]; // zlib header (no compression)
+        zlib_data.extend_from_slice(&compressed);
+        let checksum = adler32(original);
+        zlib_data.extend_from_slice(&checksum.to_be_bytes());
+
+        let decompressed = inflate_zlib_with_size(&zlib_data, None).unwrap();
+        assert_eq!(decompressed, original.to_vec());
+    }
+
+    #[test]
+    fn test_inflate_multiple_stored_blocks() {
+        use crate::compress::adler32::adler32;
+        use crate::compress::deflate::deflate_stored;
+
+        // Data larger than 65535 bytes to force multiple stored blocks
+        let original = vec![42u8; 70000];
+        let compressed = deflate_stored(&original);
+
+        let mut zlib_data = vec![0x78, 0x01];
+        zlib_data.extend_from_slice(&compressed);
+        let checksum = adler32(&original);
+        zlib_data.extend_from_slice(&checksum.to_be_bytes());
+
+        let decompressed = inflate_zlib_with_size(&zlib_data, None).unwrap();
+        assert_eq!(decompressed, original);
+    }
+
+    #[test]
+    fn test_huffman_table_empty() {
+        // All zero lengths - empty table
+        let lengths: Vec<u8> = vec![];
+        let table = HuffmanTable::from_lengths(&lengths).unwrap();
+        assert_eq!(table.max_len, 0);
+    }
+
+    #[test]
+    fn test_huffman_table_single_symbol() {
+        // Single symbol with length 1
+        let lengths = vec![1];
+        let table = HuffmanTable::from_lengths(&lengths).unwrap();
+        assert_eq!(table.max_len, 1);
+    }
+
+    #[test]
+    fn test_huffman_table_complex() {
+        // More complex Huffman table
+        let lengths = vec![3, 3, 3, 3, 3, 2, 4, 4];
+        let table = HuffmanTable::from_lengths(&lengths).unwrap();
+        assert_eq!(table.max_len, 4);
+        assert_eq!(table.lengths.len(), 8);
+    }
+
+    #[test]
+    fn test_inflate_fixed_huffman_block() {
+        use crate::compress::deflate::deflate_zlib;
+
+        // Small data that should use fixed Huffman
+        let original = b"abc";
+        let compressed = deflate_zlib(original, 1); // Low level for fixed Huffman
+        let decompressed = inflate_zlib_with_size(&compressed, None).unwrap();
+        assert_eq!(decompressed, original.to_vec());
+    }
+
+    #[test]
+    fn test_inflate_with_back_reference() {
+        use crate::compress::deflate::deflate_zlib;
+
+        // Repeating "abc" pattern that uses back-references.
+        // This was previously failing with "unexpected end of stream" because the
+        // Huffman decoder required LOOKUP_BITS (9) bits even when fewer bits were
+        // sufficient for the end-of-block code (7 bits).
+        let original = b"abcabcabcabcabcabcabcabcabcabc";
+        let compressed = deflate_zlib(original, 6);
+        let decompressed = inflate_zlib_with_size(&compressed, None).unwrap();
+        assert_eq!(decompressed.as_slice(), original);
+    }
+
+    #[test]
+    fn test_inflate_long_match() {
+        use crate::compress::deflate::deflate_zlib;
+
+        // Long repetitive pattern for maximum length matches
+        let original = vec![b'a'; 300];
+        let compressed = deflate_zlib(&original, 6);
+        let decompressed = inflate_zlib_with_size(&compressed, None).unwrap();
+        assert_eq!(decompressed, original);
+    }
+
+    #[test]
+    fn test_inflate_max_distance_match() {
+        use crate::compress::deflate::deflate_zlib;
+
+        // Pattern that requires max distance back-reference
+        let mut original = vec![b'x'; 32768 + 10];
+        original[0] = b'a';
+        let compressed = deflate_zlib(&original, 6);
+        let decompressed = inflate_zlib_with_size(&compressed, None).unwrap();
+        assert_eq!(decompressed, original);
     }
 }

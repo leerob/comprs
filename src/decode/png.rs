@@ -997,4 +997,476 @@ mod tests {
         // 1 row * (1 filter byte + 2 packed bytes) = 3
         assert_eq!(calculate_expected_size(&ihdr).unwrap(), 3);
     }
+
+    // Error Path Tests
+
+    #[test]
+    fn test_decode_invalid_ihdr_length() {
+        // Create PNG with IHDR that has wrong length
+        let mut data = Vec::new();
+        data.extend_from_slice(&PNG_SIGNATURE);
+
+        // IHDR chunk with wrong length (12 instead of 13)
+        data.extend_from_slice(&12u32.to_be_bytes()); // length
+        data.extend_from_slice(b"IHDR");
+        data.extend_from_slice(&[0u8; 12]); // wrong data length
+                                            // CRC (will be wrong but length check comes first)
+        data.extend_from_slice(&[0u8; 4]);
+
+        let result = decode_png(&data);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("IHDR") || err.contains("length") || err.contains("truncated"),
+            "Error should mention IHDR issue: {err}"
+        );
+    }
+
+    #[test]
+    fn test_decode_missing_ihdr() {
+        // Create PNG with only IEND, no IHDR
+        let mut data = Vec::new();
+        data.extend_from_slice(&PNG_SIGNATURE);
+
+        // IEND chunk
+        data.extend_from_slice(&0u32.to_be_bytes()); // length
+        data.extend_from_slice(b"IEND");
+        let crc = crc32(b"IEND");
+        data.extend_from_slice(&crc.to_be_bytes());
+
+        let result = decode_png(&data);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("IHDR") || err.contains("missing"),
+            "Error should mention missing IHDR: {err}"
+        );
+    }
+
+    #[test]
+    fn test_decode_zero_width() {
+        // Create PNG with zero width
+        let mut data = Vec::new();
+        data.extend_from_slice(&PNG_SIGNATURE);
+
+        // IHDR chunk with zero width
+        let mut ihdr_data = Vec::new();
+        ihdr_data.extend_from_slice(&0u32.to_be_bytes()); // width = 0
+        ihdr_data.extend_from_slice(&1u32.to_be_bytes()); // height = 1
+        ihdr_data.push(8); // bit depth
+        ihdr_data.push(0); // color type (grayscale)
+        ihdr_data.push(0); // compression
+        ihdr_data.push(0); // filter
+        ihdr_data.push(0); // interlace
+
+        data.extend_from_slice(&13u32.to_be_bytes()); // length
+        data.extend_from_slice(b"IHDR");
+        data.extend_from_slice(&ihdr_data);
+        let mut crc_data = Vec::new();
+        crc_data.extend_from_slice(b"IHDR");
+        crc_data.extend_from_slice(&ihdr_data);
+        data.extend_from_slice(&crc32(&crc_data).to_be_bytes());
+
+        // IEND
+        data.extend_from_slice(&0u32.to_be_bytes());
+        data.extend_from_slice(b"IEND");
+        data.extend_from_slice(&crc32(b"IEND").to_be_bytes());
+
+        let result = decode_png(&data);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("Dimensions") || err.contains("0"),
+            "Error should mention invalid dimensions: {err}"
+        );
+    }
+
+    #[test]
+    fn test_decode_zero_height() {
+        // Create PNG with zero height
+        let mut data = Vec::new();
+        data.extend_from_slice(&PNG_SIGNATURE);
+
+        // IHDR chunk with zero height
+        let mut ihdr_data = Vec::new();
+        ihdr_data.extend_from_slice(&1u32.to_be_bytes()); // width = 1
+        ihdr_data.extend_from_slice(&0u32.to_be_bytes()); // height = 0
+        ihdr_data.push(8); // bit depth
+        ihdr_data.push(0); // color type (grayscale)
+        ihdr_data.push(0); // compression
+        ihdr_data.push(0); // filter
+        ihdr_data.push(0); // interlace
+
+        data.extend_from_slice(&13u32.to_be_bytes()); // length
+        data.extend_from_slice(b"IHDR");
+        data.extend_from_slice(&ihdr_data);
+        let mut crc_data = Vec::new();
+        crc_data.extend_from_slice(b"IHDR");
+        crc_data.extend_from_slice(&ihdr_data);
+        data.extend_from_slice(&crc32(&crc_data).to_be_bytes());
+
+        // IEND
+        data.extend_from_slice(&0u32.to_be_bytes());
+        data.extend_from_slice(b"IEND");
+        data.extend_from_slice(&crc32(b"IEND").to_be_bytes());
+
+        let result = decode_png(&data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_decode_unsupported_compression_method() {
+        // Create PNG with compression_method != 0
+        let mut data = Vec::new();
+        data.extend_from_slice(&PNG_SIGNATURE);
+
+        // IHDR chunk with invalid compression method
+        let mut ihdr_data = Vec::new();
+        ihdr_data.extend_from_slice(&1u32.to_be_bytes()); // width
+        ihdr_data.extend_from_slice(&1u32.to_be_bytes()); // height
+        ihdr_data.push(8); // bit depth
+        ihdr_data.push(0); // color type (grayscale)
+        ihdr_data.push(1); // compression method = 1 (invalid)
+        ihdr_data.push(0); // filter
+        ihdr_data.push(0); // interlace
+
+        data.extend_from_slice(&13u32.to_be_bytes());
+        data.extend_from_slice(b"IHDR");
+        data.extend_from_slice(&ihdr_data);
+        let mut crc_data = Vec::new();
+        crc_data.extend_from_slice(b"IHDR");
+        crc_data.extend_from_slice(&ihdr_data);
+        data.extend_from_slice(&crc32(&crc_data).to_be_bytes());
+
+        // IEND
+        data.extend_from_slice(&0u32.to_be_bytes());
+        data.extend_from_slice(b"IEND");
+        data.extend_from_slice(&crc32(b"IEND").to_be_bytes());
+
+        let result = decode_png(&data);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("compression"),
+            "Error should mention compression: {err}"
+        );
+    }
+
+    #[test]
+    fn test_decode_unsupported_filter_method() {
+        // Create PNG with filter_method != 0
+        let mut data = Vec::new();
+        data.extend_from_slice(&PNG_SIGNATURE);
+
+        // IHDR chunk with invalid filter method
+        let mut ihdr_data = Vec::new();
+        ihdr_data.extend_from_slice(&1u32.to_be_bytes()); // width
+        ihdr_data.extend_from_slice(&1u32.to_be_bytes()); // height
+        ihdr_data.push(8); // bit depth
+        ihdr_data.push(0); // color type (grayscale)
+        ihdr_data.push(0); // compression method
+        ihdr_data.push(1); // filter method = 1 (invalid)
+        ihdr_data.push(0); // interlace
+
+        data.extend_from_slice(&13u32.to_be_bytes());
+        data.extend_from_slice(b"IHDR");
+        data.extend_from_slice(&ihdr_data);
+        let mut crc_data = Vec::new();
+        crc_data.extend_from_slice(b"IHDR");
+        crc_data.extend_from_slice(&ihdr_data);
+        data.extend_from_slice(&crc32(&crc_data).to_be_bytes());
+
+        // IEND
+        data.extend_from_slice(&0u32.to_be_bytes());
+        data.extend_from_slice(b"IEND");
+        data.extend_from_slice(&crc32(b"IEND").to_be_bytes());
+
+        let result = decode_png(&data);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(err.contains("filter"), "Error should mention filter: {err}");
+    }
+
+    #[test]
+    fn test_decode_unsupported_interlace() {
+        // Create PNG with interlace_method == 1 (Adam7)
+        let mut data = Vec::new();
+        data.extend_from_slice(&PNG_SIGNATURE);
+
+        // IHDR chunk with Adam7 interlacing
+        let mut ihdr_data = Vec::new();
+        ihdr_data.extend_from_slice(&1u32.to_be_bytes()); // width
+        ihdr_data.extend_from_slice(&1u32.to_be_bytes()); // height
+        ihdr_data.push(8); // bit depth
+        ihdr_data.push(0); // color type (grayscale)
+        ihdr_data.push(0); // compression method
+        ihdr_data.push(0); // filter method
+        ihdr_data.push(1); // interlace = 1 (Adam7)
+
+        data.extend_from_slice(&13u32.to_be_bytes());
+        data.extend_from_slice(b"IHDR");
+        data.extend_from_slice(&ihdr_data);
+        let mut crc_data = Vec::new();
+        crc_data.extend_from_slice(b"IHDR");
+        crc_data.extend_from_slice(&ihdr_data);
+        data.extend_from_slice(&crc32(&crc_data).to_be_bytes());
+
+        // IEND
+        data.extend_from_slice(&0u32.to_be_bytes());
+        data.extend_from_slice(b"IEND");
+        data.extend_from_slice(&crc32(b"IEND").to_be_bytes());
+
+        let result = decode_png(&data);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("Adam7") || err.contains("interlace"),
+            "Error should mention interlacing: {err}"
+        );
+    }
+
+    #[test]
+    fn test_decode_invalid_bit_depth_for_rgb() {
+        // RGB with bit depth 4 is invalid (must be 8 or 16)
+        let mut data = Vec::new();
+        data.extend_from_slice(&PNG_SIGNATURE);
+
+        let mut ihdr_data = Vec::new();
+        ihdr_data.extend_from_slice(&1u32.to_be_bytes()); // width
+        ihdr_data.extend_from_slice(&1u32.to_be_bytes()); // height
+        ihdr_data.push(4); // bit depth = 4 (invalid for RGB)
+        ihdr_data.push(2); // color type = RGB
+        ihdr_data.push(0); // compression
+        ihdr_data.push(0); // filter
+        ihdr_data.push(0); // interlace
+
+        data.extend_from_slice(&13u32.to_be_bytes());
+        data.extend_from_slice(b"IHDR");
+        data.extend_from_slice(&ihdr_data);
+        let mut crc_data = Vec::new();
+        crc_data.extend_from_slice(b"IHDR");
+        crc_data.extend_from_slice(&ihdr_data);
+        data.extend_from_slice(&crc32(&crc_data).to_be_bytes());
+
+        // IEND
+        data.extend_from_slice(&0u32.to_be_bytes());
+        data.extend_from_slice(b"IEND");
+        data.extend_from_slice(&crc32(b"IEND").to_be_bytes());
+
+        let result = decode_png(&data);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("bit depth") || err.contains("invalid"),
+            "Error should mention bit depth: {err}"
+        );
+    }
+
+    #[test]
+    fn test_decode_no_idat_data() {
+        // Create PNG with IHDR and IEND but no IDAT
+        let mut data = Vec::new();
+        data.extend_from_slice(&PNG_SIGNATURE);
+
+        // Valid IHDR
+        let mut ihdr_data = Vec::new();
+        ihdr_data.extend_from_slice(&1u32.to_be_bytes()); // width
+        ihdr_data.extend_from_slice(&1u32.to_be_bytes()); // height
+        ihdr_data.push(8); // bit depth
+        ihdr_data.push(0); // color type (grayscale)
+        ihdr_data.push(0); // compression
+        ihdr_data.push(0); // filter
+        ihdr_data.push(0); // interlace
+
+        data.extend_from_slice(&13u32.to_be_bytes());
+        data.extend_from_slice(b"IHDR");
+        data.extend_from_slice(&ihdr_data);
+        let mut crc_data = Vec::new();
+        crc_data.extend_from_slice(b"IHDR");
+        crc_data.extend_from_slice(&ihdr_data);
+        data.extend_from_slice(&crc32(&crc_data).to_be_bytes());
+
+        // No IDAT, just IEND
+        data.extend_from_slice(&0u32.to_be_bytes());
+        data.extend_from_slice(b"IEND");
+        data.extend_from_slice(&crc32(b"IEND").to_be_bytes());
+
+        let result = decode_png(&data);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("IDAT") || err.contains("data"),
+            "Error should mention missing IDAT: {err}"
+        );
+    }
+
+    #[test]
+    fn test_decode_invalid_plte_length() {
+        // PLTE chunk with length not multiple of 3
+        let mut data = Vec::new();
+        data.extend_from_slice(&PNG_SIGNATURE);
+
+        // Valid IHDR for indexed
+        let mut ihdr_data = Vec::new();
+        ihdr_data.extend_from_slice(&1u32.to_be_bytes());
+        ihdr_data.extend_from_slice(&1u32.to_be_bytes());
+        ihdr_data.push(8);
+        ihdr_data.push(3); // indexed color
+        ihdr_data.push(0);
+        ihdr_data.push(0);
+        ihdr_data.push(0);
+
+        data.extend_from_slice(&13u32.to_be_bytes());
+        data.extend_from_slice(b"IHDR");
+        data.extend_from_slice(&ihdr_data);
+        let mut crc_data = Vec::new();
+        crc_data.extend_from_slice(b"IHDR");
+        crc_data.extend_from_slice(&ihdr_data);
+        data.extend_from_slice(&crc32(&crc_data).to_be_bytes());
+
+        // Invalid PLTE (length = 5, not multiple of 3)
+        let plte_data = [0u8; 5];
+        data.extend_from_slice(&5u32.to_be_bytes());
+        data.extend_from_slice(b"PLTE");
+        data.extend_from_slice(&plte_data);
+        let mut plte_crc_data = Vec::new();
+        plte_crc_data.extend_from_slice(b"PLTE");
+        plte_crc_data.extend_from_slice(&plte_data);
+        data.extend_from_slice(&crc32(&plte_crc_data).to_be_bytes());
+
+        // IEND
+        data.extend_from_slice(&0u32.to_be_bytes());
+        data.extend_from_slice(b"IEND");
+        data.extend_from_slice(&crc32(b"IEND").to_be_bytes());
+
+        let result = decode_png(&data);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("PLTE") || err.contains("length"),
+            "Error should mention PLTE: {err}"
+        );
+    }
+
+    // 16-bit and Bit Depth Edge Case Tests
+
+    #[test]
+    fn test_calculate_expected_size_16bit_rgb() {
+        let ihdr = IhdrData {
+            width: 2,
+            height: 2,
+            bit_depth: 16,
+            color_type: PngColorType::Rgb,
+            compression_method: 0,
+            filter_method: 0,
+            interlace_method: 0,
+        };
+        // 16-bit RGB: 2 bytes per channel, 3 channels = 6 bytes per pixel
+        // 2 rows * (1 filter byte + 2 pixels * 6 bytes) = 2 * 13 = 26
+        assert_eq!(calculate_expected_size(&ihdr).unwrap(), 26);
+    }
+
+    #[test]
+    fn test_calculate_expected_size_16bit_rgba() {
+        let ihdr = IhdrData {
+            width: 2,
+            height: 2,
+            bit_depth: 16,
+            color_type: PngColorType::Rgba,
+            compression_method: 0,
+            filter_method: 0,
+            interlace_method: 0,
+        };
+        // 16-bit RGBA: 2 bytes per channel, 4 channels = 8 bytes per pixel
+        // 2 rows * (1 filter byte + 2 pixels * 8 bytes) = 2 * 17 = 34
+        assert_eq!(calculate_expected_size(&ihdr).unwrap(), 34);
+    }
+
+    #[test]
+    fn test_calculate_expected_size_16bit_grayscale_alpha() {
+        let ihdr = IhdrData {
+            width: 4,
+            height: 1,
+            bit_depth: 16,
+            color_type: PngColorType::GrayscaleAlpha,
+            compression_method: 0,
+            filter_method: 0,
+            interlace_method: 0,
+        };
+        // 16-bit GrayAlpha: 2 bytes gray + 2 bytes alpha = 4 bytes per pixel
+        // 1 row * (1 filter byte + 4 pixels * 4 bytes) = 17
+        assert_eq!(calculate_expected_size(&ihdr).unwrap(), 17);
+    }
+
+    #[test]
+    fn test_calculate_expected_size_2bit_indexed() {
+        let ihdr = IhdrData {
+            width: 12, // 12 pixels at 2 bits = 24 bits = 3 bytes
+            height: 1,
+            bit_depth: 2,
+            color_type: PngColorType::Indexed,
+            compression_method: 0,
+            filter_method: 0,
+            interlace_method: 0,
+        };
+        // 1 row * (1 filter byte + 3 packed bytes) = 4
+        assert_eq!(calculate_expected_size(&ihdr).unwrap(), 4);
+    }
+
+    #[test]
+    fn test_calculate_expected_size_4bit_indexed() {
+        let ihdr = IhdrData {
+            width: 5, // 5 pixels at 4 bits = 20 bits = 3 bytes (ceil)
+            height: 2,
+            bit_depth: 4,
+            color_type: PngColorType::Indexed,
+            compression_method: 0,
+            filter_method: 0,
+            interlace_method: 0,
+        };
+        // 2 rows * (1 filter byte + 3 packed bytes) = 8
+        assert_eq!(calculate_expected_size(&ihdr).unwrap(), 8);
+    }
+
+    #[test]
+    fn test_unpack_row_partial_byte() {
+        // Test unpacking when pixels don't fill complete byte
+        let packed = vec![0b11010000]; // 4 pixels at 2 bits: 3, 1, 0, 0
+        let mut out = Vec::new();
+        unpack_row(&packed, 3, 2, &mut out); // Only 3 pixels
+        assert_eq!(out, vec![3, 1, 0]);
+    }
+
+    #[test]
+    fn test_unfilter_sub_multi_byte_pixel() {
+        // Test Sub filter with bpp > 1 (e.g., RGB = 3 bytes per pixel)
+        let mut row = vec![10, 20, 30, 5, 10, 15]; // 2 RGB pixels
+        let prev = vec![0, 0, 0, 0, 0, 0];
+        unfilter_row(1, &mut row, &prev, 3).unwrap(); // bpp = 3
+                                                      // First pixel unchanged: 10, 20, 30
+                                                      // Second pixel adds first: 10+5, 20+10, 30+15 = 15, 30, 45
+        assert_eq!(row, vec![10, 20, 30, 15, 30, 45]);
+    }
+
+    #[test]
+    fn test_unfilter_average_rounding() {
+        // Average filter with odd sums to test floor division
+        let mut row = vec![7, 3];
+        let prev = vec![5, 9];
+        unfilter_row(3, &mut row, &prev, 1).unwrap();
+        // First: 7 + floor((0 + 5) / 2) = 7 + 2 = 9
+        // Second: 3 + floor((9 + 9) / 2) = 3 + 9 = 12
+        assert_eq!(row[0], 9);
+        assert_eq!(row[1], 12);
+    }
+
+    #[test]
+    fn test_unfilter_paeth_all_zeros() {
+        // Paeth with all zeros should work
+        let mut row = vec![100, 50, 25];
+        let prev = vec![0, 0, 0];
+        unfilter_row(4, &mut row, &prev, 1).unwrap();
+        // With all zeros for a, b, c: paeth returns the input + predicted
+        assert!(!row.is_empty());
+    }
 }

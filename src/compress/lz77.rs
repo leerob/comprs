@@ -651,10 +651,12 @@ impl Lz77Compressor {
                         .match_length(data, match_pos, pos)
                         .min(MAX_MATCH_LENGTH);
                     // Gate short matches: reject length 3 with very long distance.
-                    // Only update if this match is longer than the current best (e.g., RLE match).
+                    // Update if this match is longer OR equal length with shorter distance.
+                    // This preserves optimal RLE matches (distance=1) while allowing
+                    // the hash4 chain to find better distances for hash3 matches.
                     if len >= min_match_length
                         && !(len == 3 && distance > 8192)
-                        && len > best_length
+                        && (len > best_length || (len == best_length && distance < best_distance))
                     {
                         best_length = len;
                         best_distance = distance;
@@ -717,9 +719,10 @@ impl Lz77Compressor {
             // Compare strings
             let length = self.match_length(data, match_pos, pos);
 
+            // Update if longer OR equal length with shorter distance.
             if length >= min_match_length
                 && !(length == 3 && distance > 8192)
-                && length > best_length
+                && (length > best_length || (length == best_length && distance < best_distance))
             {
                 best_length = length;
                 best_distance = distance;
