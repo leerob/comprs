@@ -166,22 +166,18 @@ mod tests {
 
     #[test]
     fn test_pack_bits() {
-        // 1-bit packing: [1,0,1,0,1,0,1,0] -> 0b10101010
-        let packed = pack_bits(&[1, 0, 1, 0, 1, 0, 1, 0], 1);
-        assert_eq!(packed, vec![0b10101010]);
+        let alternating_bits = pack_bits(&[1, 0, 1, 0, 1, 0, 1, 0], 1);
+        assert_eq!(alternating_bits, vec![0b10101010]);
 
-        // 2-bit packing: [0,1,2,3] -> 00 01 10 11 = 0x1B
-        let packed = pack_bits(&[0, 1, 2, 3], 2);
-        assert_eq!(packed, vec![0b00011011]);
+        let ascending_two_bits = pack_bits(&[0, 1, 2, 3], 2);
+        assert_eq!(ascending_two_bits, vec![0b00011011]);
 
-        // 4-bit packing: [0xA, 0xB] -> 0xAB
-        let packed = pack_bits(&[0xA, 0xB], 4);
-        assert_eq!(packed, vec![0xAB]);
+        let nybble_pair = pack_bits(&[0xA, 0xB], 4);
+        assert_eq!(nybble_pair, vec![0xAB]);
     }
 
     #[test]
     fn test_reduce_bit_depth_gray() {
-        // Test through the public interface
         assert_eq!(reduce_bit_depth(&[0, 1], ColorType::Gray), Some(1));
         assert_eq!(reduce_bit_depth(&[0, 3], ColorType::Gray), Some(2));
         assert_eq!(reduce_bit_depth(&[0, 15], ColorType::Gray), Some(4));
@@ -190,7 +186,6 @@ mod tests {
 
     #[test]
     fn test_reduce_bit_depth_non_gray() {
-        // Non-grayscale color types should return None
         assert_eq!(reduce_bit_depth(&[0, 1], ColorType::Rgb), None);
         assert_eq!(reduce_bit_depth(&[0, 1], ColorType::Rgba), None);
         assert_eq!(reduce_bit_depth(&[0, 1], ColorType::GrayAlpha), None);
@@ -211,44 +206,38 @@ mod tests {
 
     #[test]
     fn test_pack_gray() {
-        // Test all bit depths
         let data = &[0, 1, 0, 1];
         assert_eq!(pack_gray(data, 1).len(), 1);
         assert_eq!(pack_gray(data, 2).len(), 1);
         assert_eq!(pack_gray(data, 4).len(), 2);
         assert_eq!(pack_gray(data, 8), data.to_vec());
-        // Test invalid bit depth returns unchanged
         assert_eq!(pack_gray(data, 16), data.to_vec());
     }
 
     #[test]
     fn test_pack_indexed() {
-        // Test all bit depths
         let data = &[0, 1, 2, 3];
         assert_eq!(pack_indexed(data, 1).len(), 1);
         assert_eq!(pack_indexed(data, 2).len(), 1);
         assert_eq!(pack_indexed(data, 4).len(), 2);
         assert_eq!(pack_indexed(data, 8), data.to_vec());
-        // Test invalid bit depth returns unchanged
         assert_eq!(pack_indexed(data, 16), data.to_vec());
     }
 
     #[test]
     fn test_pack_bits_partial_byte() {
-        // Test when data doesn't fill a complete byte
-        let packed = pack_bits(&[1, 0, 1], 1); // 3 bits -> 101xxxxx
-        assert_eq!(packed, vec![0b10100000]);
+        let three_bits = pack_bits(&[1, 0, 1], 1);
+        assert_eq!(three_bits, vec![0b10100000]);
 
-        let packed = pack_bits(&[1, 2], 2); // 4 bits -> 0110xxxx
-        assert_eq!(packed, vec![0b01100000]);
+        let two_two_bit_values = pack_bits(&[1, 2], 2);
+        assert_eq!(two_two_bit_values, vec![0b01100000]);
 
-        let packed = pack_bits(&[0xA], 4); // 4 bits -> 1010xxxx
-        assert_eq!(packed, vec![0b10100000]);
+        let single_nybble = pack_bits(&[0xA], 4);
+        assert_eq!(single_nybble, vec![0b10100000]);
     }
 
     #[test]
     fn test_pack_gray_8bit() {
-        // 8-bit packing via pack_gray should be identity
         let data = &[0x12, 0x34, 0x56];
         assert_eq!(pack_gray(data, 8), data.to_vec());
     }

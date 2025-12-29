@@ -1,8 +1,3 @@
-//! PNG conformance tests.
-//!
-//! Tests PNG encoding against expected output and validates
-//! that encoded images can be decoded correctly.
-
 #![allow(clippy::uninlined_format_args)]
 
 use image::GenericImageView;
@@ -42,130 +37,83 @@ fn encode_png_with_options(
     png::encode(data, &opts)
 }
 
-/// Test that PNG output has correct header.
 #[test]
-fn test_png_signature() {
-    let pixels = vec![255, 0, 0]; // 1x1 red pixel
+fn png_signature_matches_magic_bytes() {
+    let pixels = vec![255, 0, 0];
     let result = encode_png(&pixels, 1, 1, ColorType::Rgb).unwrap();
 
-    // PNG signature
     assert_eq!(
         &result[0..8],
         &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
     );
 }
 
-/// Test IHDR chunk format.
 #[test]
-fn test_ihdr_chunk() {
-    let pixels = vec![0u8; 100 * 100 * 3]; // 100x100 RGB
+fn ihdr_chunk_fields_match_dimensions() {
+    let pixels = vec![0u8; 100 * 100 * 3];
     let result = encode_png(&pixels, 100, 100, ColorType::Rgb).unwrap();
 
-    // IHDR should be right after signature
-    // Length (4 bytes) + "IHDR" (4 bytes) + data (13 bytes) + CRC (4 bytes)
-
-    // Length should be 13
     assert_eq!(&result[8..12], &[0, 0, 0, 13]);
-
-    // Chunk type should be IHDR
     assert_eq!(&result[12..16], b"IHDR");
-
-    // Width (100 = 0x64)
     assert_eq!(&result[16..20], &[0, 0, 0, 100]);
-
-    // Height (100 = 0x64)
     assert_eq!(&result[20..24], &[0, 0, 0, 100]);
-
-    // Bit depth (8)
     assert_eq!(result[24], 8);
-
-    // Color type (2 = RGB)
     assert_eq!(result[25], 2);
-
-    // Compression method (0 = DEFLATE)
     assert_eq!(result[26], 0);
-
-    // Filter method (0 = adaptive)
     assert_eq!(result[27], 0);
-
-    // Interlace method (0 = none)
     assert_eq!(result[28], 0);
 }
 
-/// Test that IEND chunk is present at end.
 #[test]
-fn test_iend_chunk() {
+fn iend_chunk_present_at_end() {
     let pixels = vec![128u8; 10 * 10 * 3];
     let result = encode_png(&pixels, 10, 10, ColorType::Rgb).unwrap();
 
-    // IEND chunk should be at the end
-    // It's 12 bytes: length (4) + type (4) + CRC (4)
     let iend_start = result.len() - 12;
-
-    // Length should be 0
     assert_eq!(&result[iend_start..iend_start + 4], &[0, 0, 0, 0]);
-
-    // Type should be IEND
     assert_eq!(&result[iend_start + 4..iend_start + 8], b"IEND");
-
-    // CRC of "IEND" should be 0xAE426082
     assert_eq!(
         &result[iend_start + 8..iend_start + 12],
         &[0xAE, 0x42, 0x60, 0x82]
     );
 }
 
-/// Test encoding different color types.
 #[test]
-fn test_color_types() {
-    // Grayscale
+fn color_type_field_matches_input() {
     let gray = vec![128u8; 4 * 4];
     let result = encode_png(&gray, 4, 4, ColorType::Gray).unwrap();
-    assert_eq!(result[25], 0); // Color type 0
+    assert_eq!(result[25], 0);
 
-    // Grayscale + Alpha
     let gray_alpha = vec![128u8; 4 * 4 * 2];
     let result = encode_png(&gray_alpha, 4, 4, ColorType::GrayAlpha).unwrap();
-    assert_eq!(result[25], 4); // Color type 4
+    assert_eq!(result[25], 4);
 
-    // RGB
     let rgb = vec![128u8; 4 * 4 * 3];
     let result = encode_png(&rgb, 4, 4, ColorType::Rgb).unwrap();
-    assert_eq!(result[25], 2); // Color type 2
+    assert_eq!(result[25], 2);
 
-    // RGBA
     let rgba = vec![128u8; 4 * 4 * 4];
     let result = encode_png(&rgba, 4, 4, ColorType::Rgba).unwrap();
-    assert_eq!(result[25], 6); // Color type 6
+    assert_eq!(result[25], 6);
 }
 
-/// Test that different images produce different output.
 #[test]
-fn test_different_images() {
+fn distinct_inputs_produce_distinct_pngs() {
     let black = vec![0u8; 8 * 8 * 3];
     let white = vec![255u8; 8 * 8 * 3];
 
     let black_png = encode_png(&black, 8, 8, ColorType::Rgb).unwrap();
     let white_png = encode_png(&white, 8, 8, ColorType::Rgb).unwrap();
 
-    // Should be different
     assert_ne!(black_png, white_png);
 }
 
-/// Ensure encoded PNGs decode correctly via the `image` crate (zlib wrapper validity).
 #[test]
-fn test_png_roundtrip_decode_rgb() {
+fn png_roundtrip_rgb_via_image_crate() {
     let width = 3;
     let height = 2;
     let pixels = vec![
-        // row 0
-        255, 0, 0, // red
-        0, 255, 0, // green
-        0, 0, 255, // blue
-        // row 1
-        255, 255, 0, // yellow
-        0, 255, 255, // cyan
-        255, 0, 255, // magenta
+        255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0, 0, 255, 255, 255, 0, 255,
     ];
 
     let encoded = encode_png(&pixels, width, height, ColorType::Rgb).unwrap();
@@ -176,9 +124,8 @@ fn test_png_roundtrip_decode_rgb() {
     assert_eq!(decoded.as_raw(), &pixels);
 }
 
-/// Randomized small-images roundtrip across color types to ensure decodability.
 #[test]
-fn test_png_roundtrip_random_small() {
+fn png_roundtrip_random_small_images() {
     let mut rng = StdRng::seed_from_u64(42);
     let dims = [(1, 1), (2, 3), (3, 2), (4, 4), (8, 5)];
     let color_types = [
@@ -205,9 +152,8 @@ fn test_png_roundtrip_random_small() {
     }
 }
 
-/// Validate chunk lengths and CRCs for a generated PNG.
 #[test]
-fn test_png_chunk_crc_and_lengths() {
+fn png_chunk_crc_and_lengths_are_valid() {
     let mut rng = StdRng::seed_from_u64(777);
     let w = 12;
     let h = 7;
@@ -216,12 +162,10 @@ fn test_png_chunk_crc_and_lengths() {
 
     let encoded = encode_png(&pixels, w, h, ColorType::Rgb).unwrap();
 
-    // PNG signature already validated elsewhere
     let mut offset = 8;
     let mut saw_iend = false;
 
     while offset < encoded.len() {
-        // length (u32 big-endian)
         assert!(offset + 8 <= encoded.len(), "truncated chunk header");
         let len = u32::from_be_bytes(encoded[offset..offset + 4].try_into().unwrap()) as usize;
         let chunk_type = &encoded[offset + 4..offset + 8];
@@ -240,7 +184,6 @@ fn test_png_chunk_crc_and_lengths() {
         let stored_crc = u32::from_be_bytes(encoded[offset..offset + 4].try_into().unwrap());
         offset += 4;
 
-        // CRC computed over type + data
         let mut payload = Vec::with_capacity(4 + len);
         payload.extend_from_slice(chunk_type);
         payload.extend_from_slice(data);
@@ -317,24 +260,20 @@ proptest! {
     }
 }
 
-/// Conformance: encode output of PngSuite fixtures and ensure decode success.
 #[test]
-fn test_pngsuite_encode_and_decode() {
+fn pngsuite_fixtures_reencode_and_decode() {
     let Ok(cases) = read_pngsuite() else {
         eprintln!("Skipping PngSuite test: fixtures unavailable (offline?)");
         return;
     };
 
     for (path, bytes) in cases {
-        // Decode using `image` as source pixels
         let img = image::load_from_memory(&bytes).expect("decode fixture");
         let rgba = img.to_rgba8();
         let (w, h) = img.dimensions();
 
-        // Encode through our pipeline (RGBA)
         let encoded = encode_png(rgba.as_raw(), w, h, ColorType::Rgba).unwrap();
 
-        // Decode the encoded PNG to ensure validity
         let decoded = image::load_from_memory(&encoded).expect("decode reencoded");
         assert_eq!(
             decoded.dimensions(),
@@ -345,9 +284,8 @@ fn test_pngsuite_encode_and_decode() {
     }
 }
 
-/// Test filter strategies produce valid output.
 #[test]
-fn test_filter_strategies() {
+fn filter_strategies_produce_valid_signatures() {
     use png::{FilterStrategy, PngOptions};
 
     let pixels = vec![128u8; 16 * 16 * 3];
@@ -372,7 +310,6 @@ fn test_filter_strategies() {
 
         let result = png::encode(&pixels, &options).unwrap();
 
-        // All should produce valid PNG files
         assert_eq!(
             &result[0..8],
             &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
@@ -380,9 +317,8 @@ fn test_filter_strategies() {
     }
 }
 
-/// Test compression levels.
 #[test]
-fn test_compression_levels() {
+fn compression_level_9_not_larger_than_level_1() {
     use png::PngOptions;
 
     let pixels: Vec<u8> = (0..64 * 64 * 3).map(|i| (i % 256) as u8).collect();
@@ -399,23 +335,18 @@ fn test_compression_levels() {
         sizes.push((level, result.len()));
     }
 
-    // Higher compression levels should generally produce smaller files
-    // (though not strictly monotonic for all images)
     let level1_size = sizes[0].1;
     let level9_size = sizes[8].1;
     assert!(level9_size <= level1_size);
 }
 
-/// Test error handling for invalid input.
 #[test]
-fn test_invalid_input() {
-    // Zero dimensions
+fn invalid_dimensions_or_lengths_are_rejected() {
     assert!(encode_png(&[0, 0, 0], 0, 1, ColorType::Rgb).is_err());
     assert!(encode_png(&[0, 0, 0], 1, 0, ColorType::Rgb).is_err());
 
-    // Wrong data length
-    assert!(encode_png(&[0, 0], 1, 1, ColorType::Rgb).is_err()); // Too short
-    assert!(encode_png(&[0, 0, 0, 0], 1, 1, ColorType::Rgb).is_err()); // Too long
+    assert!(encode_png(&[0, 0], 1, 1, ColorType::Rgb).is_err());
+    assert!(encode_png(&[0, 0, 0, 0], 1, 1, ColorType::Rgb).is_err());
 }
 
 #[test]
@@ -436,27 +367,22 @@ fn test_invalid_compression_level() {
     assert!(matches!(err, Error::InvalidCompressionLevel(10)));
 }
 
-/// Test large image encoding.
 #[test]
-fn test_large_image() {
-    // 1000x1000 RGB image
+fn large_image_preserves_signature_and_dimensions() {
     let pixels = vec![100u8; 1000 * 1000 * 3];
     let result = encode_png(&pixels, 1000, 1000, ColorType::Rgb).unwrap();
 
-    // Should produce valid PNG
     assert_eq!(
         &result[0..8],
         &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
     );
 
-    // IHDR should have correct dimensions
-    assert_eq!(&result[16..20], &[0, 0, 0x03, 0xE8]); // 1000 in big-endian
+    assert_eq!(&result[16..20], &[0, 0, 0x03, 0xE8]);
     assert_eq!(&result[20..24], &[0, 0, 0x03, 0xE8]);
 }
 
-/// Encoding should be deterministic for identical inputs.
 #[test]
-fn test_png_deterministic() {
+fn png_encoding_is_deterministic() {
     let mut rng = StdRng::seed_from_u64(2024);
     let w = 16;
     let h = 8;
@@ -468,22 +394,16 @@ fn test_png_deterministic() {
     assert_eq!(a, b);
 }
 
-/// Reject images exceeding maximum dimension without requiring huge allocations.
 #[test]
-fn test_png_rejects_image_too_large() {
-    let width = (1 << 24) + 1; // just over MAX_DIMENSION
+fn png_rejects_dimensions_over_limit() {
+    let width = (1 << 24) + 1;
     let height = 1;
     let err = encode_png(&[], width, height, ColorType::Rgb).unwrap_err();
     assert!(matches!(err, Error::ImageTooLarge { .. }));
 }
 
-// ============================================================================
-// Extended Property Tests - Edge Cases
-// ============================================================================
-
-/// Verify that zero dimensions are rejected for all color types.
 #[test]
-fn test_png_rejects_zero_dimensions() {
+fn png_rejects_zero_dimensions_all_color_types() {
     let color_types = [
         ColorType::Gray,
         ColorType::GrayAlpha,
@@ -492,21 +412,17 @@ fn test_png_rejects_zero_dimensions() {
     ];
 
     for ct in &color_types {
-        // Zero width
         let err = encode_png(&[0u8; 100], 0, 10, *ct);
         assert!(err.is_err(), "Should reject zero width for {:?}", ct);
 
-        // Zero height
         let err = encode_png(&[0u8; 100], 10, 0, *ct);
         assert!(err.is_err(), "Should reject zero height for {:?}", ct);
 
-        // Both zero
         let err = encode_png(&[], 0, 0, *ct);
         assert!(err.is_err(), "Should reject zero dimensions for {:?}", ct);
     }
 }
 
-// Property test: any valid image dimensions should produce decodable output.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(16))]
     #[test]
@@ -526,16 +442,13 @@ proptest! {
         let mut pixels = vec![0u8; (width * height) as usize * bpp];
         rng.fill(pixels.as_mut_slice());
 
-        // Should always succeed with valid dimensions
         let encoded = encode_png(&pixels, width, height, color_type)
             .expect("encoding should succeed");
 
-        // Should produce valid PNG
         prop_assert_eq!(&encoded[0..8], &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
     }
 }
 
-// Property test: encoding with all builder options should produce valid output.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(8))]
     #[test]
@@ -575,23 +488,14 @@ proptest! {
 
         let encoded = png::encode(&pixels, &options).expect("encoding should succeed");
 
-        // Verify PNG signature
         prop_assert_eq!(&encoded[0..8], &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
-
-        // Verify it decodes
         let decoded = image::load_from_memory(&encoded).expect("decode");
         prop_assert_eq!(decoded.dimensions(), (width, height));
     }
 }
 
-/// Regression test: ensure photographic images don't produce excessively large output.
-///
-/// This test uses a real-world photo (rocket.png) that previously triggered a bug
-/// where lazy matching in LZ77 caused level 6 compression to produce output that
-/// was 7.3% larger than the original. After the fix, output should be within 5%
-/// of the original size.
 #[test]
-fn test_png_compression_regression_rocket() {
+fn png_rocket_rgb_output_within_ten_percent() {
     let fixture_path = std::path::Path::new("tests/fixtures/rocket.png");
     if !fixture_path.exists() {
         eprintln!("Skipping rocket regression test: fixture not found");
@@ -601,14 +505,12 @@ fn test_png_compression_regression_rocket() {
     let original_bytes = std::fs::read(fixture_path).expect("read fixture");
     let original_size = original_bytes.len();
 
-    // Decode to get raw pixels
     let img = image::open(fixture_path).expect("open fixture");
     let img = img.to_rgb8();
     let width = img.width();
     let height = img.height();
     let raw_pixels = img.as_raw();
 
-    // Test with level 9 adaptive (our best quality setting)
     let options = PngOptions::builder(width, height)
         .color_type(ColorType::Rgb)
         .compression_level(9)
@@ -617,12 +519,9 @@ fn test_png_compression_regression_rocket() {
 
     let encoded = png::encode(raw_pixels, &options).expect("encode");
 
-    // Verify the output is valid PNG
     let decoded = image::load_from_memory(&encoded).expect("decode our output");
     assert_eq!(decoded.dimensions(), (width, height));
 
-    // Check that compression ratio is acceptable (within 10% of original)
-    // The original was likely compressed with zopfli, so we allow some margin.
     let size_ratio = encoded.len() as f64 / original_size as f64;
     assert!(
         size_ratio < 1.10,
@@ -630,7 +529,6 @@ fn test_png_compression_regression_rocket() {
         (size_ratio - 1.0) * 100.0
     );
 
-    // Also verify level 6 produces reasonable results
     let options_l6 = PngOptions::builder(width, height)
         .color_type(ColorType::Rgb)
         .compression_level(6)
@@ -645,7 +543,6 @@ fn test_png_compression_regression_rocket() {
         (size_ratio_l6 - 1.0) * 100.0
     );
 
-    // Level 9 should produce smaller or equal output compared to level 6
     assert!(
         encoded.len() <= encoded_l6.len(),
         "Level 9 ({} bytes) should not be larger than level 6 ({} bytes)",
@@ -654,12 +551,8 @@ fn test_png_compression_regression_rocket() {
     );
 }
 
-/// Test RGBA encoding of the rocket image (simulates web app behavior).
-///
-/// The web app receives RGBA data from canvas ImageData, so we need to ensure
-/// RGBA encoding also produces reasonable output sizes.
 #[test]
-fn test_png_compression_regression_rocket_rgba() {
+fn png_rocket_rgba_output_within_thirty_percent() {
     let fixture_path = std::path::Path::new("tests/fixtures/rocket.png");
     if !fixture_path.exists() {
         eprintln!("Skipping rocket RGBA regression test: fixture not found");
@@ -669,7 +562,6 @@ fn test_png_compression_regression_rocket_rgba() {
     let original_bytes = std::fs::read(fixture_path).expect("read fixture");
     let original_size = original_bytes.len();
 
-    // Decode to RGBA (like the web app does via canvas ImageData)
     let img = image::open(fixture_path).expect("open fixture");
     let img_rgba = img.to_rgba8();
     let width = img_rgba.width();
@@ -680,7 +572,6 @@ fn test_png_compression_regression_rocket_rgba() {
     eprintln!("Image dimensions: {}x{}", width, height);
     eprintln!("RGBA raw size: {} bytes", rgba_pixels.len());
 
-    // Test with level 6 adaptive (what web app uses by default)
     let options = PngOptions::builder(width, height)
         .color_type(ColorType::Rgba)
         .compression_level(6)
@@ -696,10 +587,6 @@ fn test_png_compression_regression_rocket_rgba() {
         (rgba_ratio - 1.0) * 100.0
     );
 
-    // For RGBA, we expect overhead due to the extra alpha channel.
-    // Even though the alpha is all 255, it adds ~33% more data per row to filter/compress.
-    // Allow up to 30% larger since we're adding a 4th channel to an originally RGB image.
-    // Note: The web app should detect hasAlpha=false and encode as RGB instead.
     assert!(
         rgba_ratio < 1.30,
         "RGBA Compression regression: output is {:.1}% larger than original (expected < 30%)",
@@ -707,24 +594,20 @@ fn test_png_compression_regression_rocket_rgba() {
     );
 }
 
-/// Test encoding with synthetic test patterns.
-/// These cover edge cases like solid colors, gradients, and high-frequency patterns.
 #[test]
-fn test_png_synthetic_patterns() {
+fn synthetic_patterns_roundtrip() {
     let test_suite = synthetic::generate_minimal_test_suite();
 
     for (name, w, h, pixels) in test_suite {
         let encoded = encode_png(&pixels, w, h, ColorType::Rgb)
             .unwrap_or_else(|e| panic!("Failed to encode {name}: {e}"));
 
-        // Verify valid PNG
         assert_eq!(
             &encoded[0..8],
             &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A],
             "Invalid PNG signature for {name}"
         );
 
-        // Verify decode roundtrip
         let decoded = image::load_from_memory(&encoded)
             .unwrap_or_else(|e| panic!("Failed to decode {name}: {e}"));
         assert_eq!(decoded.width(), w, "Width mismatch for {name}");
@@ -732,11 +615,9 @@ fn test_png_synthetic_patterns() {
     }
 }
 
-/// Test edge case dimensions with synthetic images.
 #[test]
-fn test_png_edge_case_dimensions() {
+fn synthetic_edge_case_dimensions_roundtrip() {
     for &(w, h, name) in synthetic::EDGE_CASE_DIMENSIONS {
-        // Skip very large dimensions for speed
         if w > 1024 || h > 1024 {
             continue;
         }
@@ -752,30 +633,25 @@ fn test_png_edge_case_dimensions() {
     }
 }
 
-/// Test encoding Kodak suite images (photographic content).
-/// This tests real-world compression performance on diverse photos.
 #[test]
-fn test_png_kodak_subset() {
+fn kodak_subset_roundtrip_lossless() {
     let Ok(images) = read_kodak_decoded_subset(4) else {
         eprintln!("Skipping Kodak test: fixtures unavailable (offline?)");
         return;
     };
 
     for (name, w, h, pixels) in images {
-        // Encode with balanced settings
         let options = PngOptions::balanced(w, h);
         let mut opts = options;
         opts.color_type = ColorType::Rgb;
         let encoded = png::encode(&pixels, &opts)
             .unwrap_or_else(|e| panic!("Failed to encode Kodak {name}: {e}"));
 
-        // Verify decode roundtrip
         let decoded = image::load_from_memory(&encoded)
             .unwrap_or_else(|e| panic!("Failed to decode Kodak {name}: {e}"));
         assert_eq!(decoded.width(), w, "Width mismatch for Kodak {name}");
         assert_eq!(decoded.height(), h, "Height mismatch for Kodak {name}");
 
-        // Verify lossless roundtrip
         let decoded_rgb = decoded.to_rgb8();
         assert_eq!(
             decoded_rgb.as_raw(),

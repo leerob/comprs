@@ -1,8 +1,3 @@
-//! JPEG conformance tests.
-//!
-//! Tests JPEG encoding for correctness and validates
-//! that encoded images contain proper markers.
-
 #![allow(
     clippy::uninlined_format_args,
     clippy::needless_range_loop,
@@ -67,35 +62,26 @@ fn test_jpeg_max(width: u32, height: u32, quality: u8) -> JpegOptions {
     JpegOptions::max(width, height, quality)
 }
 
-/// Test that JPEG output has correct markers.
 #[test]
-fn test_jpeg_markers() {
+fn jpeg_output_contains_soi_and_eoi() {
     let pixels = vec![128u8; 8 * 8 * 3];
     let result = encode_jpeg(&pixels, 8, 8, 85).unwrap();
 
-    // SOI marker
     assert_eq!(&result[0..2], &[0xFF, 0xD8]);
-
-    // EOI marker at end
     assert_eq!(&result[result.len() - 2..], &[0xFF, 0xD9]);
 }
 
-/// Test APP0 (JFIF) marker.
 #[test]
-fn test_app0_marker() {
+fn jpeg_app0_marker_present() {
     let pixels = vec![128u8; 8 * 8 * 3];
     let result = encode_jpeg(&pixels, 8, 8, 85).unwrap();
 
-    // APP0 should be right after SOI
     assert_eq!(&result[2..4], &[0xFF, 0xE0]);
-
-    // JFIF identifier
     assert_eq!(&result[6..11], b"JFIF\0");
 }
 
-/// Test different quality levels.
 #[test]
-fn test_quality_levels() {
+fn jpeg_quality_levels_increase_size() {
     let pixels: Vec<u8> = (0..64 * 64 * 3).map(|i| (i % 256) as u8).collect();
 
     let sizes: Vec<(u8, usize)> = [10, 25, 50, 75, 90, 100]
@@ -106,7 +92,6 @@ fn test_quality_levels() {
         })
         .collect();
 
-    // Higher quality should produce larger files
     for i in 1..sizes.len() {
         assert!(
             sizes[i].1 >= sizes[i - 1].1,
@@ -119,9 +104,8 @@ fn test_quality_levels() {
     }
 }
 
-/// Restart interval with decoding via image crate to ensure bitstream validity.
 #[test]
-fn test_jpeg_restart_interval_decodes_with_external_decoder() {
+fn jpeg_restart_interval_decodes_with_image_crate() {
     use std::io::Cursor;
 
     let width = 16;
@@ -131,7 +115,7 @@ fn test_jpeg_restart_interval_decodes_with_external_decoder() {
     rng.fill(rgb.as_mut_slice());
 
     let mut opts = test_jpeg_fast(width, height, 85);
-    opts.restart_interval = Some(2); // restart every 2 MCUs
+    opts.restart_interval = Some(2);
 
     let jpeg_bytes = jpeg::encode(&rgb, &opts).unwrap();
 
@@ -142,16 +126,14 @@ fn test_jpeg_restart_interval_decodes_with_external_decoder() {
 
     assert_eq!(img.width() as usize, width as usize);
     assert_eq!(img.height() as usize, height as usize);
-    // image crate decodes to RGB8 by default for JPEGs
     assert_eq!(
         img.into_rgb8().into_raw().len(),
         (width * height * 3) as usize
     );
 }
 
-/// Progressive JPEG should decode with image crate.
 #[test]
-fn test_jpeg_progressive_decodes_with_external_decoder() {
+fn jpeg_progressive_decodes_with_image_crate() {
     use std::io::Cursor;
 
     let width = 16;
@@ -183,14 +165,12 @@ fn test_jpeg_progressive_decodes_with_external_decoder() {
     );
 }
 
-/// Baseline vs progressive markers should be correct.
 #[test]
-fn test_jpeg_progressive_and_baseline_markers() {
+fn jpeg_progressive_and_baseline_markers_are_correct() {
     let width = 8;
     let height = 8;
     let rgb = vec![128u8; width * height * 3];
 
-    // Baseline
     let baseline_opts = test_jpeg_fast(width as u32, height as u32, 80);
     let baseline = jpeg::encode(&rgb, &baseline_opts).unwrap();
     assert!(
@@ -202,7 +182,6 @@ fn test_jpeg_progressive_and_baseline_markers() {
         "baseline should not contain SOF2"
     );
 
-    // Progressive
     let progressive_opts = test_jpeg_max(width as u32, height as u32, 80);
     let progressive = jpeg::encode(&rgb, &progressive_opts).unwrap();
     assert!(
@@ -210,15 +189,14 @@ fn test_jpeg_progressive_and_baseline_markers() {
         "progressive SOF2 missing"
     );
 }
-/// Test different image sizes.
 #[test]
-fn test_various_sizes() {
+fn jpeg_various_sizes_have_soi_and_eoi() {
     let sizes = [
         (1, 1),
-        (7, 7),   // Not multiple of 8
-        (8, 8),   // Exact MCU
-        (9, 9),   // Just over one MCU
-        (16, 16), // Two MCUs
+        (7, 7),
+        (8, 8),
+        (9, 9),
+        (16, 16),
         (100, 50),
         (50, 100),
     ];
@@ -247,35 +225,28 @@ fn test_various_sizes() {
     }
 }
 
-/// Test grayscale encoding.
 #[test]
-fn test_grayscale() {
+fn jpeg_grayscale_markers_and_size() {
     let pixels = vec![128u8; 32 * 32];
     let result = encode_jpeg_with_color(&pixels, 32, 32, 85, ColorType::Gray).unwrap();
 
-    // Should have proper markers
     assert_eq!(&result[0..2], &[0xFF, 0xD8]);
     assert_eq!(&result[result.len() - 2..], &[0xFF, 0xD9]);
 
-    // Should be smaller than RGB (1 component vs 3)
     let rgb_pixels = vec![128u8; 32 * 32 * 3];
     let rgb_result = encode_jpeg(&rgb_pixels, 32, 32, 85).unwrap();
     assert!(result.len() < rgb_result.len());
 }
 
-/// Test error handling.
 #[test]
-fn test_error_handling() {
-    // Invalid quality
+fn jpeg_invalid_parameters_are_rejected() {
     let pixels = vec![0u8; 8 * 8 * 3];
     assert!(encode_jpeg(&pixels, 8, 8, 0).is_err());
     assert!(encode_jpeg(&pixels, 8, 8, 101).is_err());
 
-    // Invalid dimensions
     assert!(encode_jpeg(&pixels, 0, 8, 85).is_err());
     assert!(encode_jpeg(&pixels, 8, 0, 85).is_err());
 
-    // Wrong data length
     assert!(encode_jpeg(&[0, 0], 8, 8, 85).is_err());
 }
 
@@ -290,14 +261,13 @@ fn test_invalid_restart_interval() {
 
 #[test]
 fn test_unsupported_color_type_rejected() {
-    let pixels = vec![0u8; 4 * 4 * 4]; // RGBA data
+    let pixels = vec![0u8; 4 * 4 * 4];
     let result = encode_jpeg_with_color(&pixels, 4, 4, 85, ColorType::Rgba);
     assert!(result.is_err());
 }
 
 #[test]
 fn test_image_too_large() {
-    // Just over the MAX_DIMENSION (65535)
     let width = 65_536;
     let height = 1;
     let pixels = vec![0u8; (width as usize * height as usize * 3) as usize];
@@ -305,45 +275,33 @@ fn test_image_too_large() {
     assert!(matches!(err, pixo::Error::ImageTooLarge { .. }));
 }
 
-// ============================================================================
-// Extended Property Tests - Edge Cases
-// ============================================================================
-
-/// Verify that zero dimensions are rejected for all supported color types.
 #[test]
-fn test_jpeg_rejects_zero_dimensions() {
+fn jpeg_rejects_zero_dimensions() {
     let color_types = [ColorType::Gray, ColorType::Rgb];
 
     for ct in &color_types {
-        // Zero width
         let err = encode_jpeg_with_color(&[0u8; 100], 0, 10, 85, *ct);
         assert!(err.is_err(), "Should reject zero width for {:?}", ct);
 
-        // Zero height
         let err = encode_jpeg_with_color(&[0u8; 100], 10, 0, 85, *ct);
         assert!(err.is_err(), "Should reject zero height for {:?}", ct);
 
-        // Both zero
         let err = encode_jpeg_with_color(&[], 0, 0, 85, *ct);
         assert!(err.is_err(), "Should reject zero dimensions for {:?}", ct);
     }
 }
 
-/// Verify edge quality values are handled correctly.
 #[test]
-fn test_jpeg_quality_edge_values() {
+fn jpeg_quality_edge_values_are_valid() {
     let pixels = vec![128u8; 8 * 8 * 3];
 
-    // Quality 1 should work (minimum)
     let result = encode_jpeg(&pixels, 8, 8, 1);
     assert!(result.is_ok(), "Quality 1 should be valid");
 
-    // Quality 100 should work (maximum)
     let result = encode_jpeg(&pixels, 8, 8, 100);
     assert!(result.is_ok(), "Quality 100 should be valid");
 }
 
-// Property test: any valid JPEG parameters should produce decodable output.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(16))]
     #[test]
@@ -361,17 +319,14 @@ proptest! {
         let mut pixels = vec![0u8; (width * height) as usize * bpp];
         rng.fill(pixels.as_mut_slice());
 
-        // Should always succeed with valid parameters
         let encoded = encode_jpeg_with_color(&pixels, width, height, quality, color_type)
             .expect("encoding should succeed");
 
-        // Should produce valid JPEG markers
         prop_assert_eq!(&encoded[0..2], &[0xFF, 0xD8], "Missing SOI");
         prop_assert_eq!(&encoded[encoded.len()-2..], &[0xFF, 0xD9], "Missing EOI");
     }
 }
 
-// Property test: encoding with all builder options should produce valid output.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(8))]
     #[test]
@@ -405,19 +360,15 @@ proptest! {
         let encoded = encode_jpeg_with_options(&pixels, width, height, ColorType::Rgb, &options)
             .expect("encoding should succeed");
 
-        // Verify JPEG markers
         prop_assert_eq!(&encoded[0..2], &[0xFF, 0xD8], "Missing SOI");
         prop_assert_eq!(&encoded[encoded.len()-2..], &[0xFF, 0xD9], "Missing EOI");
-
-        // Verify it decodes
         let decoded = image::load_from_memory(&encoded).expect("decode");
         prop_assert_eq!(decoded.dimensions(), (width, height));
     }
 }
 
-/// Test that encoding produces deterministic output.
 #[test]
-fn test_deterministic() {
+fn jpeg_encoding_is_deterministic() {
     let pixels = vec![100u8; 16 * 16 * 3];
 
     let result1 = encode_jpeg(&pixels, 16, 16, 85).unwrap();
@@ -426,14 +377,11 @@ fn test_deterministic() {
     assert_eq!(result1, result2);
 }
 
-/// Test different patterns compress differently.
 #[test]
-fn test_pattern_compression() {
-    // Solid color (should compress very well)
+fn jpeg_pattern_sizes_are_ordered_by_complexity() {
     let solid = vec![128u8; 64 * 64 * 3];
     let solid_result = encode_jpeg(&solid, 64, 64, 85).unwrap();
 
-    // Gradient (compresses reasonably)
     let mut gradient = Vec::with_capacity(64 * 64 * 3);
     for y in 0..64 {
         for x in 0..64 {
@@ -444,7 +392,6 @@ fn test_pattern_compression() {
     }
     let gradient_result = encode_jpeg(&gradient, 64, 64, 85).unwrap();
 
-    // Random-ish (compresses poorly)
     let mut noisy = Vec::with_capacity(64 * 64 * 3);
     let mut seed = 42u32;
     for _ in 0..(64 * 64 * 3) {
@@ -453,15 +400,12 @@ fn test_pattern_compression() {
     }
     let noisy_result = encode_jpeg(&noisy, 64, 64, 85).unwrap();
 
-    // Solid should be smallest, noisy should be largest
     assert!(solid_result.len() < gradient_result.len());
     assert!(gradient_result.len() < noisy_result.len());
 }
 
-/// Ensure encoded JPEGs decode via `image` for RGB and Gray.
 #[test]
-fn test_jpeg_decode_via_image() {
-    // RGB pattern
+fn jpeg_decode_via_image_rgb_and_gray() {
     let mut rgb = vec![0u8; 8 * 8 * 3];
     for i in 0..rgb.len() {
         rgb[i] = (i as u8).wrapping_mul(31);
@@ -471,7 +415,6 @@ fn test_jpeg_decode_via_image() {
     assert_eq!(decoded_rgb.width(), 8);
     assert_eq!(decoded_rgb.height(), 8);
 
-    // Grayscale random
     let mut rng = StdRng::seed_from_u64(1337);
     let mut gray = vec![0u8; 7 * 5];
     rng.fill(gray.as_mut_slice());
@@ -481,15 +424,13 @@ fn test_jpeg_decode_via_image() {
     assert_eq!(decoded_gray.height(), 5);
 }
 
-/// Randomized small-image decode across RGB/Gray and multiple qualities.
 #[test]
-fn test_jpeg_decode_random_small() {
+fn jpeg_decode_random_small_images() {
     let mut rng = StdRng::seed_from_u64(2025);
     let dims = [(1, 1), (2, 3), (5, 4), (8, 8), (16, 9)];
     let qualities = [50u8, 85u8, 95u8];
 
     for &(w, h) in &dims {
-        // RGB
         let mut rgb = vec![0u8; w * h * 3];
         rng.fill(rgb.as_mut_slice());
         for &q in &qualities {
@@ -499,7 +440,6 @@ fn test_jpeg_decode_random_small() {
             assert_eq!(decoded.height(), h as u32);
         }
 
-        // Grayscale
         let mut gray = vec![0u8; w * h];
         rng.fill(gray.as_mut_slice());
         for &q in &qualities {
@@ -512,9 +452,8 @@ fn test_jpeg_decode_random_small() {
     }
 }
 
-/// Subsampling 4:2:0 should produce valid JPEG and smaller size.
 #[test]
-fn test_jpeg_subsampling_420() {
+fn jpeg_subsampling_420_not_larger_than_444() {
     let width = 32;
     let height = 32;
     let mut rng = StdRng::seed_from_u64(4242);
@@ -530,17 +469,14 @@ fn test_jpeg_subsampling_420() {
     let jpeg_420 =
         encode_jpeg_with_options(&rgb, width, height, ColorType::Rgb, &opts_420).unwrap();
 
-    // 4:2:0 should not be larger than 4:4:4 for the same image/quality.
     assert!(jpeg_420.len() <= jpeg_444.len());
 
-    // Decode and verify dimensions
     let decoded = image::load_from_memory(&jpeg_420).expect("decode 420");
     assert_eq!(decoded.dimensions(), (width, height));
 }
 
-/// Restart interval should emit DRI and decode successfully.
 #[test]
-fn test_jpeg_restart_interval_marker_and_decode() {
+fn jpeg_restart_interval_marker_present_and_decodes() {
     let width = 16;
     let height = 16;
     let mut rng = StdRng::seed_from_u64(5151);
@@ -552,7 +488,6 @@ fn test_jpeg_restart_interval_marker_and_decode() {
 
     let jpeg_bytes = encode_jpeg_with_options(&rgb, width, height, ColorType::Rgb, &opts).unwrap();
 
-    // Ensure DRI marker (0xFFDD) exists
     let mut found_dri = false;
     for w in jpeg_bytes.windows(2) {
         if w == [0xFF, 0xDD] {
@@ -562,14 +497,12 @@ fn test_jpeg_restart_interval_marker_and_decode() {
     }
     assert!(found_dri, "DRI marker not found");
 
-    // Decode to verify validity
     let decoded = image::load_from_memory(&jpeg_bytes).expect("decode with restart interval");
     assert_eq!(decoded.dimensions(), (width, height));
 }
 
-/// Structural marker walk to ensure required segments and restart interval are present.
 #[test]
-fn test_jpeg_marker_structure_with_restart() {
+fn jpeg_marker_structure_with_restart_interval() {
     let width = 16;
     let height = 12;
     let mut rng = StdRng::seed_from_u64(6262);
@@ -585,7 +518,7 @@ fn test_jpeg_marker_structure_with_restart() {
     assert!(jpeg_bytes.starts_with(&[0xFF, 0xD8]), "missing SOI");
     assert!(jpeg_bytes.ends_with(&[0xFF, 0xD9]), "missing EOI");
 
-    let mut offset = 2; // after SOI
+    let mut offset = 2;
     let mut saw_app0 = false;
     let mut saw_dqt = false;
     let mut saw_sof0 = false;
@@ -599,7 +532,7 @@ fn test_jpeg_marker_structure_with_restart() {
         offset += 2;
 
         if marker == 0xD9 {
-            break; // EOI (no length)
+            break;
         }
 
         assert!(
@@ -617,14 +550,14 @@ fn test_jpeg_marker_structure_with_restart() {
         );
 
         match marker {
-            0xE0 => saw_app0 = true, // APP0
-            0xDB => saw_dqt = true,  // DQT
-            0xC0 => saw_sof0 = true, // SOF0
-            0xC4 => saw_dht = true,  // DHT
-            0xDD => saw_dri = true,  // DRI
+            0xE0 => saw_app0 = true,
+            0xDB => saw_dqt = true,
+            0xC0 => saw_sof0 = true,
+            0xC4 => saw_dht = true,
+            0xDD => saw_dri = true,
             0xDA => {
-                saw_sos = true; // SOS
-                break; // after SOS, entropy-coded data continues until EOI
+                saw_sos = true;
+                break;
             }
             _ => {}
         }
@@ -640,9 +573,8 @@ fn test_jpeg_marker_structure_with_restart() {
     assert!(saw_dri, "DRI not found despite restart_interval");
 }
 
-/// Ensure DRI is absent when restart intervals are disabled.
 #[test]
-fn test_jpeg_no_restart_marker_without_interval() {
+fn jpeg_no_restart_marker_without_interval() {
     let width = 12;
     let height = 9;
     let mut rng = StdRng::seed_from_u64(7373);
@@ -659,14 +591,8 @@ fn test_jpeg_no_restart_marker_without_interval() {
     );
 }
 
-/// When MCU count is exactly divisible by restart interval, no trailing restart marker
-/// should be written after the final MCU. The restart marker is only useful when there
-/// are more MCUs to follow.
 #[test]
-fn test_jpeg_no_trailing_restart_marker_when_divisible() {
-    // 16x16 image with 4:4:4 subsampling has exactly 4 MCUs (2x2 blocks of 8x8)
-    // Setting restart_interval = 4 means we hit exactly 4 MCUs = interval × 1
-    // Without the fix, a restart marker would be written after the 4th MCU
+fn jpeg_no_trailing_restart_marker_when_divisible_444() {
     let width = 16;
     let height = 16;
     let mut rng = StdRng::seed_from_u64(9999);
@@ -674,15 +600,12 @@ fn test_jpeg_no_trailing_restart_marker_when_divisible() {
     rng.fill(rgb.as_mut_slice());
 
     let mut opts = test_jpeg_fast(width, height, 85);
-    opts.restart_interval = Some(4); // Exactly matches total MCU count
+    opts.restart_interval = Some(4);
 
     let jpeg_bytes = encode_jpeg_with_options(&rgb, width, height, ColorType::Rgb, &opts).unwrap();
 
-    // Verify EOI is present
     assert!(jpeg_bytes.ends_with(&[0xFF, 0xD9]), "missing EOI");
 
-    // Check that no restart marker (0xFFD0-0xFFD7) appears right before EOI
-    // The last few bytes before EOI should be scan data, not a restart marker
     let len = jpeg_bytes.len();
     if len >= 4 {
         let before_eoi = &jpeg_bytes[len - 4..len - 2];
@@ -695,15 +618,12 @@ fn test_jpeg_no_trailing_restart_marker_when_divisible() {
         );
     }
 
-    // Also verify the image decodes correctly
     let decoded = image::load_from_memory(&jpeg_bytes).expect("decode should succeed");
     assert_eq!(decoded.dimensions(), (width, height));
 }
 
-/// Test with 4:2:0 subsampling where MCU count is exactly divisible by restart interval.
 #[test]
-fn test_jpeg_no_trailing_restart_marker_420_divisible() {
-    // 32x32 image with 4:2:0 subsampling: MCU is 16x16, so we have 4 MCUs (2x2)
+fn jpeg_no_trailing_restart_marker_420_exact_multiple() {
     let width = 32;
     let height = 32;
     let mut rng = StdRng::seed_from_u64(8888);
@@ -712,13 +632,12 @@ fn test_jpeg_no_trailing_restart_marker_420_divisible() {
 
     let mut opts = test_jpeg_fast(width, height, 85);
     opts.subsampling = jpeg::Subsampling::S420;
-    opts.restart_interval = Some(2); // 4 MCUs / 2 = exactly 2 intervals
+    opts.restart_interval = Some(2);
 
     let jpeg_bytes = encode_jpeg_with_options(&rgb, width, height, ColorType::Rgb, &opts).unwrap();
 
     assert!(jpeg_bytes.ends_with(&[0xFF, 0xD9]), "missing EOI");
 
-    // Check no trailing restart marker before EOI
     let len = jpeg_bytes.len();
     if len >= 4 {
         let before_eoi = &jpeg_bytes[len - 4..len - 2];
@@ -791,9 +710,8 @@ proptest! {
     }
 }
 
-/// Conformance: re-encode curated JPEG corpus and ensure decode succeeds.
 #[test]
-fn test_jpeg_corpus_reencode_decode() {
+fn jpeg_corpus_reencode_preserves_dimensions() {
     let Ok(cases) = read_jpeg_corpus() else {
         eprintln!("Skipping JPEG corpus test: fixtures unavailable (offline?)");
         return;
@@ -815,9 +733,8 @@ fn test_jpeg_corpus_reencode_decode() {
     }
 }
 
-/// Optimized Huffman tables should be valid and not larger on a structured image.
 #[test]
-fn test_jpeg_optimize_huffman_structured_image() {
+fn jpeg_optimized_huffman_not_larger_on_structured_image() {
     let width = 16;
     let height = 16;
     let mut rgb = Vec::with_capacity((width * height * 3) as usize);
@@ -849,13 +766,11 @@ fn test_jpeg_optimize_huffman_structured_image() {
     assert_eq!(dec_opt.dimensions(), (width, height));
 }
 
-/// Test that DQT tables are present.
 #[test]
-fn test_dqt_present() {
+fn jpeg_dqt_marker_present() {
     let pixels = vec![128u8; 8 * 8 * 3];
     let result = encode_jpeg(&pixels, 8, 8, 85).unwrap();
 
-    // Look for DQT marker (0xFFDB)
     let mut found_dqt = false;
     for i in 0..result.len() - 1 {
         if result[i] == 0xFF && result[i + 1] == 0xDB {
@@ -866,13 +781,11 @@ fn test_dqt_present() {
     assert!(found_dqt, "DQT marker not found");
 }
 
-/// Test that SOF0 marker is present.
 #[test]
-fn test_sof0_present() {
+fn jpeg_sof0_marker_present() {
     let pixels = vec![128u8; 8 * 8 * 3];
     let result = encode_jpeg(&pixels, 8, 8, 85).unwrap();
 
-    // Look for SOF0 marker (0xFFC0)
     let mut found_sof0 = false;
     for i in 0..result.len() - 1 {
         if result[i] == 0xFF && result[i + 1] == 0xC0 {
@@ -883,13 +796,11 @@ fn test_sof0_present() {
     assert!(found_sof0, "SOF0 marker not found");
 }
 
-/// Test that DHT markers are present.
 #[test]
-fn test_dht_present() {
+fn jpeg_dht_marker_count_is_four() {
     let pixels = vec![128u8; 8 * 8 * 3];
     let result = encode_jpeg(&pixels, 8, 8, 85).unwrap();
 
-    // Count DHT markers (0xFFC4) - should have 4 (DC lum, DC chrom, AC lum, AC chrom)
     let mut dht_count = 0;
     for i in 0..result.len() - 1 {
         if result[i] == 0xFF && result[i + 1] == 0xC4 {
@@ -899,13 +810,11 @@ fn test_dht_present() {
     assert_eq!(dht_count, 4, "Expected 4 DHT markers, found {}", dht_count);
 }
 
-/// Test that SOS marker is present.
 #[test]
-fn test_sos_present() {
+fn jpeg_sos_marker_present() {
     let pixels = vec![128u8; 8 * 8 * 3];
     let result = encode_jpeg(&pixels, 8, 8, 85).unwrap();
 
-    // Look for SOS marker (0xFFDA)
     let mut found_sos = false;
     for i in 0..result.len() - 1 {
         if result[i] == 0xFF && result[i + 1] == 0xDA {
@@ -916,16 +825,14 @@ fn test_sos_present() {
     assert!(found_sos, "SOS marker not found");
 }
 
-/// Test encoding with synthetic test patterns.
 #[test]
-fn test_jpeg_synthetic_patterns() {
+fn jpeg_synthetic_patterns_roundtrip() {
     let test_suite = synthetic::generate_minimal_test_suite();
 
     for (name, w, h, pixels) in test_suite {
         let encoded = encode_jpeg(&pixels, w, h, 85)
             .unwrap_or_else(|e| panic!("Failed to encode {name}: {e}"));
 
-        // Verify valid JPEG markers
         assert_eq!(&encoded[0..2], &[0xFF, 0xD8], "Missing SOI for {name}");
         assert_eq!(
             &encoded[encoded.len() - 2..],
@@ -933,7 +840,6 @@ fn test_jpeg_synthetic_patterns() {
             "Missing EOI for {name}"
         );
 
-        // Verify decode roundtrip
         let decoded = image::load_from_memory(&encoded)
             .unwrap_or_else(|e| panic!("Failed to decode {name}: {e}"));
         assert_eq!(decoded.width(), w, "Width mismatch for {name}");
@@ -941,11 +847,9 @@ fn test_jpeg_synthetic_patterns() {
     }
 }
 
-/// Test edge case dimensions with synthetic images.
 #[test]
-fn test_jpeg_edge_case_dimensions() {
+fn jpeg_edge_case_dimensions_roundtrip() {
     for &(w, h, name) in synthetic::EDGE_CASE_DIMENSIONS {
-        // Skip very large dimensions for speed
         if w > 512 || h > 512 {
             continue;
         }
@@ -961,21 +865,18 @@ fn test_jpeg_edge_case_dimensions() {
     }
 }
 
-/// Test encoding Kodak suite images (photographic content).
 #[test]
-fn test_jpeg_kodak_subset() {
+fn jpeg_kodak_subset_dimensions_match() {
     let Ok(images) = read_kodak_decoded_subset(4) else {
         eprintln!("Skipping Kodak test: fixtures unavailable (offline?)");
         return;
     };
 
     for (name, w, h, pixels) in images {
-        // Encode with balanced settings
         let opts = test_jpeg_balanced(w, h, 85);
         let encoded = encode_jpeg_with_options(&pixels, w, h, ColorType::Rgb, &opts)
             .unwrap_or_else(|e| panic!("Failed to encode Kodak {name}: {e}"));
 
-        // Verify valid JPEG
         assert_eq!(
             &encoded[0..2],
             &[0xFF, 0xD8],
@@ -987,7 +888,6 @@ fn test_jpeg_kodak_subset() {
             "Missing EOI for Kodak {name}"
         );
 
-        // Verify decode roundtrip (dimensions only, JPEG is lossy)
         let decoded = image::load_from_memory(&encoded)
             .unwrap_or_else(|e| panic!("Failed to decode Kodak {name}: {e}"));
         assert_eq!(decoded.width(), w, "Width mismatch for Kodak {name}");
@@ -995,13 +895,11 @@ fn test_jpeg_kodak_subset() {
     }
 }
 
-/// Test different JPEG presets on synthetic images.
 #[test]
-fn test_jpeg_presets_on_gradient() {
+fn jpeg_presets_on_gradient_produce_reasonable_sizes() {
     let (w, h) = (256, 256);
     let pixels = synthetic::gradient_rgb(w, h);
 
-    // Test fast and balanced presets (max uses progressive which may have decoder compatibility issues)
     let presets = [
         ("fast", test_jpeg_fast(w, h, 85)),
         ("balanced", test_jpeg_balanced(w, h, 85)),
@@ -1013,7 +911,6 @@ fn test_jpeg_presets_on_gradient() {
         let encoded = encode_jpeg_with_options(&pixels, w, h, ColorType::Rgb, &opts)
             .unwrap_or_else(|e| panic!("Failed to encode with {name} preset: {e}"));
 
-        // Verify decode
         let decoded = image::load_from_memory(&encoded)
             .unwrap_or_else(|e| panic!("Failed to decode {name} preset: {e}"));
         assert_eq!(decoded.dimensions(), (w, h));
@@ -1021,10 +918,6 @@ fn test_jpeg_presets_on_gradient() {
         sizes.push((name, encoded.len()));
     }
 
-    // Verify both presets produced valid output of reasonable size.
-    // Note: We don't assert balanced <= fast because optimized Huffman tables
-    // typically (but not always) produce smaller output. Edge cases exist where
-    // the overhead of custom tables may slightly exceed savings.
     for (name, size) in &sizes {
         assert!(*size > 0, "{name} preset produced empty output");
         assert!(

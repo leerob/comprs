@@ -1,19 +1,13 @@
-//! SIMD vs Fallback equality tests.
-//!
-//! These tests verify that SIMD implementations produce identical results
-//! to their scalar fallback counterparts.
-
 #![cfg(feature = "simd")]
 
 use proptest::prelude::*;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
-// Import the fallback implementations for comparison
 use pixo::simd::fallback;
 
-/// Test Adler-32 SIMD vs fallback equality on various data sizes.
 #[test]
 fn test_adler32_simd_vs_fallback() {
+    let nmax = 5552;
     let test_cases: Vec<Vec<u8>> = vec![
         vec![],
         vec![0],
@@ -22,8 +16,8 @@ fn test_adler32_simd_vs_fallback() {
         vec![255; 16],
         (0..256).map(|i| i as u8).collect(),
         (0..1000).map(|i| (i * 7) as u8).collect(),
-        (0..5552).map(|i| (i % 256) as u8).collect(), // NMAX boundary
-        (0..5553).map(|i| (i % 256) as u8).collect(), // Just over NMAX
+        (0..nmax).map(|i| (i % 256) as u8).collect(),
+        (0..nmax + 1).map(|i| (i % 256) as u8).collect(),
         (0..10000).map(|i| ((i * 13) % 256) as u8).collect(),
     ];
 
@@ -39,8 +33,6 @@ fn test_adler32_simd_vs_fallback() {
     }
 }
 
-/// Test CRC32 SIMD vs fallback equality on various data sizes.
-// TODO: Fix CRC32 SIMD implementation mismatch with fallback on x86_64
 #[test]
 #[ignore]
 fn test_crc32_simd_vs_fallback() {
@@ -62,12 +54,10 @@ fn test_crc32_simd_vs_fallback() {
     }
 }
 
-/// Test match_length SIMD vs fallback equality.
 #[test]
 fn test_match_length_simd_vs_fallback() {
     let mut rng = StdRng::seed_from_u64(12345);
 
-    // Test with repeated patterns
     let data: Vec<u8> = (0..1000).map(|i| (i % 32) as u8).collect();
 
     for _ in 0..100 {
@@ -84,7 +74,6 @@ fn test_match_length_simd_vs_fallback() {
     }
 }
 
-/// Test score_filter SIMD vs fallback equality.
 #[test]
 fn test_score_filter_simd_vs_fallback() {
     let test_cases: Vec<Vec<u8>> = vec![
@@ -110,7 +99,6 @@ fn test_score_filter_simd_vs_fallback() {
     }
 }
 
-/// Test filter_sub SIMD vs fallback equality.
 #[test]
 fn test_filter_sub_simd_vs_fallback() {
     let mut rng = StdRng::seed_from_u64(54321);
@@ -134,7 +122,6 @@ fn test_filter_sub_simd_vs_fallback() {
     }
 }
 
-/// Test filter_up SIMD vs fallback equality.
 #[test]
 fn test_filter_up_simd_vs_fallback() {
     let mut rng = StdRng::seed_from_u64(67890);
@@ -158,7 +145,6 @@ fn test_filter_up_simd_vs_fallback() {
     }
 }
 
-/// Test filter_average SIMD vs fallback equality.
 #[test]
 fn test_filter_average_simd_vs_fallback() {
     let mut rng = StdRng::seed_from_u64(11111);
@@ -184,7 +170,6 @@ fn test_filter_average_simd_vs_fallback() {
     }
 }
 
-/// Test filter_paeth SIMD vs fallback equality.
 #[test]
 fn test_filter_paeth_simd_vs_fallback() {
     let mut rng = StdRng::seed_from_u64(22222);
@@ -210,8 +195,6 @@ fn test_filter_paeth_simd_vs_fallback() {
     }
 }
 
-// Property-based tests for more thorough coverage
-
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(50))]
 
@@ -222,7 +205,6 @@ proptest! {
         prop_assert_eq!(expected, actual);
     }
 
-    // TODO: Fix CRC32 SIMD implementation mismatch with fallback on x86_64
     #[test]
     #[ignore]
     fn prop_crc32_simd_fallback_equality(data in proptest::collection::vec(any::<u8>(), 0..5000)) {
@@ -256,7 +238,6 @@ proptest! {
     fn prop_filter_up_simd_fallback_equality(
         row in proptest::collection::vec(any::<u8>(), 1..256),
     ) {
-        // Generate prev_row of same length
         let prev_row: Vec<u8> = row.iter().map(|&b| b.wrapping_add(42)).collect();
 
         let mut expected_output = Vec::new();
@@ -319,21 +300,9 @@ proptest! {
     }
 }
 
-// =============================================================================
-// Extended Tests for Large Data and Edge Cases
-// =============================================================================
-
-/// Test Adler-32 with very large data (multiple NMAX blocks).
 #[test]
 fn test_adler32_simd_large_data() {
-    let test_sizes = [
-        5552,  // Exactly NMAX
-        5553,  // NMAX + 1
-        11104, // 2 * NMAX
-        16656, // 3 * NMAX
-        20000, // Large non-multiple
-        50000, // Very large
-    ];
+    let test_sizes = [5552, 5553, 11104, 16656, 20000, 50000];
 
     for size in test_sizes {
         let data: Vec<u8> = (0..size).map(|i| (i * 17 % 256) as u8).collect();
@@ -343,10 +312,8 @@ fn test_adler32_simd_large_data() {
     }
 }
 
-/// Test score_filter with sizes that exercise remainder handling.
 #[test]
 fn test_score_filter_simd_remainder_sizes() {
-    // Test sizes that are not multiples of 16 or 32 (SIMD widths)
     let test_sizes = [1, 7, 15, 17, 31, 33, 47, 63, 65, 127, 129, 255];
 
     for size in test_sizes {
@@ -357,12 +324,10 @@ fn test_score_filter_simd_remainder_sizes() {
     }
 }
 
-/// Test filter functions with large rows (typical image widths).
 #[test]
 fn test_filters_simd_large_rows() {
     let mut rng = StdRng::seed_from_u64(99999);
 
-    // Test with realistic image widths
     let widths = [640, 800, 1024, 1280, 1920, 4096];
 
     for width in widths {
@@ -372,7 +337,6 @@ fn test_filters_simd_large_rows() {
         rng.fill(prev_row.as_mut_slice());
 
         for bpp in [1, 3, 4] {
-            // Test filter_sub
             let mut expected = Vec::new();
             fallback::filter_sub(&row, bpp, &mut expected);
             let mut actual = Vec::new();
@@ -382,14 +346,12 @@ fn test_filters_simd_large_rows() {
                 "filter_sub mismatch for width={width}, bpp={bpp}"
             );
 
-            // Test filter_up
             expected.clear();
             fallback::filter_up(&row, &prev_row, &mut expected);
             actual.clear();
             pixo::simd::filter_up(&row, &prev_row, &mut actual);
             assert_eq!(expected, actual, "filter_up mismatch for width={width}");
 
-            // Test filter_average
             expected.clear();
             fallback::filter_average(&row, &prev_row, bpp, &mut expected);
             actual.clear();
@@ -399,7 +361,6 @@ fn test_filters_simd_large_rows() {
                 "filter_average mismatch for width={width}, bpp={bpp}"
             );
 
-            // Test filter_paeth
             expected.clear();
             fallback::filter_paeth(&row, &prev_row, bpp, &mut expected);
             actual.clear();
@@ -412,17 +373,14 @@ fn test_filters_simd_large_rows() {
     }
 }
 
-/// Test match_length with long matching sequences.
 #[test]
 fn test_match_length_simd_long_sequences() {
-    // Create data with repeated patterns that will have long matches
     let pattern: Vec<u8> = (0..32).map(|i| (i * 7) as u8).collect();
     let mut data = Vec::with_capacity(1024);
     for _ in 0..32 {
         data.extend_from_slice(&pattern);
     }
 
-    // Test matching at pattern boundaries
     for offset in [0, 32, 64, 128] {
         let pos1 = offset;
         let pos2 = offset + 32;
@@ -434,13 +392,10 @@ fn test_match_length_simd_long_sequences() {
     }
 }
 
-/// Test match_length with exact SIMD width boundaries.
 #[test]
 fn test_match_length_simd_boundaries() {
-    // Create identical data to get maximum matches
     let data: Vec<u8> = vec![42; 512];
 
-    // Test various max_len values that hit SIMD boundaries
     for max_len in [8, 15, 16, 17, 31, 32, 33, 63, 64, 65, 128, 256] {
         let expected = fallback::match_length(&data, 0, 0, max_len);
         let actual = pixo::simd::match_length(&data, 0, 0, max_len);
@@ -448,13 +403,10 @@ fn test_match_length_simd_boundaries() {
             expected, actual,
             "match_length mismatch for max_len={max_len}"
         );
-        // Both should return max_len since data is identical
         assert_eq!(expected, max_len);
     }
 }
 
-/// Test CRC32 on aarch64 (where PCLMULQDQ is not used).
-/// On aarch64, the SIMD implementation should match fallback since it uses fallback.
 #[cfg(target_arch = "aarch64")]
 #[test]
 fn test_crc32_simd_vs_fallback_aarch64() {
@@ -475,7 +427,6 @@ fn test_crc32_simd_vs_fallback_aarch64() {
     }
 }
 
-/// Test all filter types with edge case: row shorter than bpp.
 #[test]
 fn test_filters_simd_short_rows() {
     let short_rows = [vec![1], vec![1, 2], vec![1, 2, 3]];
@@ -483,14 +434,12 @@ fn test_filters_simd_short_rows() {
 
     for (row, prev_row) in short_rows.iter().zip(prev_rows.iter()) {
         for bpp in [1, 2, 3, 4] {
-            // filter_sub
             let mut expected = Vec::new();
             fallback::filter_sub(row, bpp, &mut expected);
             let mut actual = Vec::new();
             pixo::simd::filter_sub(row, bpp, &mut actual);
             assert_eq!(expected, actual, "filter_sub short row mismatch");
 
-            // filter_up (needs same length prev_row)
             if row.len() == prev_row.len() {
                 expected.clear();
                 fallback::filter_up(row, prev_row, &mut expected);
@@ -498,14 +447,12 @@ fn test_filters_simd_short_rows() {
                 pixo::simd::filter_up(row, prev_row, &mut actual);
                 assert_eq!(expected, actual, "filter_up short row mismatch");
 
-                // filter_average
                 expected.clear();
                 fallback::filter_average(row, prev_row, bpp, &mut expected);
                 actual.clear();
                 pixo::simd::filter_average(row, prev_row, bpp, &mut actual);
                 assert_eq!(expected, actual, "filter_average short row mismatch");
 
-                // filter_paeth
                 expected.clear();
                 fallback::filter_paeth(row, prev_row, bpp, &mut expected);
                 actual.clear();
@@ -516,24 +463,20 @@ fn test_filters_simd_short_rows() {
     }
 }
 
-/// Test score_filter with all zeros and all max values.
 #[test]
 fn test_score_filter_simd_extreme_values() {
-    // All zeros
     let zeros = vec![0u8; 1000];
     let expected = fallback::score_filter(&zeros);
     let actual = pixo::simd::score_filter(&zeros);
     assert_eq!(expected, actual);
     assert_eq!(expected, 0);
 
-    // All 0x80 (signed: -128, unsigned: 128, abs: 128)
     let mid = vec![0x80u8; 1000];
     let expected = fallback::score_filter(&mid);
     let actual = pixo::simd::score_filter(&mid);
     assert_eq!(expected, actual);
     assert_eq!(expected, 128 * 1000);
 
-    // All 0xFF (signed: -1, unsigned: 255, abs: 1)
     let max = vec![0xFFu8; 1000];
     let expected = fallback::score_filter(&max);
     let actual = pixo::simd::score_filter(&max);

@@ -1,9 +1,3 @@
-//! Decode conformance tests.
-//!
-//! Tests PNG and JPEG decoding for correctness and validates
-//! that our decoders can handle encoded images from our encoders
-//! as well as external fixtures.
-
 #![cfg(feature = "cli")]
 
 use pixo::decode::{decode_jpeg, decode_png};
@@ -65,13 +59,8 @@ fn encode_jpeg_with_options(
     jpeg::encode(data, &opts)
 }
 
-// ============================================================================
-// PNG Decoder Tests
-// ============================================================================
-
-/// Test PNG decode of fixture images.
 #[test]
-fn test_decode_png_fixture_rocket() {
+fn png_fixture_rocket_decodes_pixels() {
     let fixture_path = Path::new("tests/fixtures/rocket.png");
     if !fixture_path.exists() {
         eprintln!("Skipping: fixture not found");
@@ -81,15 +70,13 @@ fn test_decode_png_fixture_rocket() {
     let bytes = std::fs::read(fixture_path).expect("read fixture");
     let decoded = decode_png(&bytes).expect("decode PNG");
 
-    // rocket.png is a known image
     assert!(decoded.width > 0);
     assert!(decoded.height > 0);
     assert!(!decoded.pixels.is_empty());
 }
 
-/// Test PNG decode of avatar fixture.
 #[test]
-fn test_decode_png_fixture_avatar() {
+fn png_fixture_avatar_decodes_pixels() {
     let fixture_path = Path::new("tests/fixtures/avatar-color.png");
     if !fixture_path.exists() {
         eprintln!("Skipping: fixture not found");
@@ -104,9 +91,8 @@ fn test_decode_png_fixture_avatar() {
     assert!(!decoded.pixels.is_empty());
 }
 
-/// Test PNG decode of playground fixture.
 #[test]
-fn test_decode_png_fixture_playground() {
+fn png_fixture_playground_reports_dimensions() {
     let fixture_path = Path::new("tests/fixtures/playground.png");
     if !fixture_path.exists() {
         eprintln!("Skipping: fixture not found");
@@ -120,10 +106,9 @@ fn test_decode_png_fixture_playground() {
     assert!(decoded.height > 0);
 }
 
-/// Test PNG encode->decode roundtrip for RGB.
 #[test]
-fn test_png_encode_decode_roundtrip_rgb() {
-    let pixels = vec![255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0]; // 2x2 RGB
+fn png_roundtrip_rgb_2x2_exact_pixels() {
+    let pixels = vec![255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0];
     let encoded = encode_png(&pixels, 2, 2, ColorType::Rgb).expect("encode");
     let decoded = decode_png(&encoded).expect("decode");
 
@@ -133,14 +118,10 @@ fn test_png_encode_decode_roundtrip_rgb() {
     assert_eq!(decoded.pixels, pixels);
 }
 
-/// Test PNG encode->decode roundtrip for RGBA.
 #[test]
-fn test_png_encode_decode_roundtrip_rgba() {
+fn png_roundtrip_rgba_2x2_opacity() {
     let pixels = vec![
-        255, 0, 0, 255, // Red, opaque
-        0, 255, 0, 128, // Green, semi-transparent
-        0, 0, 255, 0, // Blue, transparent
-        255, 255, 0, 255, // Yellow, opaque
+        255, 0, 0, 255, 0, 255, 0, 128, 0, 0, 255, 0, 255, 255, 0, 255,
     ];
     let encoded = encode_png(&pixels, 2, 2, ColorType::Rgba).expect("encode");
     let decoded = decode_png(&encoded).expect("decode");
@@ -151,10 +132,9 @@ fn test_png_encode_decode_roundtrip_rgba() {
     assert_eq!(decoded.pixels, pixels);
 }
 
-/// Test PNG encode->decode roundtrip for Grayscale.
 #[test]
-fn test_png_encode_decode_roundtrip_gray() {
-    let pixels = vec![0, 64, 128, 255]; // 2x2 grayscale
+fn png_roundtrip_gray_2x2_gradient() {
+    let pixels = vec![0, 64, 128, 255];
     let encoded = encode_png(&pixels, 2, 2, ColorType::Gray).expect("encode");
     let decoded = decode_png(&encoded).expect("decode");
 
@@ -164,10 +144,9 @@ fn test_png_encode_decode_roundtrip_gray() {
     assert_eq!(decoded.pixels, pixels);
 }
 
-/// Test PNG encode->decode roundtrip for GrayAlpha.
 #[test]
-fn test_png_encode_decode_roundtrip_gray_alpha() {
-    let pixels = vec![0, 255, 128, 128, 255, 0, 64, 192]; // 2x2 gray+alpha
+fn png_roundtrip_gray_alpha_2x2_masked() {
+    let pixels = vec![0, 255, 128, 128, 255, 0, 64, 192];
     let encoded = encode_png(&pixels, 2, 2, ColorType::GrayAlpha).expect("encode");
     let decoded = decode_png(&encoded).expect("decode");
 
@@ -177,11 +156,9 @@ fn test_png_encode_decode_roundtrip_gray_alpha() {
     assert_eq!(decoded.pixels, pixels);
 }
 
-/// Test PNG decode with various sizes using the same pattern as working tests.
 #[test]
-fn test_png_encode_decode_various_sizes() {
-    // Use the exact same pixel pattern as the working test_png_encode_decode_roundtrip_rgb
-    let pixels_2x2_rgb = vec![255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0]; // 2x2 RGB
+fn png_roundtrip_rgb_repeated_pattern_sizes() {
+    let pixels_2x2_rgb = vec![255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0];
     let encoded = encode_png(&pixels_2x2_rgb, 2, 2, ColorType::Rgb).expect("encode should succeed");
     let decoded = decode_png(&encoded).unwrap_or_else(|e| panic!("decode failed for 2x2 RGB: {e}"));
     assert_eq!(decoded.width, 2);
@@ -189,7 +166,6 @@ fn test_png_encode_decode_various_sizes() {
     assert_eq!(decoded.color_type, ColorType::Rgb);
     assert_eq!(decoded.pixels, pixels_2x2_rgb);
 
-    // Test 4x4 RGB with the same color pattern repeated
     let mut pixels_4x4_rgb = Vec::with_capacity(4 * 4 * 3);
     for _ in 0..4 {
         pixels_4x4_rgb.extend_from_slice(&[255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 0]);
@@ -201,9 +177,8 @@ fn test_png_encode_decode_various_sizes() {
     assert_eq!(decoded.pixels, pixels_4x4_rgb);
 }
 
-/// Test PNG decode with larger images.
 #[test]
-fn test_png_encode_decode_larger() {
+fn png_roundtrip_rgb_random_100x80() {
     let mut rng = StdRng::seed_from_u64(123);
 
     let (w, h) = (100, 80);
@@ -218,37 +193,28 @@ fn test_png_encode_decode_larger() {
     assert_eq!(decoded.pixels, pixels);
 }
 
-/// Test PNG decode error handling - invalid signature.
 #[test]
-fn test_png_decode_invalid_signature() {
+fn png_rejects_invalid_signature() {
     let data = b"not a PNG file";
     let result = decode_png(data);
     assert!(result.is_err());
 }
 
-/// Test PNG decode error handling - truncated data.
 #[test]
-fn test_png_decode_truncated() {
-    // PNG signature only
+fn png_rejects_signature_without_chunks() {
     let data = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
     let result = decode_png(&data);
     assert!(result.is_err());
 }
 
-/// Test PNG decode error handling - empty data.
 #[test]
-fn test_png_decode_empty() {
+fn png_rejects_empty_input() {
     let result = decode_png(&[]);
     assert!(result.is_err());
 }
 
-// ============================================================================
-// JPEG Decoder Tests
-// ============================================================================
-
-/// Test JPEG decode of fixture images.
 #[test]
-fn test_decode_jpeg_fixture_browser() {
+fn jpeg_fixture_browser_decodes_pixels() {
     let fixture_path = Path::new("tests/fixtures/browser.jpg");
     if !fixture_path.exists() {
         eprintln!("Skipping: fixture not found");
@@ -263,9 +229,8 @@ fn test_decode_jpeg_fixture_browser() {
     assert!(!decoded.pixels.is_empty());
 }
 
-/// Test JPEG decode of review fixture.
 #[test]
-fn test_decode_jpeg_fixture_review() {
+fn jpeg_fixture_review_has_dimensions() {
     let fixture_path = Path::new("tests/fixtures/review.jpg");
     if !fixture_path.exists() {
         eprintln!("Skipping: fixture not found");
@@ -279,9 +244,8 @@ fn test_decode_jpeg_fixture_review() {
     assert!(decoded.height > 0);
 }
 
-/// Test JPEG decode of web fixture.
 #[test]
-fn test_decode_jpeg_fixture_web() {
+fn jpeg_fixture_web_has_dimensions() {
     let fixture_path = Path::new("tests/fixtures/web.jpg");
     if !fixture_path.exists() {
         eprintln!("Skipping: fixture not found");
@@ -295,9 +259,8 @@ fn test_decode_jpeg_fixture_web() {
     assert!(decoded.height > 0);
 }
 
-/// Test JPEG encode->decode roundtrip - dimensions match.
 #[test]
-fn test_jpeg_encode_decode_roundtrip_rgb() {
+fn jpeg_roundtrip_rgb_preserves_dimensions() {
     let mut rng = StdRng::seed_from_u64(55);
     let (w, h) = (16, 16);
     let mut pixels = vec![0u8; w * h * 3];
@@ -306,16 +269,14 @@ fn test_jpeg_encode_decode_roundtrip_rgb() {
     let encoded = encode_jpeg(&pixels, w as u32, h as u32, 90).expect("encode");
     let decoded = decode_jpeg(&encoded).expect("decode");
 
-    // JPEG is lossy, so just check dimensions
     assert_eq!(decoded.width, w as u32);
     assert_eq!(decoded.height, h as u32);
     assert_eq!(decoded.color_type, ColorType::Rgb);
     assert_eq!(decoded.pixels.len(), w * h * 3);
 }
 
-/// Test JPEG encode->decode roundtrip for grayscale.
 #[test]
-fn test_jpeg_encode_decode_roundtrip_gray() {
+fn jpeg_roundtrip_grayscale_preserves_dimensions() {
     let mut rng = StdRng::seed_from_u64(77);
     let (w, h) = (16, 16);
     let mut pixels = vec![0u8; w * h];
@@ -331,12 +292,8 @@ fn test_jpeg_encode_decode_roundtrip_gray() {
     assert_eq!(decoded.pixels.len(), w * h);
 }
 
-/// Test grayscale JPEG with non-MCU-aligned dimensions.
-/// Verifies the decoder crops to actual image size, not MCU-aligned buffer size.
 #[test]
-fn test_jpeg_grayscale_non_mcu_aligned_size() {
-    // Non-MCU-aligned grayscale image (15x9, not multiples of 8)
-    // MCU-aligned would be 16x16 = 256 pixels, but we need exactly 15x9 = 135
+fn jpeg_grayscale_non_mcu_aligned_respects_dimensions() {
     let (w, h) = (15, 9);
     let pixels = vec![128u8; w * h];
 
@@ -356,9 +313,8 @@ fn test_jpeg_grayscale_non_mcu_aligned_size() {
     );
 }
 
-/// Test JPEG encode->decode with various sizes.
 #[test]
-fn test_jpeg_encode_decode_various_sizes() {
+fn jpeg_roundtrip_rgb_various_sizes() {
     let mut rng = StdRng::seed_from_u64(99);
 
     for (w, h) in [(8, 8), (15, 9), (24, 16), (32, 32)] {
@@ -373,9 +329,8 @@ fn test_jpeg_encode_decode_various_sizes() {
     }
 }
 
-/// Test JPEG encode->decode with 4:2:0 subsampling.
 #[test]
-fn test_jpeg_encode_decode_subsampling_420() {
+fn jpeg_roundtrip_rgb_subsampling_420() {
     let mut rng = StdRng::seed_from_u64(111);
     let (w, h) = (32, 32);
     let mut pixels = vec![0u8; w * h * 3];
@@ -400,35 +355,30 @@ fn test_jpeg_encode_decode_subsampling_420() {
     assert_eq!(decoded.height, h as u32);
 }
 
-/// Test JPEG decode error handling - invalid signature.
 #[test]
-fn test_jpeg_decode_invalid_signature() {
+fn jpeg_rejects_invalid_signature() {
     let data = b"not a JPEG file";
     let result = decode_jpeg(data);
     assert!(result.is_err());
 }
 
-/// Test JPEG decode error handling - truncated data.
 #[test]
-fn test_jpeg_decode_truncated() {
-    // JPEG SOI marker only
+fn jpeg_rejects_soi_only() {
     let data = [0xFF, 0xD8];
     let result = decode_jpeg(&data);
     assert!(result.is_err());
 }
 
-/// Test JPEG decode error handling - empty data.
 #[test]
-fn test_jpeg_decode_empty() {
+fn jpeg_rejects_empty_input() {
     let result = decode_jpeg(&[]);
     assert!(result.is_err());
 }
 
-/// Test JPEG decode with solid color (easy to decode).
 #[test]
-fn test_jpeg_encode_decode_solid_color() {
+fn jpeg_roundtrip_solid_color_is_stable() {
     let (w, h) = (16, 16);
-    let pixels = vec![128u8; w * h * 3]; // solid gray
+    let pixels = vec![128u8; w * h * 3];
 
     let encoded = encode_jpeg(&pixels, w as u32, h as u32, 95).expect("encode");
     let decoded = decode_jpeg(&encoded).expect("decode");
@@ -436,7 +386,6 @@ fn test_jpeg_encode_decode_solid_color() {
     assert_eq!(decoded.width, w as u32);
     assert_eq!(decoded.height, h as u32);
 
-    // High quality solid color should decode close to original
     let avg_diff: i32 = decoded
         .pixels
         .iter()
@@ -451,17 +400,16 @@ fn test_jpeg_encode_decode_solid_color() {
     );
 }
 
-/// Test JPEG decode with gradient pattern.
 #[test]
-fn test_jpeg_encode_decode_gradient() {
+fn jpeg_roundtrip_gradient_retains_dimensions() {
     let (w, h) = (64, 64);
     let mut pixels = Vec::with_capacity(w * h * 3);
 
     for y in 0..h {
         for x in 0..w {
-            pixels.push((x * 4) as u8); // R
-            pixels.push((y * 4) as u8); // G
-            pixels.push(128); // B
+            pixels.push((x * 4) as u8);
+            pixels.push((y * 4) as u8);
+            pixels.push(128);
         }
     }
 
@@ -472,33 +420,15 @@ fn test_jpeg_encode_decode_gradient() {
     assert_eq!(decoded.height, h as u32);
 }
 
-// ============================================================================
-// Cross-format Tests
-// ============================================================================
-
-/// Test decoding format detection by header.
 #[test]
-fn test_decode_format_detection() {
-    // PNG signature
-    let png_header = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
-    assert!(png_header.starts_with(&[0x89, 0x50, 0x4E, 0x47]));
-
-    // JPEG signature
-    let jpeg_header = [0xFF, 0xD8, 0xFF];
-    assert!(jpeg_header.starts_with(&[0xFF, 0xD8]));
-}
-
-/// Test that PNG decoder rejects JPEG data.
-#[test]
-fn test_png_decode_rejects_jpeg() {
+fn png_decoder_rejects_jpeg_data() {
     let jpeg_data = [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10];
     let result = decode_png(&jpeg_data);
     assert!(result.is_err());
 }
 
-/// Test that JPEG decoder rejects PNG data.
 #[test]
-fn test_jpeg_decode_rejects_png() {
+fn jpeg_decoder_rejects_png_data() {
     let png_data = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
     let result = decode_jpeg(&png_data);
     assert!(result.is_err());
