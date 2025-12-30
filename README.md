@@ -6,7 +6,7 @@
 
 A minimal-dependency, high-performance image compression library written in Rust.
 
-This is a work-in-progress and exploration of coding agents.
+This is a work-in-progress and exploration of coding agents. [Learn more about this project](https://leerob.com/pixo).
 
 <img width="459" height="256" alt="Pixo logo" src="https://github.com/user-attachments/assets/8d2e7acb-8a63-4c82-936c-9ae9cc9ce9f2" />
 
