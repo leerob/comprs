@@ -1990,19 +1990,17 @@ mod tests {
 
     #[test]
     fn test_encode_1x1_rgb() {
-        let pixels = vec![255, 0, 0]; // Red pixel
+        let pixels = vec![255, 0, 0];
         let png = test_encode(&pixels, 1, 1, ColorType::Rgb).unwrap();
 
-        // Check PNG signature
         assert_eq!(&png[0..8], &PNG_SIGNATURE);
 
-        // Should have IHDR, IDAT, IEND
-        assert!(png.len() > 8 + 12 + 12 + 12); // signature + 3 chunks minimum
+        assert!(png.len() > 8 + 12 + 12 + 12);
     }
 
     #[test]
     fn test_encode_1x1_rgba() {
-        let pixels = vec![255, 0, 0, 255]; // Red opaque pixel
+        let pixels = vec![255, 0, 0, 255];
         let png = test_encode(&pixels, 1, 1, ColorType::Rgba).unwrap();
 
         assert_eq!(&png[0..8], &PNG_SIGNATURE);
@@ -2017,7 +2015,7 @@ mod tests {
 
     #[test]
     fn test_encode_invalid_data_length() {
-        let pixels = vec![255, 0]; // Too short for 1x1 RGB
+        let pixels = vec![255, 0];
         let result = test_encode(&pixels, 1, 1, ColorType::Rgb);
         assert!(matches!(result, Err(Error::InvalidDataLength { .. })));
     }
@@ -2033,7 +2031,7 @@ mod tests {
     #[test]
     fn test_encode_into_reuses_buffer() {
         let mut output = Vec::with_capacity(64);
-        let pixels1 = vec![0u8, 0, 0]; // black 1x1 RGB
+        let pixels1 = vec![0u8, 0, 0];
         let opts = PngOptions::builder(1, 1).color_type(ColorType::Rgb).build();
         encode_into(&mut output, &pixels1, &opts).unwrap();
         let first = output.clone();
