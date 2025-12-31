@@ -185,6 +185,37 @@
     if (input) input.click();
   }
 
+  function handlePaste(e: ClipboardEvent) {
+    const target = e.target as HTMLElement | null;
+    const isTypingContext =
+      target &&
+      (target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable);
+    if (isTypingContext) return;
+
+    const clipboardData = e.clipboardData;
+    if (!clipboardData) return;
+
+    const files: File[] = [];
+
+    // Check for files in clipboard (e.g., copied from file explorer)
+    for (const item of clipboardData.items) {
+      if (item.kind === "file") {
+        const file = item.getAsFile();
+        if (file && acceptMime.includes(file.type)) {
+          files.push(file);
+        }
+      }
+    }
+
+    // If we found image files, add them
+    if (files.length > 0) {
+      e.preventDefault();
+      addFiles(files);
+    }
+  }
+
   onMount(() => {
     initWasm()
       .then(() => {
@@ -219,12 +250,14 @@
     };
 
     window.addEventListener("keydown", handler);
+    window.addEventListener("paste", handlePaste);
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
     window.addEventListener("touchmove", handleTouchMove, { passive: false });
     window.addEventListener("touchend", handleTouchEnd);
     return () => {
       window.removeEventListener("keydown", handler);
+      window.removeEventListener("paste", handlePaste);
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
       window.removeEventListener("touchmove", handleTouchMove);
@@ -669,24 +702,29 @@
       class:border-neutral-600={dropActive}
       class:border-neutral-800={!dropActive}
     >
-      <div class="flex flex-col items-center gap-6 text-center">
-        <div class="text-neutral-500">
-          {@render iconLayers()}
+        <div class="flex flex-col items-center gap-6 text-center">
+          <div class="text-neutral-500">
+            {@render iconLayers()}
+          </div>
+          <div class="space-y-2">
+            <p class="text-lg text-neutral-300">Drop PNG or JPEG files here</p>
+            <p class="text-sm text-neutral-600">or paste from clipboard</p>
+          </div>
+          <button
+            class="btn-primary"
+            onclick={triggerFilePicker}
+            data-testid="select-files-button"
+            >Select Files <kbd
+              class="ml-1 inline-flex items-center rounded bg-black/10 px-1.5 py-0.5 text-xs font-normal"
+              ><span class="text-sm leading-none mr-0.5">⌘</span>O</kbd
+            ></button
+          >
+          <p class="text-xs text-neutral-600">
+            <kbd class="rounded bg-neutral-800 px-1.5 py-0.5 text-neutral-500"
+              ><span class="text-xs mr-0.5">⌘</span>V</kbd
+            > to paste
+          </p>
         </div>
-        <div class="space-y-2">
-          <p class="text-lg text-neutral-300">Drop PNG or JPEG files here</p>
-          <p class="text-sm text-neutral-600">or</p>
-        </div>
-        <button
-          class="btn-primary"
-          onclick={triggerFilePicker}
-          data-testid="select-files-button"
-          >Select Files <kbd
-            class="ml-1 inline-flex items-center rounded bg-black/10 px-1.5 py-0.5 text-xs font-normal"
-            ><span class="text-sm leading-none mr-0.5">⌘</span>O</kbd
-          ></button
-        >
-      </div>
     </div>
   </div>
 {/snippet}
