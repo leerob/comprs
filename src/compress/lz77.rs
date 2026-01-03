@@ -1180,20 +1180,21 @@ impl Lz77Compressor {
             if len == 1 && dist == 0 {
                 // Literal
                 tokens.push(Token::Literal(data[data_pos]));
-            } else {
+                data_pos += 1;
+            } else if dist == 0 {
                 // Defensive: distance must be at least 1; otherwise treat as literal.
-                if dist == 0 {
-                    tokens.push(Token::Literal(data[data_pos]));
-                    data_pos += len;
-                    continue;
-                }
-                // Match
+                // For invalid matches (dist=0, len>1), emit a single literal and advance by 1.
+                tokens.push(Token::Literal(data[data_pos]));
+                data_pos += 1;
+                continue;
+            } else {
+                // Valid Match
                 tokens.push(Token::Match {
                     length: len as u16,
                     distance: dist,
                 });
+                data_pos += len;
             }
-            data_pos += len;
         }
 
         tokens
@@ -2458,5 +2459,95 @@ mod run_detection_tests {
         }
 
         assert_eq!(reconstructed, data);
+    }
+}
+
+#[cfg(test)]
+mod trace_backwards_regression_tests {
+    use super::*;
+
+    #[test]
+    fn test_trace_backwards_zero_distance_match_multibyte() {
+        // Regression test for bug where trace_backwards incorrectly advanced data_pos
+        // when handling invalid matches (dist=0, len>1).
+        //
+        // The bug: when dist=0 and len>1, code emitted a literal but advanced data_pos
+        // by len bytes instead of 1, causing subsequent tokens to read from wrong positions.
+        
+        let compressor = Lz77Compressor::new(6);
+
+        // Create DP arrays representing:
+        // - Token 1: length=5 ending at position 5 (covers bytes 0-4), distance=0 (invalid)
+        // - Token 2: length=2 ending at position 7 (covers bytes 5-6), distance=0 (invalid)
+        // Total: 7 bytes of input data
+        let length_array = vec![0u16, 0, 0, 0, 0, 5, 0, 2];
+        let dist_array = vec![0u16, 0, 0, 0, 0, 0, 0, 0];
+
+        let data = b"abcdefg"; // 7 bytes
+
+        let tokens = compressor.trace_backwards(&length_array, &dist_array, data);
+
+        assert_eq!(tokens.len(), 2, "Should produce 2 tokens");
+
+        // Verify first token reads from position 0 (correct)
+        match tokens[0] {
+            Token::Literal(b) => {
+                assert_eq!(b, b'a', "First literal should be 'a' (byte at position 0)");
+            }
+            Token::Match { .. } => {
+                panic!("Expected literal, got match");
+            }
+        }
+
+        // Verify second token reads from position 5 (not position 1, which would be the bug)
+        match tokens[1] {
+            Token::Literal(b) => {
+                assert_eq!(
+                    b, b'f',
+                    "Second literal should be 'f' (byte at position 5). \
+                     Got '{}', which indicates data_pos was not advanced correctly. \
+                     The bug would cause this to be 'b' (byte at position 1).",
+                    b as char
+                );
+            }
+            Token::Match { .. } => {
+                panic!("Expected literal, got match");
+            }
+        }
+    }
+
+    #[test]
+    fn test_trace_backwards_valid_matches() {
+        // Ensure the fix doesn't break valid match handling
+        let compressor = Lz77Compressor::new(6);
+
+        // Valid match: length=3, distance=3, ending at position 6
+        // This represents "abc" repeated: "abcabc"
+        let length_array = vec![0u16, 0, 0, 1, 1, 1, 3];
+        let dist_array = vec![0u16, 0, 0, 0, 0, 0, 3];
+
+        let data = b"abcabc";
+
+        let tokens = compressor.trace_backwards(&length_array, &dist_array, data);
+
+        // Should produce: 3 literals ('a', 'b', 'c') + 1 match (length=3, distance=3)
+        assert_eq!(tokens.len(), 4);
+
+        // First three should be literals
+        for i in 0..3 {
+            match tokens[i] {
+                Token::Literal(_) => {},
+                Token::Match { .. } => panic!("Expected literal at position {}", i),
+            }
+        }
+
+        // Last should be a match
+        match tokens[3] {
+            Token::Match { length, distance } => {
+                assert_eq!(length, 3);
+                assert_eq!(distance, 3);
+            }
+            Token::Literal(_) => panic!("Expected match at position 3"),
+        }
     }
 }
